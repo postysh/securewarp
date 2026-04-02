@@ -22,6 +22,8 @@ import ArrowTurnDownIcon from "@hugeicons/core-free-icons/ArrowTurnDownIcon";
 interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
+  files?: { id: string; name: string; isFolder: boolean }[];
+  onAction?: (action: string) => void;
 }
 
 interface SearchItem {
@@ -59,7 +61,7 @@ const quickActions: SearchItem[] = [
   { id: "a6", label: "Trash", icon: Delete02Icon, iconColor: "var(--icon-secondary)", section: "actions" },
 ];
 
-export function CommandPalette({ open, onClose }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, files: realFiles, onAction }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -97,15 +99,25 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
+  const liveFiles: SearchItem[] = (realFiles || []).map((f) => ({
+    id: f.id,
+    label: f.name,
+    icon: f.isFolder ? Folder01Icon : File01Icon,
+    iconColor: f.isFolder ? "var(--accent-blue-primary)" : "var(--icon-secondary)",
+    section: "files" as const,
+  }));
+
+  const searchableFiles = liveFiles.length > 0 ? liveFiles : allFiles;
+
   const results = useMemo(() => {
     if (!query.trim()) {
-      return { recent: recentFiles, actions: quickActions, files: [] };
+      return { recent: liveFiles.length > 0 ? liveFiles.slice(0, 3) : recentFiles, actions: quickActions, files: [] };
     }
     const q = query.toLowerCase();
-    const matchedFiles = allFiles.filter((f) => f.label.toLowerCase().includes(q));
+    const matchedFiles = searchableFiles.filter((f) => f.label.toLowerCase().includes(q));
     const matchedActions = quickActions.filter((a) => a.label.toLowerCase().includes(q));
     return { recent: [], actions: matchedActions, files: matchedFiles };
-  }, [query]);
+  }, [query, searchableFiles, liveFiles]);
 
   const flatResults = [...results.recent, ...results.files, ...results.actions];
 
@@ -118,6 +130,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       setSelectedIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter" && flatResults.length > 0) {
       e.preventDefault();
+      const item = flatResults[selectedIndex];
+      if (item?.section === "actions" && onAction) onAction(item.id);
       onClose();
     }
   };
@@ -135,7 +149,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             <button
               key={item.id}
               onMouseEnter={() => setSelectedIndex(idx)}
-              onClick={onClose}
+              onClick={() => { if (item.section === "actions" && onAction) { onAction(item.id); } onClose(); }}
               className={`w-full flex items-center gap-3 px-4 h-[36px] text-[13px] transition-colors cursor-pointer ${
                 selectedIndex === idx ? "bg-bg-overlay-tertiary" : ""
               }`}

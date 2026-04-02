@@ -18,6 +18,9 @@ import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 import Key02Icon from "@hugeicons/core-free-icons/Key02Icon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import { useTheme } from "./theme-provider";
+import { useUserKeys } from "@/hooks/use-user-keys";
+import { useAuth } from "@/hooks/use-auth";
+import { RecoveryKeyModal } from "./recovery-key-modal";
 
 interface SettingsModalProps {
   open: boolean;
@@ -61,6 +64,12 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>("account");
   const { theme, toggle: toggleTheme } = useTheme();
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [pwStatus, setPwStatus] = useState<string | null>(null);
+  const userKeys = useUserKeys();
+  const auth = useAuth();
 
   useEffect(() => {
     if (open) setActiveTab("account");
@@ -92,11 +101,46 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 Edit
               </button>
             </SettingRow>
-            <SettingRow label="Change password" description="Re-encrypts your private keys with the new password">
-              <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">
-                Change
-              </button>
-            </SettingRow>
+            <div className="py-4 border-b border-border-tertiary">
+              <div className="flex items-center justify-between mb-1">
+                <div>
+                  <p className="text-[13px] text-text-primary">Change password</p>
+                  <p className="text-[11px] text-text-disabled mt-0.5">Re-encrypts your private keys with the new password</p>
+                </div>
+                {!changingPassword && (
+                  <button onClick={() => setChangingPassword(true)} className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">
+                    Change
+                  </button>
+                )}
+              </div>
+              {changingPassword && (
+                <div className="mt-3 space-y-2 animate-fade-in">
+                  {pwStatus && <p className="text-[11px] text-accent-green">{pwStatus}</p>}
+                  <input type="password" placeholder="New password (min 8 characters)" value={newPw} onChange={(e) => setNewPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
+                  <input type="password" placeholder="Confirm new password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
+                  {newPw && confirmPw && newPw !== confirmPw && <p className="text-[11px] text-accent-red">Passwords don&apos;t match</p>}
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={() => { setChangingPassword(false); setNewPw(""); setConfirmPw(""); setPwStatus(null); }} className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">Cancel</button>
+                    <button
+                      disabled={!newPw || newPw.length < 8 || newPw !== confirmPw || auth.loading}
+                      onClick={async () => {
+                        setPwStatus("Changing password...");
+                        await auth.changePassword("", newPw, userKeys?.email || "");
+                        if (!auth.error) {
+                          setPwStatus("Password changed. New recovery key generated.");
+                          setNewPw("");
+                          setConfirmPw("");
+                          setChangingPassword(false);
+                        }
+                      }}
+                      className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {auth.loading ? (auth.step || "Processing...") : "Update password"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
             <SettingRow label="Delete account" description="Permanently delete your account and all data">
               <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-accent-red hover:bg-accent-red/10 border border-accent-red/20 transition-colors cursor-pointer">
                 Delete
@@ -259,7 +303,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   };
 
-  return createPortal(
+  const modal = createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center">
       <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={onClose} />
 
@@ -327,5 +371,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       </div>
     </div>,
     document.body
+  );
+
+  return (
+    <>
+      {modal}
+      {auth.recoveryKey && (
+        <RecoveryKeyModal open={true} onClose={auth.dismissRecoveryKey} recoveryKey={auth.recoveryKey} />
+      )}
+    </>
   );
 }

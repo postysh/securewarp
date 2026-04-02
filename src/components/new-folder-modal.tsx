@@ -12,6 +12,7 @@ import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 interface NewFolderModalProps {
   open: boolean;
   onClose: () => void;
+  onCreate?: (name: string) => void;
 }
 
 const suggestedMembers = [
@@ -20,7 +21,7 @@ const suggestedMembers = [
   { initials: "SK", name: "Sam Kim", email: "sam@example.com", bg: "var(--accent-orange-primary)" },
 ];
 
-export function NewFolderModal({ open, onClose }: NewFolderModalProps) {
+export function NewFolderModal({ open, onClose, onCreate }: NewFolderModalProps) {
   const [name, setName] = useState("");
   const [memberEmail, setMemberEmail] = useState("");
   const [addedMembers, setAddedMembers] = useState<typeof suggestedMembers>([]);
@@ -49,6 +50,7 @@ export function NewFolderModal({ open, onClose }: NewFolderModalProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+    if (onCreate) onCreate(name.trim());
     onClose();
   };
 

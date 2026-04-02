@@ -27,6 +27,26 @@ import { RecoveryKeyModal } from "./recovery-key-modal";
 import { SettingsModal } from "./settings-modal";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { useUserKeys } from "@/hooks/use-user-keys";
+
+function formatStorageBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let size = bytes;
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+  return `${size.toFixed(size < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function useStorageUsage() {
+  const [usage, setUsage] = useState({ usedBytes: 0, maxBytes: 20 * 1024 * 1024 * 1024, fileCount: 0 });
+  useEffect(() => {
+    fetch("/api/files/usage").then(r => r.json()).then(data => {
+      if (data.usedBytes !== undefined) setUsage(data);
+    }).catch(() => {});
+  }, []);
+  return usage;
+}
 
 const navItems = [
   { icon: HardDriveIcon, label: "My Drive", id: "drive" },
@@ -38,6 +58,8 @@ const navItems = [
 
 function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { theme, toggle } = useTheme();
+  const userKeys = useUserKeys();
+  const userEmail = userKeys?.email || "";
   const [open, setOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -83,7 +105,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
     >
       <HugeiconsIcon icon={UserCircleIcon} size={18} />
       {!collapsed && (
-        <span className="text-text-primary text-[12px] font-medium truncate">user@example.com</span>
+        <span className="text-text-primary text-[12px] font-medium truncate">{userEmail}</span>
       )}
     </button>
   );
@@ -95,7 +117,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
       style={{ top: pos.top, left: pos.left, boxShadow: "var(--shadow-l2)" }}
     >
       <div className="px-3 py-2.5 border-b border-border-tertiary">
-        <div className="text-[12px] text-text-primary font-medium truncate">user@example.com</div>
+        <div className="text-[12px] text-text-primary font-medium truncate">{userEmail}</div>
         <div className="text-[11px] text-text-disabled mt-0.5">Free plan</div>
       </div>
       <div className="py-1">
@@ -135,24 +157,28 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-const storageTooltipContent = (
-  <div>
-    <div className="flex items-center gap-2 mb-2">
-      <HugeiconsIcon icon={CloudServerIcon} size={14} color="var(--accent-green-primary)" />
-      <span className="text-[12px] text-text-primary font-medium">Storage</span>
-    </div>
-    <div className="h-[4px] bg-bg-field rounded-full overflow-hidden mb-2">
-      <div className="h-full bg-accent-green rounded-full" style={{ width: "23%" }} />
-    </div>
-    <div className="flex items-center justify-between">
-      <span className="text-[11px] text-text-tertiary">2.3 GB of 10 GB</span>
-      <span className="text-[10px] text-accent-green font-medium">Upgrade</span>
-    </div>
-  </div>
-);
-
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const [active, setActive] = useState("drive");
+  const storage = useStorageUsage();
+  const usedPct = storage.maxBytes > 0 ? Math.min((storage.usedBytes / storage.maxBytes) * 100, 100) : 0;
+  const usedLabel = formatStorageBytes(storage.usedBytes);
+  const maxLabel = formatStorageBytes(storage.maxBytes);
+
+  const storageTooltipContent = (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <HugeiconsIcon icon={CloudServerIcon} size={14} color="var(--accent-green-primary)" />
+        <span className="text-[12px] text-text-primary font-medium">Storage</span>
+      </div>
+      <div className="h-[4px] bg-bg-field rounded-full overflow-hidden mb-2">
+        <div className="h-full bg-accent-green rounded-full transition-all" style={{ width: `${usedPct}%` }} />
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-text-tertiary">{usedLabel} of {maxLabel}</span>
+        <span className="text-[10px] text-accent-green font-medium">Upgrade</span>
+      </div>
+    </div>
+  );
 
   return (
     <aside
@@ -283,10 +309,10 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
             <span className="text-[12px] text-text-primary font-medium whitespace-nowrap">Storage</span>
           </div>
           <div className="h-[4px] bg-bg-field rounded-full overflow-hidden mb-2">
-            <div className="h-full bg-accent-green rounded-full transition-all" style={{ width: "23%" }} />
+            <div className="h-full bg-accent-green rounded-full transition-all" style={{ width: `${usedPct}%` }} />
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-text-tertiary whitespace-nowrap">2.3 GB of 10 GB</span>
+            <span className="text-[11px] text-text-tertiary whitespace-nowrap">{usedLabel} of {maxLabel}</span>
             <span className="text-[10px] text-accent-green font-medium cursor-pointer hover:underline whitespace-nowrap">Upgrade</span>
           </div>
         </div>

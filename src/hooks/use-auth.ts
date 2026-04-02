@@ -21,11 +21,14 @@ import {
 } from "@/lib/srp/client";
 import { toBase64, randomBytes, fromBase64 } from "@/lib/crypto/utils";
 
+import type { UserKeys } from "./use-user-keys";
+
 interface AuthState {
   loading: boolean;
   error: string | null;
   step: string | null;
   recoveryKey: string | null;
+  userKeys: UserKeys | null;
 }
 
 export function useAuth() {
@@ -35,13 +38,14 @@ export function useAuth() {
     error: null,
     step: null,
     recoveryKey: null,
+    userKeys: null,
   });
 
   const setStep = (step: string) => setState((s) => ({ ...s, step, error: null }));
   const setError = (error: string) => setState((s) => ({ ...s, error, loading: false, step: null }));
 
   async function signup(email: string, password: string) {
-    setState({ loading: true, error: null, step: "Generating encryption keys...", recoveryKey: null });
+    setState({ loading: true, error: null, step: "Generating encryption keys...", recoveryKey: null, userKeys: null });
 
     try {
       // 1. Generate Argon2 salt and derive master key
@@ -95,8 +99,15 @@ export function useAuth() {
         return;
       }
 
-      // Success — store recovery key for display
-      setState({ loading: false, error: null, step: null, recoveryKey });
+      // Store keys in sessionStorage
+      const keys = { ...keypairs, email };
+      sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
+
+      // Success — store keys and recovery key for display
+      setState({
+        loading: false, error: null, step: null, recoveryKey,
+        userKeys: keys,
+      });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Signup failed";
       setError(message);
@@ -104,7 +115,7 @@ export function useAuth() {
   }
 
   async function login(email: string, password: string) {
-    setState({ loading: true, error: null, step: "Initializing...", recoveryKey: null });
+    setState({ loading: true, error: null, step: "Initializing...", recoveryKey: null, userKeys: null });
 
     try {
       // 1. Generate client ephemeral
@@ -174,10 +185,20 @@ export function useAuth() {
         ? JSON.parse(verifyData.encryptedUserData)
         : verifyData.encryptedUserData;
 
-      decryptUserData(encryptedData, passwordDerivedSecret);
+      const privateKeys = decryptUserData(encryptedData, passwordDerivedSecret);
+
+      // Store decrypted keys in sessionStorage for the drive page
+      const keys = {
+        encryptionPublicKey: verifyData.publicEncryptionKey,
+        encryptionPrivateKey: privateKeys.encryptionPrivateKey,
+        signingPublicKey: verifyData.publicSigningKey,
+        signingPrivateKey: privateKeys.signingPrivateKey,
+        email,
+      };
+      sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
 
       // Success — navigate to drive
-      setState({ loading: false, error: null, step: null, recoveryKey: null });
+      setState({ loading: false, error: null, step: null, recoveryKey: null, userKeys: keys });
       router.push("/drive");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Login failed";
@@ -186,7 +207,7 @@ export function useAuth() {
   }
 
   async function recover(email: string, recoveryWordsRaw: string, newPassword: string) {
-    setState({ loading: true, error: null, step: "Verifying recovery key...", recoveryKey: null });
+    setState({ loading: true, error: null, step: "Verifying recovery key...", recoveryKey: null, userKeys: null });
 
     try {
       // Clean the recovery input — strip numbers, punctuation, extra whitespace, newlines
@@ -271,15 +292,88 @@ export function useAuth() {
         return;
       }
 
+      // Store recovered keys
+      const recoveredKeys = {
+        encryptionPublicKey: "recovered",
+        encryptionPrivateKey: privateKeys.encryptionPrivateKey,
+        signingPublicKey: "recovered",
+        signingPrivateKey: privateKeys.signingPrivateKey,
+        email,
+      };
+      sessionStorage.setItem("securewarp_keys", JSON.stringify(recoveredKeys));
+
       // Success — show new recovery key
-      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey });
+      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: recoveredKeys });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Recovery failed";
       setError(message);
     }
   }
 
+  async function changePassword(oldPassword: string, newPassword: string, email: string) {
+    setState({ loading: true, error: null, step: "Verifying old password...", recoveryKey: null, userKeys: state.userKeys });
+
+    try {
+      // Get current argon2 salt from session storage keys
+      const storedKeys = sessionStorage.getItem("securewarp_keys");
+      if (!storedKeys) {
+        setError("Session expired. Please log in again.");
+        return;
+      }
+      const currentKeys = JSON.parse(storedKeys);
+
+      // Derive new credentials from new password
+      setStep("Deriving new master key...");
+      const newArgon2Salt = randomBytes(16);
+      const newMasterKey = await deriveMainKey(newPassword, newArgon2Salt);
+      const { srpKey: newSrpKey, passwordDerivedSecret: newPds } = splitMasterKey(newMasterKey);
+      const { srpSalt: newSrpSalt, srpVerifier: newSrpVerifier } = generateRegistrationData(newSrpKey);
+
+      // Re-encrypt private keys with new password
+      setStep("Re-encrypting private keys...");
+      const keypairs = {
+        encryptionPublicKey: currentKeys.encryptionPublicKey,
+        encryptionPrivateKey: currentKeys.encryptionPrivateKey,
+        signingPublicKey: currentKeys.signingPublicKey,
+        signingPrivateKey: currentKeys.signingPrivateKey,
+      };
+      const newEncryptedUserData = encryptUserData(keypairs, newPds);
+
+      // Generate new recovery key
+      setStep("Generating new recovery key...");
+      const newRecoveryKey = generateRecoveryKey();
+      const newRecoveryEncryptedData = encryptWithRecoveryKey(keypairs, newRecoveryKey);
+      const newRecoveryKeyHash = await hashRecoveryKey(newRecoveryKey);
+
+      // Update server
+      setStep("Updating password...");
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          newSrpSalt,
+          newSrpVerifier,
+          newArgon2Salt: toBase64(newArgon2Salt),
+          newEncryptedUserData: JSON.stringify(newEncryptedUserData),
+          newRecoveryKeyHash,
+          newRecoveryEncryptedData: JSON.stringify(newRecoveryEncryptedData),
+        }),
+      });
+
+      if (!res.ok) {
+        setError("Failed to change password");
+        return;
+      }
+
+      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: { ...keypairs, email } });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Password change failed";
+      setError(message);
+    }
+  }
+
   async function logout() {
+    sessionStorage.removeItem("securewarp_keys");
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
   }
@@ -294,6 +388,7 @@ export function useAuth() {
     signup,
     login,
     recover,
+    changePassword,
     logout,
     dismissRecoveryKey,
   };

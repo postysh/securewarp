@@ -29,36 +29,47 @@ import { CommandPalette } from "./command-palette";
 import { NewFolderModal } from "./new-folder-modal";
 import { ShareModal } from "./share-modal";
 import { MembersModal } from "./members-modal";
+import { useFiles } from "@/hooks/use-files";
+import { useUserKeys } from "@/hooks/use-user-keys";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import HardDriveIcon from "@hugeicons/core-free-icons/HardDriveIcon";
 
-interface FileItem {
-  id: string;
-  name: string;
-  type: FileKind;
-  fileType: string;
-  size: string;
-  modified: string;
-  shared?: boolean;
-  starred?: boolean;
+function getFileKind(name: string, type: string): FileKind {
+  if (type === "folder") return "folder";
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  const map: Record<string, FileKind> = {
+    pdf: "pdf", doc: "document", docx: "document", txt: "document", md: "document",
+    png: "image", jpg: "image", jpeg: "image", gif: "image", svg: "image", webp: "image",
+    js: "code", ts: "code", py: "code", rb: "code", go: "code", rs: "code", jsx: "code", tsx: "code",
+    xls: "spreadsheet", xlsx: "spreadsheet", csv: "spreadsheet",
+    mp3: "audio", wav: "audio", ogg: "audio", flac: "audio",
+    mp4: "video", mov: "video", avi: "video", mkv: "video",
+    zip: "archive", tar: "archive", gz: "archive", rar: "archive", "7z": "archive",
+    pptx: "presentation", ppt: "presentation", key: "presentation",
+  };
+  return map[ext] || "other";
 }
 
-const mockFiles: FileItem[] = [
-  { id: "1", name: "Q1 overview", type: "folder", fileType: "FOLDER", size: "", modified: "Mar 28, 2026", shared: true, starred: true },
-  { id: "2", name: "Milestones", type: "folder", fileType: "FOLDER", size: "", modified: "Mar 25, 2026" },
-  { id: "3", name: "Team review", type: "document", fileType: "DOCX", size: "856 KB", modified: "Mar 30, 2026", shared: true },
-  { id: "4", name: "BG-02.png", type: "image", fileType: "PNG", size: "1.8 MB", modified: "Mar 27, 2026", starred: true },
-  { id: "5", name: "FetchTable.py", type: "code", fileType: "PY", size: "4 KB", modified: "Mar 26, 2026" },
-  { id: "6", name: "CapTable.xls", type: "spreadsheet", fileType: "XLS", size: "2.4 MB", modified: "Mar 29, 2026", shared: true },
-  { id: "7", name: "Blonded", type: "audio", fileType: "MP3", size: "48 MB", modified: "Mar 24, 2026" },
-  { id: "8", name: "daily-finances", type: "archive", fileType: "ZIP", size: "15 MB", modified: "Mar 21, 2026" },
-  { id: "9", name: "Town hall", type: "page", fileType: "PAGE", size: "12 KB", modified: "Mar 23, 2026" },
-  { id: "10", name: "Architecture Diagram", type: "pdf", fileType: "PDF", size: "5.2 MB", modified: "Mar 20, 2026", shared: true, starred: true },
-  { id: "11", name: "Demo Recording", type: "video", fileType: "MP4", size: "124 MB", modified: "Mar 22, 2026" },
-  { id: "12", name: "Pitch Deck", type: "presentation", fileType: "PPTX", size: "5.2 MB", modified: "Mar 19, 2026" },
-];
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let size = bytes;
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+  return `${size.toFixed(size < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 
 type SortField = "name" | "type" | "size" | "modified";
 
 export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean; onToggleSidebar: () => void }) {
+  const keys = useUserKeys();
+  const fileOps = useFiles(keys ? { encryptionPublicKey: keys.encryptionPublicKey, encryptionPrivateKey: keys.encryptionPrivateKey } : null);
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortAsc, setSortAsc] = useState(true);
@@ -67,11 +78,31 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [membersOpen, setMembersOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; fileId: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; fileId: string; isFolder: boolean } | null>(null);
 
-  const selectAll = () => setSelected(new Set(mockFiles.map((f) => f.id)));
+  // Load files on mount and when keys become available
+  useEffect(() => {
+    if (keys) {
+      fileOps.fetchFiles(fileOps.currentFolder);
+    }
+  }, [keys]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Map decrypted files to display format
+  const displayFiles = fileOps.files.map((f) => ({
+    id: f.id,
+    name: f.name,
+    type: getFileKind(f.name, f.type),
+    fileType: f.isFolder ? "FOLDER" : (f.name.split(".").pop()?.toUpperCase() || "FILE"),
+    size: formatBytes(f.size),
+    modified: formatDate(f.createdAt),
+    isFolder: f.isFolder,
+    uploading: f.uploading,
+    uploadProgress: f.uploadProgress,
+  }));
+
+  const selectAll = () => setSelected(new Set(displayFiles.map((f) => f.id)));
   const selectNone = () => setSelected(new Set());
-  const allSelected = selected.size === mockFiles.length;
+  const allSelected = displayFiles.length > 0 && selected.size === displayFiles.length;
   const someSelected = selected.size > 0 && !allSelected;
 
   useEffect(() => {
@@ -103,12 +134,16 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     e.preventDefault();
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     dragCounter.current = 0;
     setIsDragging(false);
-    // Files would be handled here: e.dataTransfer.files
-  }, []);
+    const files = e.dataTransfer.files;
+    if (!files.length) return;
+    for (const file of Array.from(files)) {
+      await fileOps.uploadFile(file, fileOps.currentFolder);
+    }
+  }, [fileOps]);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -138,7 +173,14 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       onDrop={handleDrop}
     >
       {/* Hidden file input */}
-      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={() => { /* handle files */ }} />
+      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={async (e) => {
+        const files = e.target.files;
+        if (!files) return;
+        for (const file of Array.from(files)) {
+          await fileOps.uploadFile(file, fileOps.currentFolder);
+        }
+        e.target.value = "";
+      }} />
 
       {/* Drag overlay */}
       {isDragging && (
@@ -162,11 +204,31 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           <button onClick={onToggleSidebar} className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer mr-1">
             <HugeiconsIcon icon={SidebarLeft01Icon} size={16} />
           </button>
-          <span className="text-text-secondary hover:text-text-primary cursor-pointer transition-colors">My Drive</span>
-          <span className="text-text-disabled">/</span>
-          <span className="text-text-secondary hover:text-text-primary cursor-pointer transition-colors">General</span>
-          <span className="text-text-disabled">/</span>
-          <span className="text-text-primary font-medium">Q1 overview</span>
+          {(() => {
+            const crumbs = fileOps.breadcrumb;
+            const maxVisible = 3;
+            const collapsed = crumbs.length > maxVisible;
+            const visible = collapsed ? [crumbs[0], ...crumbs.slice(-2)] : crumbs;
+
+            return visible.map((crumb, i) => (
+              <span key={crumb.id ?? "root"} className="flex items-center gap-1.5">
+                {i > 0 && <span className="text-text-disabled">/</span>}
+                {i === 1 && collapsed && (
+                  <>
+                    <span className="text-text-disabled">...</span>
+                    <span className="text-text-disabled">/</span>
+                  </>
+                )}
+                {(i < visible.length - 1) ? (
+                  <button onClick={() => fileOps.navigateToBreadcrumb(collapsed && i > 0 ? crumbs.length - (visible.length - i) : i)} className="text-text-secondary hover:text-text-primary cursor-pointer transition-colors bg-transparent border-none p-0 text-[13px]">
+                    {crumb.name}
+                  </button>
+                ) : (
+                  <span className="text-text-primary font-medium">{crumb.name}</span>
+                )}
+              </span>
+            ));
+          })()}
         </div>
 
         {/* Center: search trigger */}
@@ -201,11 +263,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         </div>
       </div>
 
-      {/* E2E banner */}
-      <div className="mx-5 mt-3 mb-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-accent-green-bg text-accent-green text-[12px] font-medium">
-        <HugeiconsIcon icon={LockIcon} size={14} />
-        End-to-end encrypted. Only you and people you share with can see these files.
-      </div>
+
+      {/* Error banner */}
+      {fileOps.error && (
+        <div className="mx-5 mt-2 flex items-center justify-between px-3 py-2 rounded-lg bg-accent-red/10 border border-accent-red/20 animate-fade-in">
+          <span className="text-[12px] text-accent-red">{fileOps.error}</span>
+          <button onClick={() => fileOps.clearError()} className="text-[11px] text-accent-red/60 hover:text-accent-red transition-colors cursor-pointer ml-3 shrink-0">Dismiss</button>
+        </div>
+      )}
+
 
       {/* Selection bar */}
       {selected.size > 0 && (
@@ -223,9 +289,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
       {/* Table */}
-      <div className="flex-1 overflow-y-auto px-5 pb-4" onClick={() => setContextMenu(null)}>
-        {/* Table header */}
-        <div className="flex items-center h-[40px] px-2 box-border select-none">
+      <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
+        {/* Table header — hide when empty */}
+        {displayFiles.length > 0 && (
+        <div className="flex items-center h-[40px] px-4 box-border select-none">
           {/* Checkbox */}
           <button
             onClick={(e) => { e.stopPropagation(); allSelected || someSelected ? selectNone() : selectAll(); }}
@@ -259,22 +326,95 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             </div>
           </div>
         </div>
+        )}
 
-        {/* Rows */}
-        {mockFiles.map((file) => {
+        {/* Empty state */}
+        {!fileOps.loading && fileOps.initialized && displayFiles.length === 0 && (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center max-w-[360px]">
+              {/* Visual — stacked floating cards */}
+              <div className="relative w-[200px] h-[140px] mx-auto mb-8">
+                {/* Back card */}
+                <div className="absolute left-[19px] top-[16px] w-[150px] h-[80px] rounded-xl border border-border-tertiary bg-bg-side" />
+                {/* Middle card */}
+                <div className="absolute left-[14px] top-[6px] w-[160px] h-[90px] rounded-xl border border-border-tertiary bg-bg-l3 flex items-center justify-center">
+                  <div className="flex items-center gap-2 px-3">
+                    <div className="w-5 h-5 rounded bg-bg-overlay-tertiary" />
+                    <div className="space-y-1.5">
+                      <div className="w-20 h-1.5 rounded-full bg-bg-overlay-tertiary" />
+                      <div className="w-12 h-1.5 rounded-full bg-bg-overlay-tertiary" />
+                    </div>
+                  </div>
+                </div>
+                {/* Front card */}
+                <div className="absolute left-[26px] top-[28px] w-[160px] h-[90px] rounded-xl border border-border-tertiary bg-bg-main rotate-[3deg] flex flex-col items-center justify-center">
+                  <div className="w-10 h-10 rounded-xl bg-accent-green/10 flex items-center justify-center mb-1">
+                    <HugeiconsIcon icon={LockIcon} size={20} color="var(--accent-green-primary)" />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="relative flex h-1 w-1"><span className="animate-ping absolute h-full w-full rounded-full bg-accent-green opacity-75" /><span className="relative h-1 w-1 rounded-full bg-accent-green" /></span>
+                    <span className="text-[7px] text-accent-green font-medium">Encrypted</span>
+                  </div>
+                </div>
+              </div>
+
+              <h3 className="text-[18px] font-semibold text-text-primary mb-2">Your vault is empty</h3>
+              <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
+                Upload your first file or create a folder. Everything is end-to-end encrypted before it leaves your browser.
+              </p>
+
+              <div className="flex items-center justify-center gap-2.5">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] flex items-center gap-2"
+                >
+                  <HugeiconsIcon icon={Upload04Icon} size={15} /> Upload files
+                </button>
+                <button
+                  onClick={() => setNewFolderOpen(true)}
+                  className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer flex items-center gap-2"
+                >
+                  <HugeiconsIcon icon={FolderAddIcon} size={15} /> New folder
+                </button>
+              </div>
+
+              <p className="text-[11px] text-text-disabled mt-4">
+                Drag and drop files anywhere on this page
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Loading skeleton — Skiff-style slow pulse */}
+        {(fileOps.loading || !fileOps.initialized) && (
+          <div className="space-y-1.5">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex items-center h-[56px] px-4 rounded-xl border border-border-tertiary" style={{ animationDelay: `${i * 0.15}s` }}>
+                <div className="skeleton w-[18px] h-[18px] rounded-[4px] mr-4" style={{ animationDelay: `${i * 0.15}s` }} />
+                <div className="skeleton w-8 h-8 rounded-lg mr-3" style={{ animationDelay: `${i * 0.15 + 0.05}s` }} />
+                <div className="flex-1 flex items-center gap-3">
+                  <div className="skeleton h-3 rounded-md" style={{ width: `${100 + i * 15}px`, animationDelay: `${i * 0.15 + 0.1}s` }} />
+                </div>
+                <div className="skeleton h-[20px] w-10 rounded-md ml-4" style={{ animationDelay: `${i * 0.15 + 0.15}s` }} />
+                <div className="skeleton h-3 w-12 rounded-md ml-6" style={{ animationDelay: `${i * 0.15 + 0.2}s` }} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {displayFiles.map((file) => {
           const isSelected = selected.has(file.id);
           return (
             <div
               key={file.id}
               onClick={() => {
-                // Single click opens — folder navigation or file preview would go here
-              }}
-              onDoubleClick={() => {
-                // Double click also opens
+                if (file.isFolder) {
+                  fileOps.navigateToFolder(file.id, file.name);
+                }
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id });
+                setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
               className={`group flex items-center h-[56px] px-4 rounded-xl border cursor-pointer transition-all mb-1.5 ${
                 isSelected ? "border-accent-green/20 bg-bg-overlay-tertiary" : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
@@ -292,14 +432,29 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
               {/* Icon + name + badges */}
               <div className="flex items-center gap-3 flex-1 min-w-0">
-                <FileIcon type={file.type} />
-                <span className="text-[13px] text-text-primary truncate">{file.name}</span>
-                {file.starred && (
-                  <HugeiconsIcon icon={StarIcon} size={13} color="var(--accent-yellow-primary)" />
+                {file.uploading ? (
+                  <div className="flex h-8 w-8 items-center justify-center shrink-0">
+                    <svg width="28" height="28" viewBox="0 0 28 28" style={{ animation: "spin 0.75s linear infinite" }}>
+                      <circle cx="14" cy="14" r="11" fill="none" stroke="var(--bg-overlay-tertiary)" strokeWidth="2" />
+                      <circle
+                        cx="14" cy="14" r="11" fill="none"
+                        stroke="var(--accent-green-primary)"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeDasharray={`${2 * Math.PI * 11 * 0.3} ${2 * Math.PI * 11 * 0.7}`}
+                        style={{ transformOrigin: "center", transform: "rotate(-90deg)" }}
+                      />
+                    </svg>
+                  </div>
+                ) : (
+                  <FileIcon type={file.type} />
                 )}
-                {file.shared && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-bg-field text-text-disabled shrink-0">Shared</span>
-                )}
+                <div className="min-w-0 flex-1">
+                  <span className={`text-[13px] truncate block ${file.uploading ? "text-text-tertiary" : "text-text-primary"}`}>{file.name}</span>
+                  {file.uploading && (
+                    <span className="text-[10px] text-accent-green block mt-0.5">{fileOps.uploadStep || "Processing..."}</span>
+                  )}
+                </div>
               </div>
 
               {/* Metadata */}
@@ -332,7 +487,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                       setContextMenu(null);
                     } else {
                       const rect = e.currentTarget.getBoundingClientRect();
-                      setContextMenu({ x: rect.right - 180, y: rect.bottom + 4, fileId: file.id });
+                      setContextMenu({ x: rect.right - 180, y: rect.bottom + 4, fileId: file.id, isFolder: !!file.isFolder });
                     }
                   }} className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer">
                     <HugeiconsIcon icon={MoreHorizontalIcon} size={15} />
@@ -366,9 +521,11 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
             <HugeiconsIcon icon={Share01Icon} size={14} color="var(--icon-tertiary)" /> Share
           </button>
-          <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
-            <HugeiconsIcon icon={Download04Icon} size={14} color="var(--icon-tertiary)" /> Download
-          </button>
+          {!contextMenu?.isFolder && (
+            <button onClick={() => { if (contextMenu) { fileOps.downloadFile(contextMenu.fileId); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+              <HugeiconsIcon icon={Download04Icon} size={14} color="var(--icon-tertiary)" /> Download
+            </button>
+          )}
           <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
             <HugeiconsIcon icon={Move01Icon} size={14} color="var(--icon-tertiary)" /> Move to
           </button>
@@ -376,17 +533,28 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <HugeiconsIcon icon={InformationCircleIcon} size={14} color="var(--icon-tertiary)" /> Details
           </button>
           <div className="h-px bg-border-tertiary my-1" />
-          <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer">
+          <button onClick={() => { if (contextMenu) { fileOps.deleteItem(contextMenu.fileId); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer">
             <HugeiconsIcon icon={Delete02Icon} size={14} /> Trash
           </button>
         </div>,
         document.body
       )}
 
-      <NewFolderModal open={newFolderOpen} onClose={() => setNewFolderOpen(false)} />
+      <NewFolderModal open={newFolderOpen} onClose={() => setNewFolderOpen(false)} onCreate={(name) => fileOps.createFolder(name, fileOps.currentFolder)} />
       <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
       <MembersModal open={membersOpen} onClose={() => setMembersOpen(false)} />
-      <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        files={displayFiles.map((f) => ({ id: f.id, name: f.name, isFolder: f.isFolder }))}
+        onAction={(action) => {
+          switch (action) {
+            case "a1": fileInputRef.current?.click(); break;
+            case "a2": setNewFolderOpen(true); break;
+            case "a3": setShareOpen(true); break;
+          }
+        }}
+      />
     </div>
   );
 }
