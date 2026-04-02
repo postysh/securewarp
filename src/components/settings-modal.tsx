@@ -182,38 +182,64 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </SettingRow>
           </div>
         );
-      case "storage":
+      case "storage": {
+        const categories = [
+          { label: "Files", size: "1.8 GB", percent: 78, color: "var(--accent-blue-primary)" },
+          { label: "Shared", size: "420 MB", percent: 18, color: "var(--accent-green-primary)" },
+          { label: "Trash", size: "80 MB", percent: 4, color: "var(--accent-red-primary)" },
+        ];
         return (
           <div>
-            <div className="py-4 border-b border-border-tertiary">
-              <div className="flex items-center justify-between mb-3">
+            {/* Plan card */}
+            <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
+              <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-[13px] text-text-primary font-medium">Free plan</p>
-                  <p className="text-[11px] text-text-disabled mt-0.5">2.3 GB of 10 GB used</p>
+                  <p className="text-[14px] text-text-primary font-semibold">Free plan</p>
+                  <p className="text-[11px] text-text-disabled mt-0.5">10 GB storage included</p>
                 </div>
-                <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer">
+                <button className="h-[30px] px-4 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer active:scale-[0.98]">
                   Upgrade
                 </button>
               </div>
-              <div className="h-[6px] bg-bg-field rounded-full overflow-hidden">
-                <div className="h-full bg-accent-green rounded-full" style={{ width: "23%" }} />
+
+              {/* Stacked bar */}
+              <div className="h-[8px] bg-bg-field rounded-full overflow-hidden flex">
+                {categories.map((cat) => (
+                  <div
+                    key={cat.label}
+                    className="h-full first:rounded-l-full last:rounded-r-full"
+                    style={{ width: `${cat.percent}%`, backgroundColor: cat.color }}
+                  />
+                ))}
               </div>
+
               <div className="flex items-center justify-between mt-2">
-                <span className="text-[10px] text-text-disabled">0 GB</span>
-                <span className="text-[10px] text-text-disabled">10 GB</span>
+                <span className="text-[12px] text-text-primary font-medium">2.3 GB used</span>
+                <span className="text-[11px] text-text-disabled">of 10 GB</span>
               </div>
             </div>
-            <SettingRow label="Files" description="Documents, images, and other files">
-              <span className="text-[12px] text-text-secondary">1.8 GB</span>
-            </SettingRow>
-            <SettingRow label="Shared" description="Files shared with you">
-              <span className="text-[12px] text-text-secondary">420 MB</span>
-            </SettingRow>
-            <SettingRow label="Trash" description="Files in trash">
-              <span className="text-[12px] text-text-secondary">80 MB</span>
-            </SettingRow>
+
+            {/* Breakdown */}
+            <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-2">Breakdown</p>
+            <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
+              {categories.map((cat) => (
+                <div key={cat.label} className="flex items-center gap-3 px-3 py-3 border-b border-border-tertiary last:border-b-0">
+                  <div className="w-[10px] h-[10px] rounded-[3px]" style={{ backgroundColor: cat.color }} />
+                  <div className="flex-1">
+                    <p className="text-[12px] text-text-primary">{cat.label}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[12px] text-text-secondary font-mono">{cat.size}</span>
+                    <div className="w-[60px] h-[4px] bg-bg-field rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${cat.percent}%`, backgroundColor: cat.color }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         );
+      }
       case "import":
         return (
           <div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import ViewIcon from "@hugeicons/core-free-icons/ViewIcon";
@@ -22,8 +23,9 @@ function FadeIn({ children, keyVal }: { children: React.ReactNode; keyVal: strin
   );
 }
 
-export function AuthScreen({ onAuth }: { onAuth: () => void }) {
-  const [mode, setMode] = useState<Mode>("login");
+export function AuthScreen({ mode: initialMode = "login", onAuth }: { mode?: Mode; onAuth: () => void }) {
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -168,9 +170,9 @@ export function AuthScreen({ onAuth }: { onAuth: () => void }) {
 
             <p className="mt-5 text-center text-[13px] text-text-tertiary">
               {mode === "login" ? (
-                <>No account? <button onClick={() => setMode("signup")} className="text-text-link hover:underline font-medium cursor-pointer">Sign up</button></>
+                <>No account? <button onClick={() => router.push("/signup")} className="text-text-link hover:underline font-medium cursor-pointer">Sign up</button></>
               ) : (
-                <>Have an account? <button onClick={() => setMode("login")} className="text-text-link hover:underline font-medium cursor-pointer">Sign in</button></>
+                <>Have an account? <button onClick={() => router.push("/login")} className="text-text-link hover:underline font-medium cursor-pointer">Sign in</button></>
               )}
             </p>
 

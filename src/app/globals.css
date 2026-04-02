@@ -33,6 +33,7 @@
   --color-accent-yellow: var(--accent-yellow-primary);
   --color-accent-pink: var(--accent-pink-primary);
   --color-accent-dark-blue: var(--accent-dark-blue-primary);
+  --color-glass: var(--glass-color);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -71,6 +72,8 @@
   --accent-yellow-secondary: rgba(210,180,80,0.15);
   --accent-pink-primary: rgb(200,140,175);
   --accent-dark-blue-primary: rgb(120,150,220);
+  --glass: 0,0,0;
+  --glass-color: black;
   --shadow-l1: 0px 1px 3px rgba(0,0,0,0.1), 0px 0px 2px rgba(0,0,0,0.06);
   --shadow-l2: 0px 10px 15px -3px rgba(0,0,0,0.1), 0px 4px 6px -2px rgba(0,0,0,0.05);
 }
@@ -109,6 +112,8 @@
   --accent-yellow-secondary: rgba(225,200,110,0.18);
   --accent-pink-primary: rgba(220,170,195,0.85);
   --accent-dark-blue-primary: rgba(155,180,240,0.85);
+  --glass: 255,255,255;
+  --glass-color: white;
   --shadow-l1: 0px 1px 3px rgba(0,0,0,0.3), 0px 1px 2px rgba(0,0,0,0.26);
   --shadow-l2: 0px 10px 15px -3px rgba(0,0,0,0.3), 0px 4px 6px -2px rgba(0,0,0,0.25);
 }
@@ -129,4 +134,33 @@ body {
 }
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
+}
+
+/* Landing page animations */
+@keyframes float-up {
+  from { opacity: 0; transform: translateY(40px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.land-reveal {
+  animation: float-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.land-reveal-1 { animation-delay: 0s; }
+.land-reveal-2 { animation-delay: 0.1s; }
+.land-reveal-3 { animation-delay: 0.2s; }
+.land-reveal-4 { animation-delay: 0.35s; }
+.land-glow {
+  animation: glow-pulse 4s ease-in-out infinite;
+}
+.land-shimmer {
+  background: linear-gradient(90deg, transparent, var(--accent-green-primary), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 3s linear infinite;
 }
