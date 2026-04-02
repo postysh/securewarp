@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Key02Icon from "@hugeicons/core-free-icons/Key02Icon";
 import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
@@ -15,12 +14,39 @@ import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 interface RecoveryKeyModalProps {
   open: boolean;
   onClose: () => void;
+  recoveryKey?: string;
 }
 
-// Mock recovery key (would be generated client-side in production)
-const MOCK_RECOVERY_KEY = "whale guitar ocean marble thunder silk valley prism delta forge ember crystal noble flame quest lunar spark grove frost atlas";
+function downloadRecoveryFile(recoveryKey: string) {
+  const content = [
+    "SECUREWARP RECOVERY KEY",
+    "=======================",
+    "",
+    "Keep this somewhere safe. If you lose your password,",
+    "this is the ONLY way to recover your encrypted files.",
+    "",
+    "Recovery phrase (paste this entire line to recover):",
+    "",
+    recoveryKey,
+    "",
+    "=======================",
+    `Generated: ${new Date().toISOString()}`,
+    "IMPORTANT: Store offline. Do not share.",
+  ].join("\n");
 
-export function RecoveryKeyModal({ open, onClose }: RecoveryKeyModalProps) {
+  const blob = new Blob([content], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "securewarp-recovery-key.txt";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function RecoveryKeyModal({ open, onClose, recoveryKey }: RecoveryKeyModalProps) {
+  const words = recoveryKey ? recoveryKey.split(" ") : [];
   const [isBlurred, setIsBlurred] = useState(true);
   const [copied, setCopied] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
@@ -33,31 +59,26 @@ export function RecoveryKeyModal({ open, onClose }: RecoveryKeyModalProps) {
     }
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
-
   const handleCopy = () => {
-    navigator.clipboard.writeText(MOCK_RECOVERY_KEY);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (recoveryKey) {
+      navigator.clipboard.writeText(recoveryKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const handleDownload = () => {
-    setDownloaded(true);
-    // Would generate and download a PDF in production
+    if (recoveryKey) {
+      downloadRecoveryFile(recoveryKey);
+      setDownloaded(true);
+    }
   };
 
   if (!open) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center">
-      <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={onClose} />
+      <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" />
 
       <div
         className="relative w-full max-w-[480px] mx-4 rounded-2xl bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
@@ -71,9 +92,6 @@ export function RecoveryKeyModal({ open, onClose }: RecoveryKeyModalProps) {
             </div>
             <span className="text-[14px] font-semibold text-text-primary">Recovery Key</span>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer">
-            <HugeiconsIcon icon={Cancel01Icon} size={16} />
-          </button>
         </div>
 
         {/* Body */}
@@ -84,35 +102,35 @@ export function RecoveryKeyModal({ open, onClose }: RecoveryKeyModalProps) {
               <HugeiconsIcon icon={Alert01Icon} size={13} />
             </div>
             <div>
-              <p className="font-medium">Save this key somewhere safe</p>
-              <p className="opacity-70 mt-0.5 leading-relaxed">If you lose your password and this key, your files are permanently unrecoverable. We cannot reset this for you.</p>
+              <p className="font-medium">Save this recovery phrase somewhere safe</p>
+              <p className="opacity-70 mt-0.5 leading-relaxed">If you lose your password and this phrase, your files are permanently unrecoverable. We cannot reset this for you.</p>
             </div>
           </div>
 
-          {/* Description */}
+          {/* Instructions */}
           <div className="space-y-2 mb-5">
             <div className="flex items-center gap-2 text-[12px] text-text-secondary">
               <HugeiconsIcon icon={Key02Icon} size={14} color="var(--icon-tertiary)" />
-              <span>Download or copy your one-time recovery code</span>
+              <span>Copy or download your 24-word recovery phrase</span>
             </div>
             <div className="flex items-center gap-2 text-[12px] text-text-secondary">
               <HugeiconsIcon icon={LockIcon} size={14} color="var(--icon-tertiary)" />
-              <span>This key can decrypt your private keys if you forget your password</span>
+              <span>Paste the entire phrase when recovering your account</span>
             </div>
           </div>
 
-          {/* Key card */}
-          <div className="relative rounded-[10px] bg-bg-overlay-tertiary overflow-hidden min-h-[100px]">
+          {/* Recovery phrase — single copyable block like Skiff */}
+          <div className="relative rounded-[10px] bg-bg-overlay-tertiary overflow-hidden">
             <div
-              className="p-4 transition-all duration-200"
+              className="p-4 transition-all duration-200 min-h-[80px]"
               style={{ filter: isBlurred ? "blur(5px)" : "none" }}
             >
-              <p className={`text-[13px] leading-relaxed font-mono select-all ${isBlurred ? "text-text-disabled" : "text-text-secondary"}`}>
-                {MOCK_RECOVERY_KEY}
+              <p className={`text-[13px] leading-relaxed font-mono select-all break-words ${isBlurred ? "text-text-disabled" : "text-text-secondary"}`}>
+                {recoveryKey}
               </p>
             </div>
 
-            {/* Key actions — bottom right */}
+            {/* Actions overlay */}
             <div className="absolute bottom-3 right-3 flex items-center gap-2">
               <button
                 onClick={() => setIsBlurred(!isBlurred)}
@@ -131,20 +149,23 @@ export function RecoveryKeyModal({ open, onClose }: RecoveryKeyModalProps) {
             </div>
           </div>
 
+          {/* Word count indicator */}
+          <p className="text-[10px] text-text-disabled mt-2 px-1">{words.length} words</p>
+
           {/* Actions */}
-          <div className="flex items-center justify-end gap-2 mt-5">
-            <button
-              onClick={onClose}
-              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
-            >
-              Close
-            </button>
+          <div className="flex items-center justify-between mt-5">
             <button
               onClick={handleDownload}
-              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] flex items-center gap-1.5"
+              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer flex items-center gap-1.5"
             >
               <HugeiconsIcon icon={Download04Icon} size={14} />
-              {downloaded ? "Downloaded" : "Save key as PDF"}
+              {downloaded ? "Downloaded" : "Download backup"}
+            </button>
+            <button
+              onClick={onClose}
+              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer active:scale-[0.98]"
+            >
+              I&apos;ve saved my key
             </button>
           </div>
         </div>

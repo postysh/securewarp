@@ -276,8 +276,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id });
               }}
-              className={`group flex items-center h-[56px] px-2 border-b border-border-tertiary cursor-pointer transition-colors ${
-                isSelected ? "bg-bg-overlay-tertiary" : "hover:bg-bg-overlay-tertiary"
+              className={`group flex items-center h-[56px] px-4 rounded-xl border cursor-pointer transition-all mb-1.5 ${
+                isSelected ? "border-accent-green/20 bg-bg-overlay-tertiary" : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
               }`}
             >
               {/* Checkbox */}
