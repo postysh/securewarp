@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getOwnedFile, revokeFileAccess } from "@/lib/db/files";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const UnshareSchema = z.object({
@@ -45,6 +46,13 @@ export async function POST(request: Request) {
     }
 
     await revokeFileAccess(fileId, targetUserId);
+    auditEvent({
+      event: "files.unshare",
+      actorUserId: session.userId,
+      targetUserId,
+      targetFileId: fileId,
+      detail: isSelfRemoval ? "self_leave" : "owner_remove",
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
     logError("files.unshare", err);

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getFileById, grantFileAccess } from "@/lib/db/files";
 import { getPublicUserByEmail } from "@/lib/db/users";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const ShareSchema = z.object({
@@ -32,6 +34,16 @@ export async function POST(request: Request) {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Cap noisy share floods (e.g. a compromised session spamming
+    // shares to enumerate accounts). 60/hour is generous for normal
+    // usage and cheap to bump later.
+    if (!(await checkRateLimit(`share:${session.userId}`, 60))) {
+      return NextResponse.json(
+        { error: "Too many share requests. Try again later." },
+        { status: 429 }
+      );
     }
 
     const body = await request.json();
@@ -67,6 +79,14 @@ export async function POST(request: Request) {
       encryptedPrivateHierarchicalKey,
       wrappedByPublicKey,
       permissionLevel: permissionLevel ?? "editor",
+    });
+
+    auditEvent({
+      event: "files.share",
+      actorUserId: session.userId,
+      targetUserId: recipient.id,
+      targetFileId: fileId,
+      detail: permissionLevel ?? "editor",
     });
 
     return NextResponse.json({

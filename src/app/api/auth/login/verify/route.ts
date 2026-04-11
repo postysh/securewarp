@@ -4,6 +4,7 @@ import { getUserById } from "@/lib/db/users";
 import { getSrpSession, deleteSrpSession } from "@/lib/db/srp-sessions";
 import { verifyClientAndDeriveSession } from "@/lib/srp/server";
 import { createSession } from "@/lib/auth/session";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
@@ -50,6 +51,11 @@ export async function POST(request: Request) {
       );
       serverProof = result.serverProof;
     } catch {
+      auditEvent({
+        event: "auth.login.fail",
+        actorUserId: user.id,
+        detail: "srp_proof_mismatch",
+      });
       return NextResponse.json(
         { error: "Invalid email or password" },
         { status: 401 }
@@ -61,6 +67,7 @@ export async function POST(request: Request) {
 
     // Create JWT session
     await createSession({ userId: user.id, email: user.email });
+    auditEvent({ event: "auth.login.success", actorUserId: user.id });
 
     return NextResponse.json({
       serverProof,

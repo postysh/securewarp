@@ -3,6 +3,8 @@ import { RegisterSchema } from "@/lib/validators/auth";
 import { createUser, getUserByEmail } from "@/lib/db/users";
 import { createSession } from "@/lib/auth/session";
 import { normalizeEmail } from "@/lib/auth/email";
+import { verifyTurnstile } from "@/lib/auth/turnstile";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
@@ -18,6 +20,16 @@ export async function POST(request: Request) {
     }
 
     const data = parsed.data;
+
+    // Gate signup on Turnstile (no-op until TURNSTILE_SECRET_KEY is set).
+    const turnstile = await verifyTurnstile(data.turnstileToken, request);
+    if (!turnstile.ok) {
+      return NextResponse.json(
+        { error: "Verification required", reason: turnstile.reason },
+        { status: 403 }
+      );
+    }
+
     // Canonicalise so `a@x.com` and `A@x.com` cannot register as two
     // distinct accounts. The DB `users.email` unique constraint is
     // case-sensitive so the only defence lives at this boundary.
@@ -49,6 +61,7 @@ export async function POST(request: Request) {
 
     // Create session
     await createSession({ userId: user.id, email: user.email });
+    auditEvent({ event: "auth.register", actorUserId: user.id });
 
     return NextResponse.json({ success: true, userId: user.id });
   } catch (err: unknown) {

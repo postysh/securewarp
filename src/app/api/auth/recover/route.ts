@@ -7,6 +7,8 @@ import { createSession } from "@/lib/auth/session";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { consumeRecoveryToken } from "@/lib/auth/used-tokens";
 import { normalizeEmail } from "@/lib/auth/email";
+import { verifyTurnstile } from "@/lib/auth/turnstile";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const RECOVERY_TOKEN_EXPIRY = "5m";
@@ -22,6 +24,7 @@ const VerifySchema = z.object({
   action: z.literal("verify"),
   email: z.string().email(),
   recoveryKeyHash: z.string().min(1),
+  turnstileToken: z.string().optional(),
 });
 
 // Step 2: Update credentials — requires valid recovery token
@@ -47,9 +50,17 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Invalid data" }, { status: 400 });
       }
 
-      const { recoveryKeyHash } = parsed.data;
+      const { recoveryKeyHash, turnstileToken } = parsed.data;
       // Normalize so rate-limit keys + user lookups never vary by case.
       const email = normalizeEmail(parsed.data.email);
+
+      const turnstile = await verifyTurnstile(turnstileToken, request);
+      if (!turnstile.ok) {
+        return NextResponse.json(
+          { error: "Verification required", reason: turnstile.reason },
+          { status: 403 }
+        );
+      }
 
       // Rate limit — 5 attempts per hour per normalized email
       if (!(await checkRateLimit(`recover:${email}`, 5))) {
@@ -58,6 +69,7 @@ export async function POST(request: Request) {
 
       const user = await getUserByEmail(email);
       if (!user || !user.recovery_key_hash) {
+        auditEvent({ event: "auth.recovery.verify.fail", detail: "unknown_user" });
         return NextResponse.json({ error: "Invalid email or recovery key" }, { status: 401 });
       }
 
@@ -65,8 +77,15 @@ export async function POST(request: Request) {
       const storedHash = Buffer.from(user.recovery_key_hash, "base64");
       const providedHash = Buffer.from(recoveryKeyHash, "base64");
       if (storedHash.length !== providedHash.length || !timingSafeEqual(storedHash, providedHash)) {
+        auditEvent({
+          event: "auth.recovery.verify.fail",
+          actorUserId: user.id,
+          detail: "hash_mismatch",
+        });
         return NextResponse.json({ error: "Invalid email or recovery key" }, { status: 401 });
       }
+
+      auditEvent({ event: "auth.recovery.verify.success", actorUserId: user.id });
 
       // Generate a signed, single-use recovery token
       const jti = crypto.randomUUID();
@@ -122,6 +141,7 @@ export async function POST(request: Request) {
 
       // Create session
       await createSession({ userId, email });
+      auditEvent({ event: "auth.recovery.update", actorUserId: userId });
 
       return NextResponse.json({ success: true });
     }

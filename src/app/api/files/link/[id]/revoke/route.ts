@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { revokeLink } from "@/lib/db/files";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const ParamSchema = z.object({ id: z.string().uuid() });
@@ -31,6 +32,11 @@ export async function POST(
     if (!ok) {
       return NextResponse.json({ error: "Link not found or not yours to revoke" }, { status: 404 });
     }
+    auditEvent({
+      event: "link.revoke",
+      actorUserId: session.userId,
+      targetLinkId: parsed.data.id,
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
     logError("files.link.revoke", err);

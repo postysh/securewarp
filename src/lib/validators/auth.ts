@@ -16,11 +16,15 @@ export const RegisterSchema = z.object({
     nonce: z.string().min(1),
     ciphertext: z.string().min(1),
   }).optional(),
+  // Optional because Turnstile is gated on an env var — when unset,
+  // the server-side verifier treats the request as passing regardless.
+  turnstileToken: z.string().optional(),
 });
 
 export const LoginInitSchema = z.object({
   email: z.string().email(),
   clientPublicEphemeral: z.string().min(1),
+  turnstileToken: z.string().optional(),
 });
 
 export const LoginVerifySchema = z.object({

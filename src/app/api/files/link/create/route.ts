@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getFileById, createLink } from "@/lib/db/files";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const CreateSchema = z
@@ -73,6 +74,14 @@ export async function POST(request: Request) {
       passwordSalt: parsed.data.passwordSalt,
       passwordWrappedLinkKey: parsed.data.passwordWrappedLinkKey,
       passwordWrapNonce: parsed.data.passwordWrapNonce,
+    });
+
+    auditEvent({
+      event: "link.create",
+      actorUserId: session.userId,
+      targetFileId: parsed.data.fileId,
+      targetLinkId: id,
+      detail: parsed.data.passwordSalt ? "password" : "public",
     });
 
     return NextResponse.json({ id });

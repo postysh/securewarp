@@ -126,6 +126,12 @@ R2_BUCKET=securewarp
 # On Vercel, set CRON_SECRET instead (or in addition) — Vercel forwards it
 # automatically to scheduled cron invocations.
 CLEANUP_SECRET=long-random-secret-for-cron-to-call-cleanup
+# Cloudflare Turnstile (optional). When TURNSTILE_SECRET_KEY is unset the
+# server-side verifier treats every request as passing — handy for local
+# dev. Once you provision a Turnstile site in the Cloudflare dashboard,
+# set both variables and auth routes start enforcing the widget.
+TURNSTILE_SECRET_KEY=
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=
 ```
 
 Run database migrations (via Supabase dashboard or CLI):
@@ -271,6 +277,24 @@ CREATE TABLE used_recovery_tokens (
   expires_at timestamptz NOT NULL
 );
 CREATE INDEX used_recovery_tokens_expires_at_idx ON used_recovery_tokens (expires_at);
+
+-- Append-only security audit log (auth, share, rotate, link events).
+-- Deliberately lightweight — no request bodies, no ciphertexts, just
+-- classification codes for post-incident forensics.
+CREATE TABLE security_audit (
+  id bigserial PRIMARY KEY,
+  occurred_at timestamptz NOT NULL DEFAULT now(),
+  event_type text NOT NULL,
+  actor_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  target_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  target_file_id uuid REFERENCES files(id) ON DELETE SET NULL,
+  target_link_id uuid REFERENCES file_links(id) ON DELETE SET NULL,
+  source_hint text,
+  detail text
+);
+CREATE INDEX security_audit_event_time_idx ON security_audit (event_type, occurred_at DESC);
+CREATE INDEX security_audit_actor_idx ON security_audit (actor_user_id, occurred_at DESC);
+CREATE INDEX security_audit_target_file_idx ON security_audit (target_file_id, occurred_at DESC);
 ```
 
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from

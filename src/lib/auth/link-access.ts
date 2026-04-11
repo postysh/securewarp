@@ -17,15 +17,22 @@ export async function assertLinkCovers(
 }
 
 /**
- * Best-effort anonymous rate-limit key. Uses the Vercel-forwarded IP
- * when present, falls back to the X-Forwarded-For leftmost entry. The
- * key is intentionally coarse — it's defense-in-depth, not a security
- * boundary. UUID link IDs are 122-bit random so enumeration isn't the
- * threat we're protecting against.
+ * Best-effort anonymous rate-limit key. Prefers Cloudflare's
+ * `cf-connecting-ip` header (only set when the request has transited
+ * Cloudflare's proxy — the production setup), then falls back to
+ * Vercel's forwarded IP, then to the leftmost `x-forwarded-for` entry.
+ * Last resort is a string constant so different anon requests still
+ * collide into a single bucket rather than going entirely unlimited.
+ *
+ * The key is intentionally coarse — it's defense-in-depth, not a
+ * security boundary. UUID link IDs are 122-bit random so enumeration
+ * isn't the threat we're protecting against.
  */
 export function anonymousRateLimitKey(request: Request, suffix: string): string {
+  const cfIp = request.headers.get("cf-connecting-ip");
   const vercelIp = request.headers.get("x-vercel-forwarded-for");
   const forwarded = request.headers.get("x-forwarded-for");
-  const ip = (vercelIp ?? forwarded ?? "").split(",")[0].trim() || "anon";
+  const ip =
+    cfIp ?? vercelIp ?? (forwarded?.split(",")[0]?.trim() || "anon");
   return `${suffix}:${ip}`;
 }

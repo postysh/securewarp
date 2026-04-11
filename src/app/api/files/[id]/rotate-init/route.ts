@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getOwnedFile } from "@/lib/db/files";
 import { getUploadUrl } from "@/lib/db/r2";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
 const ParamSchema = z.object({ id: z.string().uuid() });
@@ -25,6 +26,16 @@ export async function POST(
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Rotation is expensive (re-encrypts every chunk). Even a
+    // legitimate user revoking a handful of collaborators should
+    // never hit this limit, but it caps pathological loops.
+    if (!(await checkRateLimit(`rotate:${session.userId}`, 20))) {
+      return NextResponse.json(
+        { error: "Too many rotation requests. Try again later." },
+        { status: 429 }
+      );
     }
 
     const { id } = await params;

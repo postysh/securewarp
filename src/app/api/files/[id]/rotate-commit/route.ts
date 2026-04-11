@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth/session";
 import { getOwnedFile } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { deleteBlob } from "@/lib/db/r2";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const ParamSchema = z.object({ id: z.string().uuid() });
@@ -208,6 +209,14 @@ export async function POST(
         }
       }
     );
+
+    auditEvent({
+      event: "files.rotate",
+      actorUserId: session.userId,
+      targetFileId: file.id,
+      targetUserId: data.revokedUserId,
+      detail: `remaining=${data.remainingCollaborators.length}`,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {
