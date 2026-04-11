@@ -6,6 +6,7 @@ import { getUserByEmail, updateUserAuth } from "@/lib/db/users";
 import { createSession } from "@/lib/auth/session";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { consumeRecoveryToken } from "@/lib/auth/used-tokens";
+import { normalizeEmail } from "@/lib/auth/email";
 import { logError } from "@/lib/log";
 
 const RECOVERY_TOKEN_EXPIRY = "5m";
@@ -46,9 +47,11 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Invalid data" }, { status: 400 });
       }
 
-      const { email, recoveryKeyHash } = parsed.data;
+      const { recoveryKeyHash } = parsed.data;
+      // Normalize so rate-limit keys + user lookups never vary by case.
+      const email = normalizeEmail(parsed.data.email);
 
-      // Rate limit — 5 attempts per hour per email
+      // Rate limit — 5 attempts per hour per normalized email
       if (!(await checkRateLimit(`recover:${email}`, 5))) {
         return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
       }

@@ -4,6 +4,7 @@ import { getUserByEmail } from "@/lib/db/users";
 import { generateServerEphemeral } from "@/lib/srp/server";
 import { createSrpSession } from "@/lib/db/srp-sessions";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { normalizeEmail } from "@/lib/auth/email";
 import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
@@ -18,9 +19,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const { email, clientPublicEphemeral } = parsed.data;
+    const { clientPublicEphemeral } = parsed.data;
+    // Normalize so rate-limit keys and user lookups never vary by case.
+    const email = normalizeEmail(parsed.data.email);
 
-    // Rate limit by email
+    // Rate limit by normalized email
     if (!(await checkRateLimit(`login:${email}`, 10))) {
       return NextResponse.json({ error: "Too many login attempts. Try again later." }, { status: 429 });
     }

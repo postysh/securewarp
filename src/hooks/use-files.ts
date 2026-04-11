@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
 import {
   generateSessionKey,
   encryptMetadata,
@@ -129,11 +129,24 @@ export function useFiles(keys: {
   //   - `publicHierarchicalKey` is needed when uploading a new child into
   //     the folder (wrapParentKeysClaim needs the parent's pub hier key).
   // Ref (not state) so it survives re-renders and doesn't retrigger
-  // fetchFiles. Scoped to the hook instance — cleared when the provider
-  // unmounts on logout.
+  // fetchFiles. Security lifecycle rules:
+  //   - Cleared whenever `keys` identity changes — a new user logging in
+  //     must never inherit cached material from a prior session.
+  //   - Cleared on unmount (logout triggers the provider unmount).
+  //   - Not persisted anywhere — memory-only, tab-scoped.
   const folderPrivHierCache = useRef<
     Map<string, { publicHierarchicalKey: string; privateHierarchicalKey: string }>
   >(new Map());
+
+  useEffect(() => {
+    // Wipe on key change (which covers logout → login swap) and on
+    // unmount. Plaintext private hierarchical keys live here and must
+    // not outlive the session they were decrypted in.
+    folderPrivHierCache.current = new Map();
+    return () => {
+      folderPrivHierCache.current = new Map();
+    };
+  }, [keys]);
 
   const fetchFiles = useCallback(
     async (parentId: string | null = null, mode: ViewMode = "own") => {
@@ -327,11 +340,16 @@ export function useFiles(keys: {
       }));
     };
 
+    // Hoist the session key so a `finally` can zero it on every exit
+    // path — thrown error, early return, or successful finalize. The
+    // session key is the symmetric secret that encrypts the file body
+    // and metadata; it must never outlive the upload flow in memory.
+    let sessionKey: Uint8Array | null = null;
     try {
       // 1. Generate the symmetric session key + the file's hierarchical
       //    keypair, then encrypt metadata with the session key.
       updateProgress(8, "Generating encryption keys...");
-      const sessionKey = generateSessionKey();
+      sessionKey = generateSessionKey();
       const hier = generateHierarchicalKeypair();
 
       const encryptedMetadata = encryptMetadata(
@@ -476,9 +494,6 @@ export function useFiles(keys: {
         body: JSON.stringify({ action: "finalize", fileId }),
       });
 
-      // 5. Clean up
-      sessionKey.fill(0);
-
       updateProgress(100, "Done");
       await new Promise((r) => setTimeout(r, 400));
       setState((s) => ({
@@ -492,12 +507,19 @@ export function useFiles(keys: {
     } catch (err) {
       console.error("Upload error:", err);
       setState((s) => ({ ...s, uploading: false, error: "Upload failed", files: s.files.filter((f) => f.id !== tempId) }));
+    } finally {
+      // Zero the session key on every exit path — success, error, or
+      // early return. Strings (hier keys, wrappedBy) are GC'd by the
+      // runtime; typed-array secrets must be cleared explicitly.
+      if (sessionKey) sessionKey.fill(0);
     }
   }, [keys, fetchFiles]);
 
   const downloadFile = useCallback(async (fileId: string) => {
     if (!keys) return;
 
+    // Hoisted so the finally block can zero the key on any exit path.
+    let sessionKey: Uint8Array | null = null;
     try {
       // 1. Get download info
       const res = await fetch(`/api/files/chunk-download?fileId=${fileId}`);
@@ -515,7 +537,7 @@ export function useFiles(keys: {
         data.wrappedByPublicKey,
         keys.encryptionPrivateKey
       );
-      const sessionKey = unwrapSessionKeyFromFile(
+      sessionKey = unwrapSessionKeyFromFile(
         data.encryptedSessionKeyByFile,
         data.sessionKeyNonce,
         data.ownerPublicKey,
@@ -554,7 +576,6 @@ export function useFiles(keys: {
         // 4b. Legacy single-blob download
         const r2Res = await fetch(data.downloadUrl);
         const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-        const { decryptFileContent } = await import("@/lib/crypto/file-crypto");
         decryptedContent = decryptFileContent(encrypted, data.encryptionNonce, sessionKey);
       }
 
@@ -568,12 +589,11 @@ export function useFiles(keys: {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-
-      // 6. Zero out
-      sessionKey.fill(0);
     } catch (err) {
       console.error("Download error:", err);
       setState((s) => ({ ...s, error: "Download failed" }));
+    } finally {
+      if (sessionKey) sessionKey.fill(0);
     }
   }, [keys]);
 
@@ -878,27 +898,30 @@ export function useFiles(keys: {
 
         // 4. Build remaining-collaborator wraps (owner re-wraps to
         //    themselves, everyone else gets a new per-user wrap).
-        const currentCollabs = await fetch(
-          `/api/files/collaborators?fileId=${file.id}`
-        ).then((r) => r.json());
         type RawCollab = {
           userId: string;
           publicEncryptionKey: string;
           permissionLevel: "owner" | "editor" | "viewer";
           isOwner: boolean;
         };
-        const remainingCollaborators = (currentCollabs.collaborators as RawCollab[])
-          .filter((c) => c.userId !== revokedUserId)
-          .map((c) => ({
-            userId: c.userId,
-            encryptedPrivateHierarchicalKey: wrapPrivateHierarchicalKeyForUser(
-              newHier.privateKey,
-              c.publicEncryptionKey,
-              keys.encryptionPrivateKey
-            ),
-            wrappedByPublicKey: keys.encryptionPublicKey,
-            permissionLevel: c.permissionLevel,
-          }));
+        const buildRemainingWraps = async () => {
+          const currentCollabs = await fetch(
+            `/api/files/collaborators?fileId=${file.id}`
+          ).then((r) => r.json());
+          return (currentCollabs.collaborators as RawCollab[])
+            .filter((c) => c.userId !== revokedUserId)
+            .map((c) => ({
+              userId: c.userId,
+              encryptedPrivateHierarchicalKey: wrapPrivateHierarchicalKeyForUser(
+                newHier.privateKey,
+                c.publicEncryptionKey,
+                keys.encryptionPrivateKey
+              ),
+              wrappedByPublicKey: keys.encryptionPublicKey,
+              permissionLevel: c.permissionLevel,
+            }));
+        };
+        let remainingCollaborators = await buildRemainingWraps();
 
         // 5. Chunk, encrypt, upload. Chunk boundaries are re-derived
         //    from the newly plaintext bytes — the old chunk count and
@@ -946,27 +969,47 @@ export function useFiles(keys: {
           });
         }
 
-        // 6. Commit the swap.
-        const commitRes = await fetch(`/api/files/${file.id}/rotate-commit`, {
+        // 6. Commit the swap. Retry once on 409 — a concurrent share
+        //    may have added a new collaborator between buildRemainingWraps
+        //    and commit, and the server enforces exact set-equality to
+        //    prevent stale rotations from sneaking grants in. Without
+        //    the retry the revocation silently fails; with it, we
+        //    transparently pick up the new member and re-commit.
+        const commitPayload = () => ({
+          encryptedMetadata: JSON.stringify(encryptedMetadata),
+          publicHierarchicalKey: newHier.publicKey,
+          encryptedSessionKeyByFile,
+          sessionKeyNonce,
+          parentKeysClaim,
+          parentKeysClaimWrappedBy,
+          newChunks,
+          remainingCollaborators,
+          revokedUserId,
+        });
+        let commitRes = await fetch(`/api/files/${file.id}/rotate-commit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            encryptedMetadata: JSON.stringify(encryptedMetadata),
-            publicHierarchicalKey: newHier.publicKey,
-            encryptedSessionKeyByFile,
-            sessionKeyNonce,
-            parentKeysClaim,
-            parentKeysClaimWrappedBy,
-            newChunks,
-            remainingCollaborators,
-            revokedUserId,
-          }),
+          body: JSON.stringify(commitPayload()),
         });
+        if (commitRes.status === 409) {
+          remainingCollaborators = await buildRemainingWraps();
+          commitRes = await fetch(`/api/files/${file.id}/rotate-commit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(commitPayload()),
+          });
+        }
         const commitData = await commitRes.json();
         if (!commitRes.ok) {
           plaintext.fill(0);
           newSessionKey.fill(0);
-          return { ok: false, error: commitData.error || "Rotate commit failed" };
+          return {
+            ok: false,
+            error:
+              commitRes.status === 409
+                ? "Collaborators keep changing — please try again in a moment"
+                : commitData.error || "Rotate commit failed",
+          };
         }
 
         plaintext.fill(0);

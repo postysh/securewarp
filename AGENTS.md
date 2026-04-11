@@ -217,6 +217,42 @@ or `src/hooks/use-files.ts`:
 - The server must **never** learn the private hierarchical key or the
   plaintext session key. If a code path would need it, redesign.
 
+## Security hardening rules
+
+- **Email canonicalization.** Every auth boundary (register, login,
+  recover) MUST pass the request email through
+  `normalizeEmail` from `@/lib/auth/email` before using it for a
+  database lookup, a rate-limit key, or an SRP session row. The DB
+  `users.email` unique constraint is case-sensitive; without
+  normalization two users could register as `a@x.com` and `A@x.com`,
+  and an attacker could cycle rate-limit buckets by case.
+
+- **Rate limiter fails closed.** `checkRateLimit` returns `false` on
+  RPC failure. Don't flip this. SRP-6a bounds online guessing but the
+  limiter is still the primary defence against password spraying and
+  recovery-token enumeration; fail-open during an outage is worse than
+  a temporary login outage that forces the operator to look.
+
+- **`folderPrivHierCache` lifecycle** (`src/hooks/use-files.ts`). The
+  cache holds plaintext private hierarchical keys. It MUST be wiped on
+  `keys` identity change and on hook unmount. Never persist it, never
+  serialise it, never expose it on `window`. If you add a new caller
+  for the hook that survives across user sessions, you MUST manually
+  clear the cache when the active user changes.
+
+- **Typed-array secrets are zeroed in `finally` blocks.** Session keys
+  are `Uint8Array` and must be `.fill(0)`'d on every exit path in the
+  upload/download/rotate flows. Strings (base64 priv hier keys) can't
+  be zeroed — that's a tradeoff; don't extend the string-secret
+  surface area. Hoist the typed array outside the `try` block so a
+  single `finally` covers both success and error paths.
+
+- **`isDescendantOf` throws on depth overflow** rather than returning
+  false. Silent false-returns hide data-corruption bugs that would
+  otherwise surface to operators. The cycle case shouldn't be
+  reachable today (the create flow can't introduce one), but the
+  throw gives us a loud alarm if it ever does.
+
 ## Don't
 
 - Don't add telemetry, analytics, or logging that includes request bodies,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { RegisterSchema } from "@/lib/validators/auth";
 import { createUser, getUserByEmail } from "@/lib/db/users";
 import { createSession } from "@/lib/auth/session";
+import { normalizeEmail } from "@/lib/auth/email";
 import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
@@ -17,9 +18,13 @@ export async function POST(request: Request) {
     }
 
     const data = parsed.data;
+    // Canonicalise so `a@x.com` and `A@x.com` cannot register as two
+    // distinct accounts. The DB `users.email` unique constraint is
+    // case-sensitive so the only defence lives at this boundary.
+    const email = normalizeEmail(data.email);
 
     // Check if user already exists — don't reveal email existence
-    const existing = await getUserByEmail(data.email);
+    const existing = await getUserByEmail(email);
     if (existing) {
       return NextResponse.json(
         { error: "Unable to create account. Please try a different email or sign in." },
@@ -29,7 +34,7 @@ export async function POST(request: Request) {
 
     // Create user
     const user = await createUser({
-      email: data.email,
+      email,
       srpSalt: data.srpSalt,
       srpVerifier: data.srpVerifier,
       argon2Salt: data.argon2Salt,

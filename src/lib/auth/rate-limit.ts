@@ -18,10 +18,15 @@ export async function checkRateLimit(
   });
 
   if (error) {
-    // Fail open on DB errors so an outage doesn't lock every user out of
-    // login. Rate limiting is defense-in-depth; auth is still gated by SRP.
-    console.error("Rate limit RPC failed:", error.message);
-    return true;
+    // Fail closed. An attacker who can reliably trigger transient DB
+    // errors (network jitter, coordinated load) would otherwise slip
+    // past rate limits entirely. SRP-6a bounds the damage of online
+    // guessing attempts, but rate limiting is still the primary defence
+    // against password spraying and recovery-token enumeration; losing
+    // it wholesale during an outage is worse than a brief login outage
+    // that forces the operator to investigate.
+    console.error("Rate limit RPC failed (failing closed):", error.message);
+    return false;
   }
 
   return data === true;

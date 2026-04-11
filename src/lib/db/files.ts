@@ -730,7 +730,8 @@ export async function isDescendantOf(
 ): Promise<boolean> {
   if (ancestorFileId === candidateId) return true;
   let current: string | null = candidateId;
-  for (let depth = 0; depth < 64 && current; depth++) {
+  const MAX_DEPTH = 64;
+  for (let depth = 0; depth < MAX_DEPTH && current; depth++) {
     const query: { data: unknown; error: unknown } = await supabase
       .from("files")
       .select("parent_id")
@@ -741,5 +742,14 @@ export async function isDescendantOf(
     if (nextParent === ancestorFileId) return true;
     current = nextParent;
   }
-  return false;
+  // Hit the depth cap without resolving the walk. The create flow can't
+  // introduce a cycle (parent_id is set once at creation and the
+  // filesystem is a DAG by construction), but if one ever exists — via
+  // admin intervention or a future bug — silently returning false would
+  // hide a real data-corruption bug while still failing safely (the
+  // caller's ACL check would deny access). Throw instead so operators
+  // see the problem.
+  throw new Error(
+    `isDescendantOf hit depth cap of ${MAX_DEPTH} walking ${candidateId} → ${ancestorFileId}; possible parent_id cycle or pathological nesting`
+  );
 }
