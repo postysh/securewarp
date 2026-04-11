@@ -44,7 +44,7 @@ export function useAuth() {
   const setStep = (step: string) => setState((s) => ({ ...s, step, error: null }));
   const setError = (error: string) => setState((s) => ({ ...s, error, loading: false, step: null }));
 
-  async function signup(email: string, password: string) {
+  async function signup(email: string, password: string, turnstileToken?: string) {
     setState({ loading: true, error: null, step: "Generating encryption keys...", recoveryKey: null, userKeys: null });
 
     try {
@@ -90,6 +90,7 @@ export function useAuth() {
           publicSigningKey: keypairs.signingPublicKey,
           recoveryKeyHash,
           recoveryEncryptedData,
+          turnstileToken,
         }),
       });
 
@@ -114,7 +115,7 @@ export function useAuth() {
     }
   }
 
-  async function login(email: string, password: string) {
+  async function login(email: string, password: string, turnstileToken?: string) {
     setState({ loading: true, error: null, step: "Initializing...", recoveryKey: null, userKeys: null });
 
     try {
@@ -127,7 +128,7 @@ export function useAuth() {
       const initRes = await fetch("/api/auth/login/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, clientPublicEphemeral }),
+        body: JSON.stringify({ email, clientPublicEphemeral, turnstileToken }),
       });
 
       const initData = await initRes.json();
@@ -206,7 +207,7 @@ export function useAuth() {
     }
   }
 
-  async function recover(email: string, recoveryWordsRaw: string, newPassword: string) {
+  async function recover(email: string, recoveryWordsRaw: string, newPassword: string, turnstileToken?: string) {
     setState({ loading: true, error: null, step: "Verifying recovery key...", recoveryKey: null, userKeys: null });
 
     try {
@@ -227,7 +228,7 @@ export function useAuth() {
       const verifyRes = await fetch("/api/auth/recover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "verify", email, recoveryKeyHash }),
+        body: JSON.stringify({ action: "verify", email, recoveryKeyHash, turnstileToken }),
       });
 
       const verifyResult = await verifyRes.json();

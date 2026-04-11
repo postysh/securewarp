@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { TurnstileChallenge, isTurnstileEnabled } from "./turnstile-challenge";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import ViewIcon from "@hugeicons/core-free-icons/ViewIcon";
 import ViewOffIcon from "@hugeicons/core-free-icons/ViewOffIcon";
@@ -43,6 +44,18 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
   const { theme, toggle } = useTheme();
   const auth = useAuth();
 
+  // Turnstile token for the main (login/signup) form. A second slot
+  // exists for the recovery form below so the two widgets don't share
+  // state across tabs.
+  const [primaryTurnstileToken, setPrimaryTurnstileToken] = useState<string | null>(null);
+  const [recoveryTurnstileToken, setRecoveryTurnstileToken] = useState<string | null>(null);
+  const primaryTurnstileResetRef = useRef<(() => void) | null>(null);
+  const recoveryTurnstileResetRef = useRef<(() => void) | null>(null);
+
+  const turnstileRequired = isTurnstileEnabled();
+  const primaryReady = !turnstileRequired || primaryTurnstileToken !== null;
+  const recoveryReady = !turnstileRequired || recoveryTurnstileToken !== null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -53,10 +66,14 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
       if (password.length < 8) {
         return;
       }
-      await auth.signup(email, password);
+      await auth.signup(email, password, primaryTurnstileToken ?? undefined);
     } else {
-      await auth.login(email, password);
+      await auth.login(email, password, primaryTurnstileToken ?? undefined);
     }
+    // Turnstile tokens are single-use. Reset on submit so the user
+    // can retry after an error without page refresh.
+    setPrimaryTurnstileToken(null);
+    primaryTurnstileResetRef.current?.();
   };
 
   return (
@@ -210,13 +227,21 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                 </div>
               )}
 
+              <TurnstileChallenge
+                onToken={(t) => setPrimaryTurnstileToken(t)}
+                onExpire={() => setPrimaryTurnstileToken(null)}
+                resetRef={primaryTurnstileResetRef}
+              />
+
               <button
                 type="submit"
-                disabled={auth.loading || (mode === "signup" && password !== confirmPassword)}
+                disabled={auth.loading || !primaryReady || (mode === "signup" && password !== confirmPassword)}
                 className="w-full flex items-center justify-center gap-2 h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {auth.loading ? (
                   <span className="text-[12px]">{auth.step || "Processing..."}</span>
+                ) : !primaryReady ? (
+                  <span className="text-[12px]">Verifying human…</span>
                 ) : (
                   <>
                     {mode === "login" ? "Sign in" : "Create account"}
@@ -272,7 +297,14 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                 e.preventDefault();
                 if (newPassword !== confirmNewPassword) return;
                 if (newPassword.length < 8) return;
-                await auth.recover(recoveryEmail, recoveryWords, newPassword);
+                await auth.recover(
+                  recoveryEmail,
+                  recoveryWords,
+                  newPassword,
+                  recoveryTurnstileToken ?? undefined
+                );
+                setRecoveryTurnstileToken(null);
+                recoveryTurnstileResetRef.current?.();
               }}
               className="px-5 py-5 space-y-4"
             >
@@ -339,6 +371,12 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                 )}
               </div>
 
+              <TurnstileChallenge
+                onToken={(t) => setRecoveryTurnstileToken(t)}
+                onExpire={() => setRecoveryTurnstileToken(null)}
+                resetRef={recoveryTurnstileResetRef}
+              />
+
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -350,10 +388,19 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                 </button>
                 <button
                   type="submit"
-                  disabled={auth.loading || (newPassword !== confirmNewPassword) || !recoveryWords.trim()}
+                  disabled={
+                    auth.loading ||
+                    !recoveryReady ||
+                    (newPassword !== confirmNewPassword) ||
+                    !recoveryWords.trim()
+                  }
                   className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {auth.loading ? (auth.step || "Processing...") : "Recover account"}
+                  {auth.loading
+                    ? (auth.step || "Processing...")
+                    : !recoveryReady
+                      ? "Verifying human…"
+                      : "Recover account"}
                 </button>
               </div>
             </form>
