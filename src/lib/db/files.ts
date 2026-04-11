@@ -527,3 +527,208 @@ export async function createFolder(data: {
     parentKeysClaimWrappedBy: data.parentKeysClaimWrappedBy ?? null,
   });
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 4 — file_links
+// ──────────────────────────────────────────────────────────────────────
+
+export interface FileLinkRow {
+  id: string;
+  file_id: string;
+  created_by: string;
+  encrypted_private_hierarchical_key: string;
+  link_key_nonce: string;
+  permission_level: "viewer";
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+/**
+ * Shape returned by `getLinkById` for the anonymous /api/files/link/[id]
+ * route. Embeds only the file fields the visitor needs to perform the
+ * two-step client-side unwrap; no file_keys rows are included because
+ * the visitor uses the link's own secretbox wrap instead.
+ */
+export interface AnonymousLinkPayload {
+  link: FileLinkRow;
+  file: {
+    id: string;
+    owner_id: string;
+    parent_id: string | null;
+    encrypted_metadata: string;
+    is_folder: boolean;
+    size_bytes: number;
+    storage_key: string | null;
+    encryption_nonce: string | null;
+    chunk_count: number;
+    public_hierarchical_key: string;
+    encrypted_session_key_by_file: string;
+    session_key_nonce: string;
+    owner_public_key: string;
+  };
+}
+
+export async function createLink(data: {
+  fileId: string;
+  createdBy: string;
+  encryptedPrivateHierarchicalKey: string;
+  linkKeyNonce: string;
+  expiresAt?: string | null;
+}): Promise<{ id: string }> {
+  const { data: row, error } = await supabase
+    .from("file_links")
+    .insert({
+      file_id: data.fileId,
+      created_by: data.createdBy,
+      encrypted_private_hierarchical_key: data.encryptedPrivateHierarchicalKey,
+      link_key_nonce: data.linkKeyNonce,
+      expires_at: data.expiresAt ?? null,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(`Failed to create link: ${error.message}`);
+  return { id: (row as { id: string }).id };
+}
+
+/**
+ * Anonymous-safe link lookup. Returns null for "not found OR revoked OR
+ * expired" so every failure collapses to a single 404 — no distinguishing
+ * between "never existed" and "revoked" from outside.
+ */
+export async function getLinkById(linkId: string): Promise<AnonymousLinkPayload | null> {
+  const { data, error } = await supabase
+    .from("file_links")
+    .select("*")
+    .eq("id", linkId)
+    .is("revoked_at", null)
+    .single();
+  if (error && error.code !== "PGRST116") {
+    throw new Error(`Failed to fetch link: ${error.message}`);
+  }
+  if (!data) return null;
+  const link = data as FileLinkRow;
+  if (link.expires_at && new Date(link.expires_at).getTime() <= Date.now()) return null;
+
+  const { data: file, error: fileErr } = await supabase
+    .from("files")
+    .select(
+      "id, owner_id, parent_id, encrypted_metadata, is_folder, size_bytes, storage_key, encryption_nonce, chunk_count, public_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, owner:users!files_owner_id_fkey(public_encryption_key)"
+    )
+    .eq("id", link.file_id)
+    .eq("upload_complete", true)
+    .single();
+  if (fileErr || !file) return null;
+
+  const fileRow = file as unknown as {
+    id: string;
+    owner_id: string;
+    parent_id: string | null;
+    encrypted_metadata: string;
+    is_folder: boolean;
+    size_bytes: number;
+    storage_key: string | null;
+    encryption_nonce: string | null;
+    chunk_count: number;
+    public_hierarchical_key: string;
+    encrypted_session_key_by_file: string;
+    session_key_nonce: string;
+    owner: { public_encryption_key: string } | null;
+  };
+
+  return {
+    link,
+    file: {
+      id: fileRow.id,
+      owner_id: fileRow.owner_id,
+      parent_id: fileRow.parent_id,
+      encrypted_metadata: fileRow.encrypted_metadata,
+      is_folder: fileRow.is_folder,
+      size_bytes: fileRow.size_bytes,
+      storage_key: fileRow.storage_key,
+      encryption_nonce: fileRow.encryption_nonce,
+      chunk_count: fileRow.chunk_count,
+      public_hierarchical_key: fileRow.public_hierarchical_key,
+      encrypted_session_key_by_file: fileRow.encrypted_session_key_by_file,
+      session_key_nonce: fileRow.session_key_nonce,
+      owner_public_key: fileRow.owner?.public_encryption_key ?? "",
+    },
+  };
+}
+
+/**
+ * Active (non-revoked, non-expired) links for a file. Caller must verify
+ * access to the file upstream — this helper performs no ACL check.
+ */
+export async function getLinksForFile(fileId: string): Promise<FileLinkRow[]> {
+  const { data, error } = await supabase
+    .from("file_links")
+    .select("*")
+    .eq("file_id", fileId)
+    .is("revoked_at", null)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(`Failed to list links: ${error.message}`);
+  const now = Date.now();
+  return ((data as FileLinkRow[]) ?? []).filter(
+    (r) => !r.expires_at || new Date(r.expires_at).getTime() > now
+  );
+}
+
+/**
+ * Revoke a link. Allowed by either the link creator or the current file
+ * owner. Returns true on successful revoke, false if the caller isn't
+ * authorised or the link doesn't exist.
+ */
+export async function revokeLink(linkId: string, actingUserId: string): Promise<boolean> {
+  const { data: link, error } = await supabase
+    .from("file_links")
+    .select("file_id, created_by, revoked_at")
+    .eq("id", linkId)
+    .single();
+  if (error || !link) return false;
+  const linkRow = link as { file_id: string; created_by: string; revoked_at: string | null };
+  if (linkRow.revoked_at) return true; // already revoked is idempotent
+
+  let authorised = linkRow.created_by === actingUserId;
+  if (!authorised) {
+    const { data: file } = await supabase
+      .from("files")
+      .select("owner_id")
+      .eq("id", linkRow.file_id)
+      .single();
+    authorised = (file as { owner_id: string } | null)?.owner_id === actingUserId;
+  }
+  if (!authorised) return false;
+
+  const { error: updateErr } = await supabase
+    .from("file_links")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("id", linkId);
+  if (updateErr) throw new Error(`Failed to revoke link: ${updateErr.message}`);
+  return true;
+}
+
+/**
+ * Walks upward from `candidateId` through `parent_id` links and returns
+ * true if `ancestorFileId` appears in the chain (or equals the candidate).
+ * Bounded to 64 levels as defence-in-depth against pathological cycles.
+ */
+export async function isDescendantOf(
+  ancestorFileId: string,
+  candidateId: string
+): Promise<boolean> {
+  if (ancestorFileId === candidateId) return true;
+  let current: string | null = candidateId;
+  for (let depth = 0; depth < 64 && current; depth++) {
+    const query: { data: unknown; error: unknown } = await supabase
+      .from("files")
+      .select("parent_id")
+      .eq("id", current)
+      .single();
+    if (query.error || !query.data) return false;
+    const nextParent = (query.data as { parent_id: string | null }).parent_id;
+    if (nextParent === ancestorFileId) return true;
+    current = nextParent;
+  }
+  return false;
+}

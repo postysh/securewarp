@@ -6,6 +6,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
+import Link04Icon from "@hugeicons/core-free-icons/Link04Icon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
 import { useFilesContext, type DecryptedFile, type Collaborator, type PermissionLevel } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { RoleDropdown } from "./role-dropdown";
@@ -21,6 +23,14 @@ interface ShareModalProps {
   onClose: () => void;
 }
 
+interface LinkSummary {
+  id: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string | null;
+  permissionLevel: string;
+}
+
 export function ShareModal({ file, onClose }: ShareModalProps) {
   const fileOps = useFilesContext();
   const [inputValue, setInputValue] = useState("");
@@ -29,6 +39,13 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [loadingCollabs, setLoadingCollabs] = useState(false);
+  const [links, setLinks] = useState<LinkSummary[]>([]);
+  const [creatingLink, setCreatingLink] = useState(false);
+  // The freshly created URL is only shown once — after the modal is
+  // closed or another link is created, it disappears forever. Matches the
+  // Skiff UX: links cannot be recovered server-side.
+  const [freshLinkUrl, setFreshLinkUrl] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const open = file !== null;
@@ -38,11 +55,14 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
     setInputValue("");
     setInputError("");
     setInfo("");
+    setFreshLinkUrl(null);
+    setLinkCopied(false);
     setLoadingCollabs(true);
     fileOps
       .loadCollaborators(file.id)
       .then((list) => setCollaborators(list))
       .finally(() => setLoadingCollabs(false));
+    fileOps.listLinks(file.id).then((list) => setLinks(list));
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [open, file, fileOps]);
 
@@ -91,6 +111,51 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
     }
     setCollaborators((prev) => prev.filter((x) => x.userId !== c.userId));
     setInfo(`Removed ${c.email}`);
+  };
+
+  const handleCreateLink = async () => {
+    if (!file || creatingLink) return;
+    setCreatingLink(true);
+    setLinkCopied(false);
+    const result = await fileOps.createLink(file);
+    setCreatingLink(false);
+    if (!result.ok) {
+      setInputError(result.error);
+      return;
+    }
+    setFreshLinkUrl(result.url);
+    // Auto-copy so the user doesn't accidentally close the modal before
+    // grabbing it — the URL is unrecoverable after the modal closes.
+    try {
+      await navigator.clipboard.writeText(result.url);
+      setLinkCopied(true);
+    } catch {
+      // clipboard permission denied — user can copy manually from the
+      // visible box.
+    }
+    fileOps.listLinks(file.id).then((list) => setLinks(list));
+  };
+
+  const handleRevokeLink = async (linkId: string) => {
+    if (!file) return;
+    const result = await fileOps.revokeLink(linkId);
+    if (!result.ok) {
+      setInputError(result.error);
+      return;
+    }
+    setLinks((prev) => prev.filter((l) => l.id !== linkId));
+    setInfo("Link revoked");
+  };
+
+  const copyFresh = async () => {
+    if (!freshLinkUrl) return;
+    try {
+      await navigator.clipboard.writeText(freshLinkUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1500);
+    } catch {
+      // no-op
+    }
   };
 
   const changePermission = async (c: Collaborator, level: PermissionLevel) => {
@@ -208,6 +273,79 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                   )}
                 </div>
               ))
+            )}
+          </div>
+
+          {/* Link access */}
+          <div className="mt-5">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <HugeiconsIcon icon={Link04Icon} size={14} color="var(--icon-tertiary)" />
+                <span className="text-[12px] font-medium text-text-primary">Public link</span>
+              </div>
+              <button
+                onClick={handleCreateLink}
+                disabled={creatingLink}
+                className="text-[11px] text-accent-green hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {creatingLink ? "Creating…" : "Create link"}
+              </button>
+            </div>
+
+            {freshLinkUrl && (
+              <div className="mb-2 p-2.5 rounded-[10px] bg-bg-field border border-border-tertiary">
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={freshLinkUrl}
+                    className="flex-1 bg-transparent text-[11px] text-text-primary font-mono truncate focus:outline-none"
+                  />
+                  <button
+                    onClick={copyFresh}
+                    className="shrink-0 flex items-center gap-1 px-2 h-[24px] rounded-[6px] text-[11px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                  >
+                    <HugeiconsIcon icon={Copy01Icon} size={12} />
+                    {linkCopied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[10px] text-text-disabled">
+                  This URL cannot be retrieved later. Copy it now or create a new link.
+                </p>
+              </div>
+            )}
+
+            {links.length > 0 && (
+              <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
+                {links.map((l) => (
+                  <div
+                    key={l.id}
+                    className="flex items-center gap-2 px-3 py-2 border-b border-border-tertiary last:border-b-0"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] text-text-primary font-mono truncate">
+                        /share/{l.id.slice(0, 8)}…
+                      </div>
+                      <div className="text-[10px] text-text-disabled">
+                        {l.expiresAt
+                          ? `Expires ${new Date(l.expiresAt).toLocaleDateString()}`
+                          : "No expiration"}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRevokeLink(l.id)}
+                      className="text-[11px] text-accent-red hover:bg-bg-cell-hover rounded-[6px] px-2 h-[24px] transition-colors cursor-pointer"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {links.length === 0 && !freshLinkUrl && (
+              <p className="text-[11px] text-text-disabled">
+                No active public links. Create one to share with anyone, no account needed.
+              </p>
             )}
           </div>
 

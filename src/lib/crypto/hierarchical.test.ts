@@ -9,6 +9,11 @@ import {
   unwrapPrivateHierarchicalKey,
   wrapParentKeysClaim,
   unwrapParentKeysClaim,
+  generateLinkKey,
+  wrapPrivateHierarchicalKeyForLink,
+  unwrapPrivateHierarchicalKeyFromLink,
+  encodeLinkKeyForFragment,
+  decodeLinkKeyFromFragment,
   encryptMetadata,
   decryptMetadata,
 } from "./file-crypto";
@@ -446,5 +451,122 @@ describe("Phase 3 parent_keys_claim (folder inheritance)", () => {
     expect(() =>
       unwrapParentKeysClaim(claim, imposter.publicKey, fHier.privateKey)
     ).toThrow(/Box decryption failed/);
+  });
+});
+
+describe("Phase 4 link sharing (symmetric linkKey)", () => {
+  it("wrap/unwrap roundtrips a private hierarchical key through a link key", () => {
+    const hier = generateHierarchicalKeypair();
+    const linkKey = generateLinkKey();
+
+    const { encryptedPrivateHierarchicalKey, linkKeyNonce } =
+      wrapPrivateHierarchicalKeyForLink(hier.privateKey, linkKey);
+    const recovered = unwrapPrivateHierarchicalKeyFromLink(
+      encryptedPrivateHierarchicalKey,
+      linkKeyNonce,
+      linkKey
+    );
+    expect(recovered).toBe(hier.privateKey);
+  });
+
+  it("rejects unwrap with the wrong link key", () => {
+    const hier = generateHierarchicalKeypair();
+    const linkKey = generateLinkKey();
+    const wrongLinkKey = generateLinkKey();
+
+    const { encryptedPrivateHierarchicalKey, linkKeyNonce } =
+      wrapPrivateHierarchicalKeyForLink(hier.privateKey, linkKey);
+
+    expect(() =>
+      unwrapPrivateHierarchicalKeyFromLink(
+        encryptedPrivateHierarchicalKey,
+        linkKeyNonce,
+        wrongLinkKey
+      )
+    ).toThrow(/Link unwrap failed/);
+  });
+
+  it("URL-safe fragment encode/decode roundtrips bytes", () => {
+    // Exercise several random keys so we hit both with- and without-
+    // padding branches.
+    for (let i = 0; i < 20; i++) {
+      const linkKey = generateLinkKey();
+      const fragment = encodeLinkKeyForFragment(linkKey);
+      expect(fragment).not.toContain("+");
+      expect(fragment).not.toContain("/");
+      expect(fragment).not.toContain("=");
+      const decoded = decodeLinkKeyFromFragment(fragment);
+      expect(toBase64(decoded)).toBe(toBase64(linkKey));
+    }
+  });
+
+  it("end-to-end: owner creates a link, anonymous visitor decrypts", () => {
+    // Simulates the entire /share/[id] flow without any file_keys row
+    // for the visitor. Proves the design does not rely on the visitor
+    // being a registered user.
+    const owner = makeUser();
+    const sessionKey = generateSessionKey();
+    const hier = generateHierarchicalKeypair();
+
+    // Owner-side upload: session key wrapped to file, metadata encrypted.
+    const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(
+      sessionKey,
+      hier.publicKey,
+      owner.privateKey
+    );
+    const encMeta = encryptMetadata(
+      { name: "leaked.txt", type: "text/plain", size: 42 },
+      sessionKey
+    );
+
+    // Owner creates a link: generate linkKey, wrap priv hier under it.
+    const linkKey = generateLinkKey();
+    const { encryptedPrivateHierarchicalKey, linkKeyNonce } =
+      wrapPrivateHierarchicalKeyForLink(hier.privateKey, linkKey);
+    const fragment = encodeLinkKeyForFragment(linkKey);
+
+    // Anonymous visitor opens the URL. They have: `fragment`, the
+    // server payload (encryptedPrivateHierarchicalKey + linkKeyNonce),
+    // and the file's public ciphertexts (encryptedSessionKeyByFile,
+    // sessionKeyNonce, owner.publicKey). Zero account material.
+    const recoveredLinkKey = decodeLinkKeyFromFragment(fragment);
+    const recoveredPrivHier = unwrapPrivateHierarchicalKeyFromLink(
+      encryptedPrivateHierarchicalKey,
+      linkKeyNonce,
+      recoveredLinkKey
+    );
+    const recoveredSessionKey = unwrapSessionKeyFromFile(
+      encryptedSessionKeyByFile,
+      sessionKeyNonce,
+      owner.publicKey,
+      recoveredPrivHier
+    );
+    const meta = decryptMetadata(encMeta, recoveredSessionKey);
+
+    expect(toBase64(recoveredSessionKey)).toBe(toBase64(sessionKey));
+    expect(meta.name).toBe("leaked.txt");
+    expect(meta.size).toBe(42);
+  });
+
+  it("revoking (simulating link deletion) has no effect on already-copied URLs cryptographically", () => {
+    // Phase 4 revocation is ACL-only: the server refuses to serve the
+    // payload after revoke, but the crypto primitives themselves are
+    // unchanged. A visitor who already fetched + cached the ciphertexts
+    // before revocation could still decrypt. This test documents that
+    // invariant so future contributors don't accidentally assume
+    // crypto-level revocation without also implementing key rotation.
+    const hier = generateHierarchicalKeypair();
+    const linkKey = generateLinkKey();
+    const { encryptedPrivateHierarchicalKey, linkKeyNonce } =
+      wrapPrivateHierarchicalKeyForLink(hier.privateKey, linkKey);
+
+    // "Revoke" on the server is simulated as: the visitor can't fetch
+    // the row anymore. But if they already have the ciphertext cached:
+    const recovered = unwrapPrivateHierarchicalKeyFromLink(
+      encryptedPrivateHierarchicalKey,
+      linkKeyNonce,
+      linkKey
+    );
+    expect(recovered).toBe(hier.privateKey);
   });
 });

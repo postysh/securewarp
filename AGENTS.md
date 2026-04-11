@@ -140,6 +140,45 @@ collaborators. Each collaborator's `file_keys` row holds the file's
      have *only* the parent row, losing it also loses every inherited
      descendant automatically — nothing else to do.
 
+## Phase 4 invariants — public link sharing
+
+Links live in their own `file_links` table, **not** in `file_keys`. The
+wrap is symmetric (`nacl.secretbox`), not asymmetric (`nacl.box`). The
+`linkKey` is a fresh 32-byte random blob generated in the browser,
+shipped to the visitor via the URL fragment, and never touches the
+server.
+
+8. **`/share/[id]/page.tsx` must stay `"use client"`** and must never
+   call `getSession()`, `cookies()`, or any other authenticated helper.
+   The whole point of the page is that an anonymous visitor can render
+   it. If you add SSR logic here, you break the invariant that a link's
+   viewer is not a registered user.
+
+9. **`linkKey` never leaves the browser.** It lives only in
+   `window.location.hash`. Do not log it, do not persist it, do not send
+   it in any request body or query string. The `createLink` hook returns
+   it exactly once at creation time; after that the only copy is in the
+   URL the user copied. Matches Skiff's "links cannot be retrieved"
+   design — don't add a "get my existing link" endpoint.
+
+10. **Every anonymous link route must call `assertLinkCovers(link,
+    targetFileId)`** before returning any file data. A link to folder A
+    must not grant access to sibling folder B, even at the same DB
+    access level. The helper walks up from the target through
+    `parent_id` to find the link's file — centralized in
+    `src/lib/auth/link-access.ts`.
+
+11. **File links vs. file_keys.** Don't add `file_links` joins to
+    `LIST_SELECT` or any path that serves registered users. `file_keys`
+    is per-user asymmetric grants; `file_links` is per-link symmetric
+    wraps — different tables, different wrap semantics, different
+    lifetimes.
+
+12. **Revocation is not forward-secret.** Setting `revoked_at` stops
+    new fetches but doesn't invalidate cached ciphertexts held by a
+    recipient who already visited the link. Phase 5 will rotate the
+    linkKey + re-wrap content on revoke.
+
 ## Touching the sharing surface — checklist
 
 Before changing any of `src/lib/crypto/file-crypto.ts`,

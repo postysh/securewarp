@@ -199,6 +199,24 @@ CREATE TABLE file_keys (
   PRIMARY KEY (file_id, user_id)
 );
 
+-- Phase 4: public link sharing
+CREATE TABLE file_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_id uuid NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  created_by uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- secretbox(file.private_hierarchical_key, link_key_nonce, linkKey)
+  encrypted_private_hierarchical_key text NOT NULL,
+  link_key_nonce text NOT NULL,
+  permission_level text NOT NULL DEFAULT 'viewer'
+    CHECK (permission_level IN ('viewer')),
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX file_links_file_id_active_idx
+  ON file_links (file_id) WHERE revoked_at IS NULL;
+CREATE INDEX file_links_created_by_idx ON file_links (created_by);
+
 -- File chunks for large files
 CREATE TABLE file_chunks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -371,7 +389,77 @@ descendant. The machinery:
   child that gained visibility via a parent share will show only its
   owner in the stack. Effective ACL (direct ∪ ancestors) is a UI
   follow-up.
-- **No link sharing** — Phase 4.
+- **Link sharing shipped in Phase 4** — see below.
+
+### Public link sharing (Phase 4)
+
+Any collaborator on a file or folder can generate a public link. The link
+works for anyone with the URL — no SecureWarp account required — and
+remains end-to-end encrypted: the server never sees a key capable of
+decrypting the file.
+
+**How it works**:
+
+1. The client generates a fresh 32-byte symmetric `linkKey` via
+   `nacl.randomBytes`.
+2. It unwraps the file's private hierarchical key from its own
+   `file_keys` row (the same key it uses for direct access), then wraps
+   it under `linkKey` with `nacl.secretbox`. The resulting
+   `encrypted_private_hierarchical_key` + `link_key_nonce` is the only
+   ciphertext the server persists in `file_links`.
+3. The URL is built client-side: `${origin}/share/${linkId}#${linkKey}`.
+   `linkKey` lives in the URL fragment, which browsers never send to
+   servers in HTTP requests.
+4. An anonymous visitor opens the link. The `/share/[id]` page reads the
+   fragment, fetches the link row from `/api/files/link/[id]`, uses
+   `linkKey` to unwrap the private hierarchical key, then uses that to
+   unwrap the session key wrapped to the file's public hier key by the
+   owner (same two-step flow a registered collaborator uses). Metadata
+   and content decrypt entirely client-side.
+5. For folder links, the visitor walks the `parent_keys_claim` chain on
+   descendants using the folder's private hierarchical key — identical
+   to the Phase 3 inherited-access flow, just with no `file_keys` row
+   on the anonymous side.
+
+**Endpoints**:
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/api/files/link/create` | user | Any collaborator mints a link |
+| `GET`  | `/api/files/link?fileId=` | user | List active links for a file |
+| `POST` | `/api/files/link/[id]/revoke` | user | Creator or file owner revokes |
+| `GET`  | `/api/files/link/[id]` | **anon** | Anonymous metadata + wrapped priv hier |
+| `GET`  | `/api/files/link/[id]/children?parentId=` | **anon** | Folder-link children listing |
+| `GET`  | `/api/files/link/[id]/download?fileId=` | **anon** | Chunk URLs for a file inside the link's scope |
+
+Every anonymous route calls `assertLinkCovers(link, targetFileId)` before
+returning data: a link to folder A cannot be used as a bearer token to
+read a sibling folder B. Descendant verification walks upward from the
+target through `parent_id` with a 64-level depth cap.
+
+**What's still deferred to Phase 4.1+**:
+
+- **Password-protected links** via SRP (server stores only salt + verifier,
+  not a password-derivable key). The current link URL is the sole bearer
+  token — anyone with the URL gains access.
+- **Editor-level links.** Phase 4 links are Viewer-only at the ACL level;
+  the CHECK constraint rejects other values. A viewer distinction here
+  is cosmetic until there's a write surface the server can gate on.
+- **Forward-secret revocation.** Revoke is an ACL delete — the server
+  refuses new fetches, but a visitor who already cached the ciphertext
+  before revoke can still decrypt. Same caveat as Phase 1 unshare.
+- **Link retrieval.** The URL is shown exactly once at creation and
+  cannot be recovered server-side. This is intentional: Skiff does the
+  same, and it prevents link leakage via the share modal of a
+  compromised account.
+
+**Anonymous rate limits**: `/api/files/link/[id]`, `/children`, and
+`/download` are all rate-limited per forwarded IP (via
+`x-vercel-forwarded-for` on Vercel, `x-forwarded-for` elsewhere). The
+key format is `link:get:${ip}` / `link:children:${ip}` /
+`link:download:${ip}`. On shared-IP networks the limit is lax (300/hr)
+to avoid cross-user interference; the 128-bit random link IDs make
+enumeration infeasible regardless.
 
 ### Testing
 

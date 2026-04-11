@@ -260,6 +260,71 @@ export function unwrapPrivateHierarchicalKey(
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Link sharing — Phase 4
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Fresh symmetric key for a public link. Lives only in the URL fragment
+ * on the client; the server only ever sees the wrapped ciphertext.
+ */
+export function generateLinkKey(): Uint8Array {
+  return randomBytes(nacl.secretbox.keyLength);
+}
+
+/**
+ * Wrap a file's private hierarchical key under a link's symmetric key.
+ * Uses `nacl.secretbox` so no sender public key is involved — anyone
+ * who holds `linkKey` can unwrap. `linkKey` lives only in the URL fragment
+ * and is never transmitted to the server.
+ */
+export function wrapPrivateHierarchicalKeyForLink(
+  privateHierarchicalKey: string, // base64
+  linkKey: Uint8Array
+): { encryptedPrivateHierarchicalKey: string; linkKeyNonce: string } {
+  const nonce = randomBytes(nacl.secretbox.nonceLength);
+  const ciphertext = nacl.secretbox(fromBase64(privateHierarchicalKey), nonce, linkKey);
+  if (!ciphertext) throw new Error("Link wrap failed");
+  return {
+    encryptedPrivateHierarchicalKey: toBase64(ciphertext),
+    linkKeyNonce: toBase64(nonce),
+  };
+}
+
+/**
+ * Inverse of `wrapPrivateHierarchicalKeyForLink`. The recovered private
+ * hier key is then fed into `unwrapSessionKeyFromFile` along with the
+ * owner's public key (which the server can return — it's public).
+ */
+export function unwrapPrivateHierarchicalKeyFromLink(
+  encryptedPrivateHierarchicalKey: string,
+  linkKeyNonce: string,
+  linkKey: Uint8Array
+): string {
+  const plain = nacl.secretbox.open(
+    fromBase64(encryptedPrivateHierarchicalKey),
+    fromBase64(linkKeyNonce),
+    linkKey
+  );
+  if (!plain) throw new Error("Link unwrap failed — wrong key or tampered ciphertext");
+  return toBase64(plain);
+}
+
+/**
+ * URL-safe base64 without padding. The linkKey lives in
+ * `window.location.hash`; standard base64 can include `/` and `+` which
+ * are fine in fragments but awkward in logs and copy-paste flows.
+ */
+export function encodeLinkKeyForFragment(linkKey: Uint8Array): string {
+  return toBase64(linkKey).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function decodeLinkKeyFromFragment(fragment: string): Uint8Array {
+  const padded = fragment.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
+  return fromBase64(padded + pad);
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Parent keys claim — Phase 3 folder inheritance
 // ──────────────────────────────────────────────────────────────────────
 

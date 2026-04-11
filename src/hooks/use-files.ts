@@ -12,6 +12,9 @@ import {
   unwrapPrivateHierarchicalKey,
   wrapParentKeysClaim,
   unwrapParentKeysClaim,
+  generateLinkKey,
+  wrapPrivateHierarchicalKeyForLink,
+  encodeLinkKeyForFragment,
 } from "@/lib/crypto/file-crypto";
 import {
   fileChunkGenerator,
@@ -805,6 +808,98 @@ export function useFiles(keys: {
     []
   );
 
+  /**
+   * Phase 4 — create a public link to a file or folder. Client-side:
+   *   1. Unwrap our own private hier key (existing flow via file_keys).
+   *   2. Generate a fresh symmetric linkKey (never reaches the server).
+   *   3. Wrap the priv hier key under linkKey with nacl.secretbox.
+   *   4. POST the ciphertext + nonce to /api/files/link/create.
+   *   5. Build the URL with linkKey in the fragment. Return it to the
+   *      caller exactly once — after this point there's no way to
+   *      recover the linkKey, so the UI must copy it immediately.
+   */
+  const createLink = useCallback(
+    async (
+      file: DecryptedFile,
+      opts?: { expiresAt?: string }
+    ): Promise<{ ok: true; url: string; id: string } | { ok: false; error: string }> => {
+      if (!keys) return { ok: false, error: "Not signed in" };
+      try {
+        const privHier = unwrapPrivateHierarchicalKey(
+          file.encryptedPrivateHierarchicalKey,
+          file.wrappedByPublicKey,
+          keys.encryptionPrivateKey
+        );
+        const linkKey = generateLinkKey();
+        const { encryptedPrivateHierarchicalKey, linkKeyNonce } =
+          wrapPrivateHierarchicalKeyForLink(privHier, linkKey);
+
+        const res = await fetch("/api/files/link/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileId: file.id,
+            encryptedPrivateHierarchicalKey,
+            linkKeyNonce,
+            expiresAt: opts?.expiresAt,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          linkKey.fill(0);
+          return { ok: false, error: data.error || "Failed to create link" };
+        }
+
+        const fragment = encodeLinkKeyForFragment(linkKey);
+        linkKey.fill(0);
+        return {
+          ok: true,
+          id: data.id,
+          url: `${window.location.origin}/share/${data.id}#${fragment}`,
+        };
+      } catch (err) {
+        console.error("Create link error:", err);
+        return { ok: false, error: "Failed to create link" };
+      }
+    },
+    [keys]
+  );
+
+  const revokeLink = useCallback(
+    async (linkId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      try {
+        const res = await fetch(`/api/files/link/${linkId}/revoke`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) return { ok: false, error: data.error || "Failed to revoke" };
+        return { ok: true };
+      } catch (err) {
+        console.error("Revoke link error:", err);
+        return { ok: false, error: "Failed to revoke" };
+      }
+    },
+    []
+  );
+
+  const listLinks = useCallback(
+    async (
+      fileId: string
+    ): Promise<
+      {
+        id: string;
+        createdBy: string;
+        createdAt: string;
+        expiresAt: string | null;
+        permissionLevel: string;
+      }[]
+    > => {
+      const res = await fetch(`/api/files/link/list?fileId=${fileId}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.links || [];
+    },
+    []
+  );
+
   const loadCollaborators = useCallback(
     async (fileId: string): Promise<Collaborator[]> => {
       const res = await fetch(`/api/files/collaborators?fileId=${fileId}`);
@@ -889,6 +984,9 @@ export function useFiles(keys: {
     unshareFile,
     leaveShare,
     setPermission,
+    createLink,
+    revokeLink,
+    listLinks,
     loadCollaborators,
     setViewMode,
     navigateToFolder,
