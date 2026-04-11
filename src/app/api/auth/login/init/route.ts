@@ -4,6 +4,7 @@ import { getUserByEmail } from "@/lib/db/users";
 import { generateServerEphemeral } from "@/lib/srp/server";
 import { createSrpSession } from "@/lib/db/srp-sessions";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
   try {
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
     const { email, clientPublicEphemeral } = parsed.data;
 
     // Rate limit by email
-    if (!checkRateLimit(`login:${email}`, 10)) {
+    if (!(await checkRateLimit(`login:${email}`, 10))) {
       return NextResponse.json({ error: "Too many login attempts. Try again later." }, { status: 429 });
     }
 
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
       serverPublicEphemeral,
     });
   } catch (err: unknown) {
-    console.error("Login init error:", err);
+    logError("auth.login.init", err);
     return NextResponse.json({ error: "Login failed" }, { status: 500 });
   }
 }

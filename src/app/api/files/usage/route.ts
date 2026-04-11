@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
-
-const MAX_STORAGE_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB
+import { MAX_STORAGE_BYTES } from "@/lib/db/quota";
+import { logError } from "@/lib/log";
 
 export async function GET() {
   try {
@@ -26,7 +26,7 @@ export async function GET() {
       fileCount: data?.length || 0,
     });
   } catch (err) {
-    console.error("Usage error:", err);
+    logError("files.usage", err);
     return NextResponse.json({ error: "Failed to get usage" }, { status: 500 });
   }
 }

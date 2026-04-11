@@ -4,16 +4,33 @@ import { getSession } from "@/lib/auth/session";
 import { createFile, createFileKey } from "@/lib/db/files";
 import { getUploadUrl } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
+import { assertWithinQuota } from "@/lib/db/quota";
+import { logError } from "@/lib/log";
 
 // Step 1: Initialize chunked upload — creates file record, returns presigned URLs for all chunks
 const InitSchema = z.object({
   action: z.literal("init"),
   encryptedMetadata: z.string().min(1),
-  encryptedSessionKey: z.string().min(1),
   parentId: z.string().uuid().nullable(),
   totalSizeBytes: z.number().positive(),
   chunkCount: z.number().int().positive(),
-});
+  // Phase 2 hierarchical key payload — all client-generated.
+  publicHierarchicalKey: z.string().min(1),
+  encryptedSessionKeyByFile: z.string().min(1),
+  sessionKeyNonce: z.string().min(1),
+  encryptedPrivateHierarchicalKey: z.string().min(1),
+  // Sharer's public key at wrap time. For a fresh upload this is always the
+  // owner's own public key, but we pass it explicitly so the server never
+  // has to infer it.
+  wrappedByPublicKey: z.string().min(1),
+  // Phase 3 — folder inheritance. Required when parentId is set; forbidden
+  // when parentId is null (root uploads have no parent to inherit from).
+  parentKeysClaim: z.string().min(1).optional(),
+  parentKeysClaimWrappedBy: z.string().min(1).optional(),
+}).refine(
+  (v) => (v.parentId === null) === (v.parentKeysClaim === undefined),
+  { message: "parent_keys_claim must be present iff parentId is set" }
+);
 
 // Step 2: Register a chunk after upload
 const ChunkSchema = z.object({
@@ -50,7 +67,16 @@ export async function POST(request: Request) {
 
       const data = parsed.data;
 
-      // Create file record
+      // Reject uploads that would exceed the per-user storage quota.
+      try {
+        await assertWithinQuota(session.userId, data.totalSizeBytes);
+      } catch (e) {
+        const status = (e as { status?: number }).status ?? 500;
+        return NextResponse.json({ error: (e as Error).message }, { status });
+      }
+
+      // Create file record (upload_complete defaults to false — row is
+      // hidden from listings until the finalize step confirms all chunks).
       const file = await createFile({
         ownerId: session.userId,
         parentId: data.parentId,
@@ -58,16 +84,23 @@ export async function POST(request: Request) {
         isFolder: false,
         sizeBytes: data.totalSizeBytes,
         storageKey: null, // chunks have their own storage keys
+        uploadComplete: false,
+        publicHierarchicalKey: data.publicHierarchicalKey,
+        encryptedSessionKeyByFile: data.encryptedSessionKeyByFile,
+        sessionKeyNonce: data.sessionKeyNonce,
+        parentKeysClaim: data.parentKeysClaim ?? null,
+        parentKeysClaimWrappedBy: data.parentKeysClaimWrappedBy ?? null,
       });
 
       // Update chunk count
       await supabase.from("files").update({ chunk_count: data.chunkCount }).eq("id", file.id);
 
-      // Store encrypted session key
+      // Owner's wrapped private hierarchical key row.
       await createFileKey({
         fileId: file.id,
         userId: session.userId,
-        encryptedSessionKey: data.encryptedSessionKey,
+        encryptedPrivateHierarchicalKey: data.encryptedPrivateHierarchicalKey,
+        wrappedByPublicKey: data.wrappedByPublicKey,
       });
 
       // Generate presigned URLs for all chunks
@@ -142,12 +175,20 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Not all chunks uploaded" }, { status: 400 });
       }
 
+      // Mark the file as visible now that all chunks have been registered.
+      const { error: finalizeErr } = await supabase
+        .from("files")
+        .update({ upload_complete: true })
+        .eq("id", parsed.data.fileId)
+        .eq("owner_id", session.userId);
+      if (finalizeErr) throw finalizeErr;
+
       return NextResponse.json({ success: true });
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (err) {
-    console.error("Chunk upload error:", err);
+    logError("chunk-upload", err);
     return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }

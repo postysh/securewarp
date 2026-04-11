@@ -5,6 +5,8 @@ import { timingSafeEqual } from "crypto";
 import { getUserByEmail, updateUserAuth } from "@/lib/db/users";
 import { createSession } from "@/lib/auth/session";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { consumeRecoveryToken } from "@/lib/auth/used-tokens";
+import { logError } from "@/lib/log";
 
 const RECOVERY_TOKEN_EXPIRY = "5m";
 
@@ -13,9 +15,6 @@ function getSecret() {
   if (!secret || secret.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters");
   return new TextEncoder().encode(secret);
 }
-
-// Track consumed recovery tokens to prevent reuse
-const consumedTokens = new Set<string>();
 
 // Step 1: Verify recovery key hash, return encrypted data + signed recovery token
 const VerifySchema = z.object({
@@ -50,7 +49,7 @@ export async function POST(request: Request) {
       const { email, recoveryKeyHash } = parsed.data;
 
       // Rate limit — 5 attempts per hour per email
-      if (!checkRateLimit(`recover:${email}`, 5)) {
+      if (!(await checkRateLimit(`recover:${email}`, 5))) {
         return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
       }
 
@@ -97,10 +96,10 @@ export async function POST(request: Request) {
         tokenPayload = result.payload;
         if (tokenPayload.purpose !== "recovery") throw new Error("Invalid token purpose");
         const jti = tokenPayload.jti as string;
-        if (!jti || consumedTokens.has(jti)) throw new Error("Token already used");
-        consumedTokens.add(jti);
-        // Clean old entries periodically
-        if (consumedTokens.size > 1000) consumedTokens.clear();
+        const exp = tokenPayload.exp as number | undefined;
+        if (!jti || !exp) throw new Error("Malformed token");
+        const firstUse = await consumeRecoveryToken(jti, new Date(exp * 1000));
+        if (!firstUse) throw new Error("Token already used");
       } catch {
         return NextResponse.json({ error: "Recovery session expired or already used. Please start over." }, { status: 401 });
       }
@@ -126,7 +125,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (err: unknown) {
-    console.error("Recovery error:", err);
+    logError("auth.recover", err);
     return NextResponse.json({ error: "Recovery failed" }, { status: 500 });
   }
 }

@@ -28,6 +28,7 @@ import { SettingsModal } from "./settings-modal";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useUserKeys } from "@/hooks/use-user-keys";
+import { useFilesContext } from "@/hooks/use-files";
 
 function formatStorageBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -158,7 +159,14 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
 }
 
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
-  const [active, setActive] = useState("drive");
+  const fileOps = useFilesContext();
+  // Derive the highlighted nav item from the breadcrumb's root, not the
+  // viewMode. Navigating into a shared folder sets viewMode="own" because
+  // the listing endpoint handles both ownership paths, but the user is
+  // still semantically inside "Shared with me" — the breadcrumb root
+  // reflects that truth.
+  const active =
+    fileOps.breadcrumb[0]?.name === "Shared with me" ? "shared" : "drive";
   const storage = useStorageUsage();
   const usedPct = storage.maxBytes > 0 ? Math.min((storage.usedBytes / storage.maxBytes) * 100, 100) : 0;
   const usedLabel = formatStorageBytes(storage.usedBytes);
@@ -194,10 +202,16 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
       <nav className={`flex-1 py-3 overflow-y-auto overflow-x-hidden transition-all duration-200 ${collapsed ? "px-[10px]" : "px-2"}`}>
         <div className={`flex flex-col gap-[2px] ${collapsed ? "items-center" : ""}`}>
           {navItems.map((item) => {
+            const handleClick = () => {
+              if (item.id === "drive") fileOps.setViewMode("own");
+              else if (item.id === "shared") fileOps.setViewMode("shared");
+              // Other items (recent/starred/trash) are placeholders — keep
+              // the current view instead of triggering a dead nav.
+            };
             const btn = (
               <button
                 key={item.id}
-                onClick={() => setActive(item.id)}
+                onClick={handleClick}
                 className={`flex items-center rounded-[6px] transition-colors cursor-pointer ${
                   collapsed
                     ? "w-8 h-8 justify-center"

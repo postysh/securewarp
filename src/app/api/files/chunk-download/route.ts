@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth/session";
 import { getFileById } from "@/lib/db/files";
 import { getDownloadUrl } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
+import { logError } from "@/lib/log";
 
 export async function GET(request: Request) {
   try {
@@ -47,7 +48,15 @@ export async function GET(request: Request) {
         chunked: true,
         chunks: chunkDownloads,
         encryptedMetadata: file.encrypted_metadata,
-        encryptedSessionKey: file.encrypted_session_key,
+        // Phase 2 hierarchical payload — client unwraps the priv hier key
+        // from its file_keys row, then uses it to unwrap the session key
+        // wrapped to the file's public hier key.
+        publicHierarchicalKey: file.public_hierarchical_key,
+        encryptedSessionKeyByFile: file.encrypted_session_key_by_file,
+        sessionKeyNonce: file.session_key_nonce,
+        encryptedPrivateHierarchicalKey: file.encrypted_private_hierarchical_key,
+        wrappedByPublicKey: file.wrapped_by_public_key,
+        ownerPublicKey: file.owner_public_key,
       });
     }
 
@@ -61,11 +70,16 @@ export async function GET(request: Request) {
       chunked: false,
       downloadUrl,
       encryptedMetadata: file.encrypted_metadata,
-      encryptedSessionKey: file.encrypted_session_key,
       encryptionNonce: file.encryption_nonce,
+      publicHierarchicalKey: file.public_hierarchical_key,
+      encryptedSessionKeyByFile: file.encrypted_session_key_by_file,
+      sessionKeyNonce: file.session_key_nonce,
+      encryptedPrivateHierarchicalKey: file.encrypted_private_hierarchical_key,
+      wrappedByPublicKey: file.wrapped_by_public_key,
+      ownerPublicKey: file.owner_public_key,
     });
   } catch (err) {
-    console.error("Chunk download error:", err);
+    logError("chunk-download", err);
     return NextResponse.json({ error: "Download failed" }, { status: 500 });
   }
 }

@@ -1,10 +1,19 @@
 /**
  * File encryption — client-side only.
  *
- * Each file gets a unique random session key.
- * File content is encrypted with xsalsa20-poly1305 (secretbox).
- * The session key is encrypted with the user's public encryption key (box).
- * Metadata (filename, type, size) is encrypted with the session key.
+ * Phase 2 hierarchical key model (Skiff-style):
+ *   - Every file has a random symmetric `sessionKey` for content + metadata.
+ *   - Every file has an asymmetric `hierarchicalKeyPair` (nacl.box).
+ *   - `sessionKey` is wrapped *once* to the file's public hierarchical key,
+ *     using the owner's private key as the box sender. Stored on the file.
+ *   - Each collaborator's file_keys row stores `privateHierarchicalKey`
+ *     wrapped to *their* public encryption key by whoever granted access.
+ *   - To read: collaborator unwraps privateHierarchicalKey → uses it to
+ *     unwrap sessionKey → uses sessionKey for content.
+ *
+ * This design lets non-owners re-share (they hold privateHierarchicalKey),
+ * makes adding a collaborator O(1) regardless of file size, and sets up
+ * Phase 3 folder inheritance via parent_keys_claim.
  */
 
 import nacl from "tweetnacl";
@@ -94,47 +103,220 @@ export function decryptMetadata(
   return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
-/**
- * Encrypt a session key for a specific user using their public encryption key (box).
- * This is asymmetric — only the user with the matching private key can decrypt.
- */
-export function encryptSessionKeyForUser(
-  sessionKey: Uint8Array,
-  recipientPublicKey: string, // base64
-  senderPrivateKey: string    // base64
-): string {
-  const pubKey = fromBase64(recipientPublicKey);
-  const privKey = fromBase64(senderPrivateKey);
-  const nonce = randomBytes(nacl.box.nonceLength);
-  const encrypted = nacl.box(sessionKey, nonce, pubKey, privKey);
+// ──────────────────────────────────────────────────────────────────────
+// Hierarchical keypair (Phase 2)
+// ──────────────────────────────────────────────────────────────────────
 
-  if (!encrypted) throw new Error("Session key encryption failed");
-
-  // Combine nonce + ciphertext into a single base64 string
-  const combined = new Uint8Array(nonce.length + encrypted.length);
-  combined.set(nonce);
-  combined.set(encrypted, nonce.length);
-
-  return toBase64(combined);
+export interface HierarchicalKeypair {
+  publicKey: string;  // base64
+  privateKey: string; // base64
 }
 
 /**
- * Decrypt a session key using the user's private encryption key.
+ * Generate a fresh Curve25519 keypair for use as a file's hierarchical key.
+ * Nothing distinguishes these from a user's own encryption keypair at the
+ * crypto layer — only the role they play in the storage model differs.
  */
-export function decryptSessionKey(
-  encryptedSessionKey: string, // base64 (nonce + ciphertext)
-  senderPublicKey: string,     // base64
-  recipientPrivateKey: string  // base64
+export function generateHierarchicalKeypair(): HierarchicalKeypair {
+  const kp = nacl.box.keyPair();
+  return {
+    publicKey: toBase64(kp.publicKey),
+    privateKey: toBase64(kp.secretKey),
+  };
+}
+
+// Shared nacl.box wrap helper. Returns combined nonce‖ciphertext base64 plus
+// the nonce separately (for cases where the storage schema splits them).
+function boxWrap(
+  message: Uint8Array,
+  recipientPublicKey: string,
+  senderPrivateKey: string
+): { combined: string; nonceB64: string; ciphertextB64: string } {
+  const pubKey = fromBase64(recipientPublicKey);
+  const privKey = fromBase64(senderPrivateKey);
+  const nonce = randomBytes(nacl.box.nonceLength);
+  const ciphertext = nacl.box(message, nonce, pubKey, privKey);
+  if (!ciphertext) throw new Error("Box encryption failed");
+
+  const combined = new Uint8Array(nonce.length + ciphertext.length);
+  combined.set(nonce);
+  combined.set(ciphertext, nonce.length);
+  return {
+    combined: toBase64(combined),
+    nonceB64: toBase64(nonce),
+    ciphertextB64: toBase64(ciphertext),
+  };
+}
+
+function boxOpenCombined(
+  combinedB64: string,
+  senderPublicKey: string,
+  recipientPrivateKey: string
 ): Uint8Array {
-  const combined = fromBase64(encryptedSessionKey);
+  const combined = fromBase64(combinedB64);
   const nonce = combined.slice(0, nacl.box.nonceLength);
   const ciphertext = combined.slice(nacl.box.nonceLength);
-  const pubKey = fromBase64(senderPublicKey);
-  const privKey = fromBase64(recipientPrivateKey);
+  const plain = nacl.box.open(
+    ciphertext,
+    nonce,
+    fromBase64(senderPublicKey),
+    fromBase64(recipientPrivateKey)
+  );
+  if (!plain) throw new Error("Box decryption failed — wrong key or tampered ciphertext");
+  return plain;
+}
 
-  const sessionKey = nacl.box.open(ciphertext, nonce, pubKey, privKey);
+function boxOpenSplit(
+  ciphertextB64: string,
+  nonceB64: string,
+  senderPublicKey: string,
+  recipientPrivateKey: string
+): Uint8Array {
+  const plain = nacl.box.open(
+    fromBase64(ciphertextB64),
+    fromBase64(nonceB64),
+    fromBase64(senderPublicKey),
+    fromBase64(recipientPrivateKey)
+  );
+  if (!plain) throw new Error("Box decryption failed — wrong key or tampered ciphertext");
+  return plain;
+}
 
-  if (!sessionKey) throw new Error("Session key decryption failed — wrong key");
+/**
+ * Wrap a file's session key to its own public hierarchical key. The owner
+ * is always the box sender — their public key is what a reader uses to
+ * unwrap via nacl.box.open. Returns `ciphertext` + `nonce` as separate
+ * base64 strings so the DB schema can store them in distinct columns.
+ */
+export function wrapSessionKeyToFile(
+  sessionKey: Uint8Array,
+  filePublicHierarchicalKey: string,
+  ownerPrivateKey: string
+): { encryptedSessionKeyByFile: string; sessionKeyNonce: string } {
+  const { nonceB64, ciphertextB64 } = boxWrap(
+    sessionKey,
+    filePublicHierarchicalKey,
+    ownerPrivateKey
+  );
+  return {
+    encryptedSessionKeyByFile: ciphertextB64,
+    sessionKeyNonce: nonceB64,
+  };
+}
 
-  return sessionKey;
+/**
+ * Unwrap a file's session key given its private hierarchical key and the
+ * owner's public key (the box sender at upload time).
+ */
+export function unwrapSessionKeyFromFile(
+  encryptedSessionKeyByFile: string,
+  sessionKeyNonce: string,
+  ownerPublicKey: string,
+  filePrivateHierarchicalKey: string
+): Uint8Array {
+  return boxOpenSplit(
+    encryptedSessionKeyByFile,
+    sessionKeyNonce,
+    ownerPublicKey,
+    filePrivateHierarchicalKey
+  );
+}
+
+/**
+ * Wrap a file's private hierarchical key to a collaborator's public key.
+ * Either the owner or any existing collaborator can call this — the
+ * `wrappedByPublicKey` is the sharer's own public key, which the recipient
+ * must use when unwrapping via nacl.box.open.
+ */
+export function wrapPrivateHierarchicalKeyForUser(
+  filePrivateHierarchicalKey: string,
+  recipientPublicKey: string,
+  sharerPrivateKey: string
+): string {
+  const { combined } = boxWrap(
+    fromBase64(filePrivateHierarchicalKey),
+    recipientPublicKey,
+    sharerPrivateKey
+  );
+  return combined;
+}
+
+/**
+ * Unwrap your own file_keys row to recover the file's private hierarchical
+ * key. `wrappedByPublicKey` is the sharer's public key at the time of the
+ * grant (owner for initial rows, any collaborator for re-shares).
+ */
+export function unwrapPrivateHierarchicalKey(
+  encryptedPrivateHierarchicalKey: string,
+  wrappedByPublicKey: string,
+  recipientPrivateKey: string
+): string {
+  const raw = boxOpenCombined(
+    encryptedPrivateHierarchicalKey,
+    wrappedByPublicKey,
+    recipientPrivateKey
+  );
+  return toBase64(raw);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Parent keys claim — Phase 3 folder inheritance
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Payload of a parent_keys_claim: the child's session key and its own
+ * private hierarchical key, both base64. Wrapped once at upload time so
+ * anyone who can unwrap the parent can unwrap every descendant without
+ * per-child ACL fan-out.
+ */
+interface ParentClaimPayload {
+  sessionKey: string;
+  childPrivateHierarchicalKey: string;
+}
+
+/**
+ * Wrap `{sessionKey, childPrivateHierarchicalKey}` under the *parent's*
+ * public hierarchical key, with the owner's private encryption key as the
+ * nacl.box sender. The result is a single base64 combined nonce‖ciphertext.
+ *
+ * At read time the unwrap needs the parent's *private* hier key (obtained
+ * by the user unwrapping their file_keys row on the parent) and the owner's
+ * public key (stored alongside as `parent_keys_claim_wrapped_by`).
+ */
+export function wrapParentKeysClaim(
+  sessionKey: Uint8Array,
+  childPrivateHierarchicalKey: string,
+  parentPublicHierarchicalKey: string,
+  ownerPrivateKey: string
+): string {
+  const payload: ParentClaimPayload = {
+    sessionKey: toBase64(sessionKey),
+    childPrivateHierarchicalKey,
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const { combined } = boxWrap(bytes, parentPublicHierarchicalKey, ownerPrivateKey);
+  return combined;
+}
+
+/**
+ * Unwrap a parent_keys_claim using the parent's private hierarchical key.
+ * Returns the child's session key (raw bytes) and its own private hier key
+ * (base64). The caller is responsible for zeroing the returned sessionKey
+ * as soon as it's done with it.
+ */
+export function unwrapParentKeysClaim(
+  parentKeysClaim: string,
+  wrappedByPublicKey: string,
+  parentPrivateHierarchicalKey: string
+): { sessionKey: Uint8Array; childPrivateHierarchicalKey: string } {
+  const bytes = boxOpenCombined(
+    parentKeysClaim,
+    wrappedByPublicKey,
+    parentPrivateHierarchicalKey
+  );
+  const payload = JSON.parse(new TextDecoder().decode(bytes)) as ParentClaimPayload;
+  return {
+    sessionKey: fromBase64(payload.sessionKey),
+    childPrivateHierarchicalKey: payload.childPrivateHierarchicalKey,
+  };
 }

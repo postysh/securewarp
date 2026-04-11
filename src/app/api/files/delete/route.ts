@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth/session";
 import { deleteFile } from "@/lib/db/files";
 import { deleteBlob } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
+import { logError } from "@/lib/log";
 
 const DeleteSchema = z.object({
   fileId: z.string().uuid(),
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("Delete error:", err);
+    logError("files.delete", err);
     return NextResponse.json({ error: "Delete failed" }, { status: 500 });
   }
 }

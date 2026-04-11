@@ -3,3 +3,163 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
+
+# SecureWarp — project rules
+
+## Crypto is the product
+
+This app is a zero-knowledge encrypted drive. The server must **never** see
+plaintext file content, plaintext filenames, the user's password, or any
+derived key material beyond the SRP verifier and the public keys. If a change
+would cause the server to handle any of those, stop and flag it — it is not a
+bug fix, it is a product-level regression.
+
+Client-side primitives are fixed: xsalsa20-poly1305 (tweetnacl), Argon2id,
+HKDF-SHA256 (@noble/hashes), SRP-6a (secure-remote-password), BIP39. Don't
+swap them without a migration path for existing ciphertext and stored hashes.
+
+## Touching `src/lib/crypto/**` or `src/lib/srp/**`
+
+1. Read the module you're editing **and** its test file before changing
+   anything. The tests document invariants (chunk reorder/truncation, HKDF
+   domain separation, recovery hash ≠ encryption key, etc.).
+2. Add or update a test for the behavior you're changing. `npm test` must
+   stay green.
+3. If you change the HKDF `salt` or `info` string, the function name, or the
+   ciphertext layout, you have silently invalidated every existing user's
+   data. Version the constants (e.g. `-v2`) and keep the old path available
+   until a migration is run.
+
+## Server routes
+
+- All API handlers live under `src/app/api/**/route.ts` and follow the
+  Next.js App Router conventions documented in `node_modules/next/dist/docs/`.
+- Validate every request body with Zod (`safeParse`, return `400` on
+  failure). Never trust `body as T`.
+- Use `logError("<route-tag>", err)` from `@/lib/log` instead of raw
+  `console.error`. It produces structured single-line JSON logs and avoids
+  leaking request payloads.
+- Auth endpoints must not reveal whether an email exists — return the same
+  generic error for "no such user" and "wrong password".
+- Rate-limit any endpoint that takes a secret guess (login, recovery) via
+  `checkRateLimit(...)`. It's async now — don't forget to `await`.
+
+## Database conventions
+
+- Access Supabase through `@/lib/db/supabase` with the service-role client.
+  RLS is enabled on every table as belt-and-braces but the service role
+  bypasses it, so correctness lives in the API layer.
+- Filter `files` queries by `upload_complete = true` on any read path that
+  exposes rows to users. `getFilesForUser` and `getFileById` already do this;
+  new readers must match.
+- New tables: add the migration SQL to `README.md` under the migrations
+  block. Don't rely on the Supabase dashboard alone.
+- If you add a Postgres function, set an explicit `SET search_path` clause
+  to silence the `function_search_path_mutable` advisor.
+
+## Tests
+
+- Run `npm test` before declaring any crypto/auth change complete.
+- Tests live next to the source: `src/lib/crypto/keys.ts` ↔
+  `src/lib/crypto/keys.test.ts`.
+- Vitest runs in the Node environment — `crypto.subtle` and the Web Crypto
+  primitives are available globally in Node 20+, so the client-side modules
+  are tested with the same code paths that run in the browser.
+
+## Sharing invariants (Phase 3 — hierarchical keys + folder inheritance)
+
+The crypto model is Skiff's two-layer design. Every file has:
+
+- a symmetric `sessionKey` (encrypts content + metadata), and
+- an asymmetric `hierarchicalKeyPair` generated client-side.
+
+The session key is wrapped **once** to the file's `publicHierarchicalKey`
+with the owner as the `nacl.box` sender. It is never re-wrapped for new
+collaborators. Each collaborator's `file_keys` row holds the file's
+*private* hierarchical key wrapped to that user's public encryption key.
+
+**Invariants that must not be violated**:
+
+1. **The plaintext session key only exists on the client, briefly, during
+   upload/download/metadata-decrypt.** Zero it with `.fill(0)` as soon as
+   you're done. Never serialize it, never log it, never put it in a
+   request body. The only place it gets wrapped is `wrapSessionKeyToFile`
+   in `src/lib/crypto/file-crypto.ts`.
+
+2. **The plaintext private hierarchical key only exists on the client,
+   briefly, during a share or a decrypt.** Same rules as above. Only
+   `wrapPrivateHierarchicalKeyForUser` is allowed to touch it.
+
+3. **The `wrapped_by_public_key` column on a `file_keys` row is the box
+   sender for *that specific row*.** For an owner-created row it's the
+   owner's public key; for a collaborator re-share it's the sharer's.
+   Don't conflate it with `files.owner_id → users.public_encryption_key`
+   (which is the box sender for the *session-key-to-file* wrap). These
+   two sender keys can differ; the client needs both.
+
+4. **Non-owners can re-share.** `POST /api/files/share` gates on
+   `getFileById(fileId, session.userId)` (does the caller have a
+   file_keys row), not on ownership. If you ever tighten that, you break
+   the Phase 2 guarantee that whoever holds the private hier key can
+   grant. Conversely: never let `share` accept a caller without a row —
+   that would let outsiders drop new keys.
+
+5. **Only `/delete` is owner-only.** `share` is any-collaborator.
+   `unshare` is owner-or-self (the self-path is how a viewer "leaves").
+   `leave` is explicitly not-owner. `permission` is owner-only. Don't
+   collapse these into one endpoint.
+
+6. **Revocation is not forward-secret.** `unshare`/`leave` only delete
+   the ACL row — no hier keypair, session key, or `parent_keys_claim`
+   gets rotated. A user who previously unwrapped and cached the private
+   hier key keeps decrypt capability. Phase 5 will rotate on revoke.
+
+7. **Folder inheritance via `parent_keys_claim` (Phase 3).** Every file
+   with a parent stores a claim blob wrapping
+   `{sessionKey, childPrivateHierarchicalKey}` under the **parent's**
+   public hierarchical key, with the owner's private encryption key as
+   the box sender. Anyone who can unwrap the parent's private hier key
+   transitively unwraps every descendant without any ACL fan-out.
+
+   Subrules:
+   - The box sender for a `parent_keys_claim` is stored explicitly in
+     `parent_keys_claim_wrapped_by` (the owner at upload time). Don't
+     re-derive it from `files.owner_id → users.public_encryption_key`
+     today and hope it keeps matching after ownership transfers land.
+   - The **owner always has a direct `file_keys` row** on every file
+     they own. `getFilesForUser` relies on this. Don't remove the
+     owner's row as an "optimization" — it breaks the fast decrypt
+     path and the `getFileById` access gate.
+   - Inherited children MAY have no direct `file_keys` row for a given
+     user. List endpoints that return inherited children must
+     left-join on file_keys, never inner-join. `getInheritedChildren`
+     is the canonical implementation; copy its pattern.
+   - **Don't recurse on unshare/leave.** Removing a user from a parent
+     folder deletes only that row. If they also have a direct row on
+     some child, they keep child access via the direct row. If they
+     have *only* the parent row, losing it also loses every inherited
+     descendant automatically — nothing else to do.
+
+## Touching the sharing surface — checklist
+
+Before changing any of `src/lib/crypto/file-crypto.ts`,
+`src/app/api/files/share/route.ts`, `src/app/api/files/list/route.ts`,
+or `src/hooks/use-files.ts`:
+
+- Read `src/lib/crypto/hierarchical.test.ts` — it documents the exact
+  wrap/unwrap invariants with tiny runnable scenarios. Update it if the
+  semantics change.
+- Re-run `npm test` — the hierarchical suite catches "oh I forgot which
+  public key goes where" bugs immediately.
+- The server must **never** learn the private hierarchical key or the
+  plaintext session key. If a code path would need it, redesign.
+
+## Don't
+
+- Don't add telemetry, analytics, or logging that includes request bodies,
+  headers beyond `Authorization`, or anything derived from user keys.
+- Don't store derived passwords server-side. The only acceptable secret on
+  the server is the SRP verifier and the recovery verification hash.
+- Don't introduce a "backup" or "export" flow that bypasses client-side
+  encryption.
+- Don't amend a published migration — add a new one.

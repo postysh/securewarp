@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { RegisterSchema } from "@/lib/validators/auth";
 import { createUser, getUserByEmail } from "@/lib/db/users";
 import { createSession } from "@/lib/auth/session";
+import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
   try {
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, userId: user.id });
   } catch (err: unknown) {
-    console.error("Registration error:", err);
+    logError("auth.register", err);
     return NextResponse.json({ error: "Registration failed" }, { status: 500 });
   }
 }

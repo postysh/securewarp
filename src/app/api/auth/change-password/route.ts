@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { updateUserAuth } from "@/lib/db/users";
+import { logError } from "@/lib/log";
 
 const ChangePasswordSchema = z.object({
   newSrpSalt: z.string().min(1),
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("Change password error:", err);
+    logError("auth.change-password", err);
     return NextResponse.json({ error: "Failed to change password" }, { status: 500 });
   }
 }

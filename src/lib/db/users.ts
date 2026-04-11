@@ -60,6 +60,30 @@ export async function getUserById(id: string): Promise<UserRow | null> {
   return data || null;
 }
 
+/**
+ * Thin public profile for share-grant lookups. Deliberately limited to the
+ * fields a sharer needs (id + public encryption key) so the endpoint that
+ * wraps this doesn't leak auth material like srp_verifier.
+ */
+export interface PublicUserProfile {
+  id: string;
+  email: string;
+  public_encryption_key: string;
+}
+
+export async function getPublicUserByEmail(email: string): Promise<PublicUserProfile | null> {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, email, public_encryption_key")
+    .eq("email", email)
+    .single();
+
+  if (error && error.code !== "PGRST116") {
+    throw new Error(`Failed to fetch user: ${error.message}`);
+  }
+  return (data as PublicUserProfile) || null;
+}
+
 export async function getUserByEmail(email: string): Promise<UserRow | null> {
   const { data, error } = await supabase
     .from("users")

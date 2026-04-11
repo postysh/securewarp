@@ -107,8 +107,12 @@ function deriveRecoveryKeys(recoveryKey: string): {
   encryptionKey: Uint8Array;
 } {
   const entropy = fromHex(mnemonicToEntropy(recoveryKey));
-  const verificationKey = hkdf(sha256, entropy, undefined, new TextEncoder().encode("securewarp-recovery-verify"), 32);
-  const encryptionKey = hkdf(sha256, entropy, undefined, new TextEncoder().encode("securewarp-recovery-encrypt"), 32);
+  const enc = new TextEncoder();
+  // Fixed, non-secret salt provides HKDF domain separation per RFC 5869.
+  // Versioned so future algorithm changes can coexist with old recovery keys.
+  const salt = enc.encode("securewarp-recovery-v1");
+  const verificationKey = hkdf(sha256, entropy, salt, enc.encode("securewarp-recovery-verify-v1"), 32);
+  const encryptionKey = hkdf(sha256, entropy, salt, enc.encode("securewarp-recovery-encrypt-v1"), 32);
   return { verificationKey, encryptionKey };
 }
 

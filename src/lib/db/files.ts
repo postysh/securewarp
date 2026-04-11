@@ -10,14 +10,46 @@ export interface FileRow {
   size_bytes: number;
   storage_key: string | null;
   encryption_nonce: string | null;
+  upload_complete: boolean;
+  // Phase 2 — hierarchical keypair per file (Skiff model).
+  // Every file has a dedicated asymmetric keypair. The session key is
+  // wrapped once to this public key; each collaborator's file_keys row
+  // then wraps the *private* hierarchical key to that collaborator's
+  // public encryption key. Adding a collaborator is O(1) regardless of
+  // file size.
+  public_hierarchical_key: string;
+  encrypted_session_key_by_file: string;
+  session_key_nonce: string;
+  // Phase 3 — folder inheritance. When this file has a parent, the
+  // claim wraps {sessionKey, childPrivateHierarchicalKey} under the
+  // parent's public hierarchical key. Anyone holding the parent's
+  // private hier key can unwrap descendants transitively. NULL for
+  // root items.
+  parent_keys_claim: string | null;
+  parent_keys_claim_wrapped_by: string | null;
   created_at: string;
   updated_at: string;
 }
 
+// Shape returned by list/get endpoints. `encrypted_private_hierarchical_key`
+// is the caller's per-user wrap (from their file_keys row); the session key
+// is decrypted by first unwrapping the hierarchical private key, then using
+// it to unwrap `encrypted_session_key_by_file` via box(owner.pub, file.priv).
+export type FileRowWithKey = FileRow & {
+  encrypted_private_hierarchical_key: string;
+  // Who wrapped the caller's private-hier-key row. Usually the file owner;
+  // for non-owner re-shares this is the sharer at the time of the grant.
+  wrapped_by_public_key: string;
+  // Owner's current public key, needed for the session-key unwrap step
+  // (session_key is always wrapped by the owner at upload time).
+  owner_public_key: string;
+};
+
 export interface FileKeyRow {
   file_id: string;
   user_id: string;
-  encrypted_session_key: string;
+  encrypted_private_hierarchical_key: string;
+  wrapped_by_public_key: string;
 }
 
 export async function createFile(data: {
@@ -28,6 +60,16 @@ export async function createFile(data: {
   sizeBytes: number;
   storageKey: string | null;
   encryptionNonce?: string;
+  publicHierarchicalKey: string;
+  encryptedSessionKeyByFile: string;
+  sessionKeyNonce: string;
+  // Phase 3. Required when parentId is non-null; must be null when
+  // parentId is null. The route handler enforces this coupling.
+  parentKeysClaim?: string | null;
+  parentKeysClaimWrappedBy?: string | null;
+  // Defaults to true so folders and any future single-shot uploads are
+  // immediately visible. Chunked uploads pass false and flip it on finalize.
+  uploadComplete?: boolean;
 }): Promise<FileRow> {
   const { data: file, error } = await supabase
     .from("files")
@@ -39,6 +81,12 @@ export async function createFile(data: {
       size_bytes: data.sizeBytes,
       storage_key: data.storageKey,
       encryption_nonce: data.encryptionNonce || null,
+      upload_complete: data.uploadComplete ?? true,
+      public_hierarchical_key: data.publicHierarchicalKey,
+      encrypted_session_key_by_file: data.encryptedSessionKeyByFile,
+      session_key_nonce: data.sessionKeyNonce,
+      parent_keys_claim: data.parentKeysClaim ?? null,
+      parent_keys_claim_wrapped_by: data.parentKeysClaimWrappedBy ?? null,
     })
     .select()
     .single();
@@ -50,24 +98,64 @@ export async function createFile(data: {
 export async function createFileKey(data: {
   fileId: string;
   userId: string;
-  encryptedSessionKey: string;
+  encryptedPrivateHierarchicalKey: string;
+  wrappedByPublicKey: string;
 }): Promise<void> {
   const { error } = await supabase
     .from("file_keys")
     .insert({
       file_id: data.fileId,
       user_id: data.userId,
-      encrypted_session_key: data.encryptedSessionKey,
+      encrypted_private_hierarchical_key: data.encryptedPrivateHierarchicalKey,
+      wrapped_by_public_key: data.wrappedByPublicKey,
+      // createFileKey is only called from upload/folder creation paths,
+      // which always create the owner's own row. Shared grants go through
+      // grantFileAccess instead.
+      permission_level: "owner",
     });
 
   if (error) throw new Error(`Failed to create file key: ${error.message}`);
 }
 
-export async function getFilesForUser(userId: string, parentId: string | null): Promise<(FileRow & { encrypted_session_key: string })[]> {
+// The PostgREST join pulls the caller's file_keys row (`encrypted_private_
+// hierarchical_key` + `wrapped_by_public_key`) and the owner's public key
+// from the `users` table.
+type FileJoinRow = Record<string, unknown> & {
+  file_keys: {
+    encrypted_private_hierarchical_key: string;
+    wrapped_by_public_key: string;
+  }[];
+  owner: { public_encryption_key: string } | null;
+};
+
+function shapeRow(row: FileJoinRow): FileRowWithKey {
+  const { file_keys, owner, ...rest } = row;
+  const fk = file_keys[0];
+  return {
+    ...(rest as unknown as FileRow),
+    encrypted_private_hierarchical_key: fk?.encrypted_private_hierarchical_key || "",
+    wrapped_by_public_key: fk?.wrapped_by_public_key || "",
+    owner_public_key: owner?.public_encryption_key || "",
+  };
+}
+
+const LIST_SELECT =
+  "*, file_keys!inner(encrypted_private_hierarchical_key, wrapped_by_public_key)," +
+  " owner:users!files_owner_id_fkey(public_encryption_key)";
+
+export async function getFilesForUser(
+  userId: string,
+  parentId: string | null
+): Promise<FileRowWithKey[]> {
+  // Own files only — scoped by owner_id. The file_keys join is still required
+  // to surface the caller's wrapped hierarchical private key (which is stored
+  // per-user even for the owner so owner and shared decrypt paths match).
   let query = supabase
     .from("files")
-    .select("*, file_keys!inner(encrypted_session_key)")
-    .eq("file_keys.user_id", userId);
+    .select(LIST_SELECT)
+    .eq("owner_id", userId)
+    .eq("file_keys.user_id", userId)
+    .eq("upload_complete", true);
 
   if (parentId) {
     query = query.eq("parent_id", parentId);
@@ -75,41 +163,324 @@ export async function getFilesForUser(userId: string, parentId: string | null): 
     query = query.is("parent_id", null);
   }
 
-  const { data, error } = await query.order("is_folder", { ascending: false }).order("created_at", { ascending: false });
+  const { data, error } = await query
+    .order("is_folder", { ascending: false })
+    .order("created_at", { ascending: false });
 
   if (error) throw new Error(`Failed to fetch files: ${error.message}`);
-
-  return (data || []).map((row: Record<string, unknown>) => {
-    const fileKeys = row.file_keys as { encrypted_session_key: string }[];
-    const { file_keys: _, ...rest } = row;
-    return {
-      ...rest,
-      encrypted_session_key: fileKeys[0]?.encrypted_session_key || "",
-    } as unknown as FileRow & { encrypted_session_key: string };
-  });
+  return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
 }
 
-export async function getFileById(fileId: string, userId: string): Promise<(FileRow & { encrypted_session_key: string }) | null> {
+/**
+ * Files shared with a user by someone else. Flat list — there is no per-user
+ * folder structure for Phase 1 sharing, shared items surface at the root of
+ * the "Shared with me" view.
+ */
+export async function getSharedWithUser(userId: string): Promise<FileRowWithKey[]> {
   const { data, error } = await supabase
     .from("files")
-    .select("*, file_keys!inner(encrypted_session_key)")
+    .select(LIST_SELECT)
+    .eq("file_keys.user_id", userId)
+    .neq("owner_id", userId)
+    .eq("upload_complete", true)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(`Failed to fetch shared files: ${error.message}`);
+  return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
+}
+
+/**
+ * Phase 3 — list children of a folder the caller has access to but does
+ * not necessarily own. Used when a collaborator navigates into a shared
+ * folder: every child may lack a direct file_keys row, so the caller
+ * walks the parent_keys_claim chain client-side instead.
+ *
+ * Two-query design:
+ *   1. Access check — caller must have a file_keys row on `parentId`.
+ *      This is the gate for reading anything below the folder.
+ *   2. Fetch all direct children regardless of their file_keys state.
+ *   3. Left-merge the caller's own file_keys rows on those children so
+ *      direct-row holders (owner, direct collaborators) keep the fast
+ *      decrypt path.
+ */
+export async function getInheritedChildren(
+  parentId: string,
+  userId: string
+): Promise<FileRowWithKey[]> {
+  // 1. Access check — is the parent accessible to the caller?
+  const parent = await getFileById(parentId, userId);
+  if (!parent) return [];
+
+  // 2. All direct children, no file_keys filter (children of an inherited
+  //    folder commonly have no direct row for this user).
+  const { data: files, error } = await supabase
+    .from("files")
+    .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+    .eq("parent_id", parentId)
+    .eq("upload_complete", true)
+    .order("is_folder", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(`Failed to fetch children: ${error.message}`);
+  if (!files || files.length === 0) return [];
+
+  // 3. Any file_keys rows the caller does hold directly on these children.
+  const fileIds = (files as { id: string }[]).map((f) => f.id);
+  const { data: ownRows, error: keysErr } = await supabase
+    .from("file_keys")
+    .select("file_id, encrypted_private_hierarchical_key, wrapped_by_public_key")
+    .eq("user_id", userId)
+    .in("file_id", fileIds);
+  if (keysErr) throw new Error(`Failed to fetch file_keys: ${keysErr.message}`);
+
+  const keyByFile = new Map(
+    (ownRows as {
+      file_id: string;
+      encrypted_private_hierarchical_key: string;
+      wrapped_by_public_key: string;
+    }[]).map((r) => [r.file_id, r])
+  );
+
+  return (files as (FileRow & { owner: { public_encryption_key: string } | null })[]).map(
+    (f) => {
+      const direct = keyByFile.get(f.id);
+      const { owner, ...rest } = f;
+      return {
+        ...rest,
+        encrypted_private_hierarchical_key: direct?.encrypted_private_hierarchical_key ?? "",
+        wrapped_by_public_key: direct?.wrapped_by_public_key ?? "",
+        owner_public_key: owner?.public_encryption_key ?? "",
+      };
+    }
+  );
+}
+
+export async function getFileById(
+  fileId: string,
+  userId: string
+): Promise<FileRowWithKey | null> {
+  const { data, error } = await supabase
+    .from("files")
+    .select(LIST_SELECT)
     .eq("id", fileId)
     .eq("file_keys.user_id", userId)
+    .eq("upload_complete", true)
     .single();
 
   if (error && error.code !== "PGRST116") {
     throw new Error(`Failed to fetch file: ${error.message}`);
   }
-
   if (!data) return null;
+  return shapeRow(data as unknown as FileJoinRow);
+}
 
-  const dataObj = data as Record<string, unknown>;
-  const fileKeys = dataObj.file_keys as { encrypted_session_key: string }[];
-  const { file_keys: _, ...rest } = dataObj;
-  return {
-    ...rest,
-    encrypted_session_key: fileKeys[0]?.encrypted_session_key || "",
-  } as unknown as FileRow & { encrypted_session_key: string };
+/**
+ * Confirm a file exists and is owned by the given user. Used to gate
+ * share/unshare operations — only the owner can grant or revoke access.
+ */
+export async function getOwnedFile(fileId: string, ownerId: string): Promise<FileRow | null> {
+  const { data, error } = await supabase
+    .from("files")
+    .select("*")
+    .eq("id", fileId)
+    .eq("owner_id", ownerId)
+    .single();
+
+  if (error && error.code !== "PGRST116") {
+    throw new Error(`Failed to load file: ${error.message}`);
+  }
+  return (data as FileRow) || null;
+}
+
+/**
+ * Grant a collaborator access to a file by inserting (or updating) their
+ * wrapped hierarchical-private-key row. Idempotent on (file_id, user_id).
+ *
+ * `wrappedByPublicKey` is the sharer's public encryption key at the time of
+ * the grant — the recipient uses it as the nacl.box sender to unwrap the
+ * hierarchical private key. For owner-initiated grants this is the owner.
+ * For non-owner re-shares (Phase 2), this is whichever collaborator performed
+ * the re-share.
+ */
+export async function grantFileAccess(data: {
+  fileId: string;
+  userId: string;
+  encryptedPrivateHierarchicalKey: string;
+  wrappedByPublicKey: string;
+  permissionLevel?: PermissionLevel;
+  isOwnerRow?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.from("file_keys").upsert(
+    {
+      file_id: data.fileId,
+      user_id: data.userId,
+      encrypted_private_hierarchical_key: data.encryptedPrivateHierarchicalKey,
+      wrapped_by_public_key: data.wrappedByPublicKey,
+      // Owner's own row is labelled 'owner'; new grants default to 'editor'.
+      permission_level: data.isOwnerRow ? "owner" : data.permissionLevel ?? "editor",
+    },
+    { onConflict: "file_id,user_id" }
+  );
+  if (error) throw new Error(`Failed to grant access: ${error.message}`);
+}
+
+/**
+ * Revoke a collaborator's access by deleting their wrapped session key row.
+ * Note: Phase 1 does NOT rotate the session key, so a collaborator who
+ * cached content before revocation retains decrypt capability on that cache.
+ * Forward-secret revocation is deferred to Phase 5.
+ */
+export async function revokeFileAccess(fileId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("file_keys")
+    .delete()
+    .eq("file_id", fileId)
+    .eq("user_id", userId);
+  if (error) throw new Error(`Failed to revoke access: ${error.message}`);
+}
+
+export type PermissionLevel = "editor" | "viewer";
+
+export interface CollaboratorRow {
+  user_id: string;
+  email: string;
+  public_encryption_key: string;
+  is_owner: boolean;
+  permission_level: PermissionLevel;
+}
+
+/**
+ * List everyone who currently has a wrapped session key for a file. Owner
+ * first, then collaborators by addition order. Done as two queries — the
+ * PostgREST embedded-join shape for a belongs-to relationship is ambiguous
+ * between single-object and single-element-array across client versions,
+ * and collapsing it was hiding real email/pubkey data behind empty strings.
+ */
+export async function getCollaborators(fileId: string): Promise<CollaboratorRow[]> {
+  const { data: rows, error } = await supabase
+    .from("file_keys")
+    .select("user_id, permission_level")
+    .eq("file_id", fileId);
+  if (error) throw new Error(`Failed to load collaborators: ${error.message}`);
+  if (!rows || rows.length === 0) return [];
+
+  const userIds = (rows as { user_id: string; permission_level: PermissionLevel }[]).map(
+    (r) => r.user_id
+  );
+  const { data: users, error: usersErr } = await supabase
+    .from("users")
+    .select("id, email, public_encryption_key")
+    .in("id", userIds);
+  if (usersErr) throw new Error(`Failed to load users: ${usersErr.message}`);
+
+  const { data: file } = await supabase
+    .from("files")
+    .select("owner_id")
+    .eq("id", fileId)
+    .single();
+  const ownerId = (file as { owner_id: string } | null)?.owner_id ?? null;
+
+  const userById = new Map(
+    (users as { id: string; email: string; public_encryption_key: string }[]).map((u) => [u.id, u])
+  );
+
+  return (rows as { user_id: string; permission_level: PermissionLevel }[])
+    .map((r) => {
+      const u = userById.get(r.user_id);
+      return {
+        user_id: r.user_id,
+        email: u?.email ?? "",
+        public_encryption_key: u?.public_encryption_key ?? "",
+        is_owner: r.user_id === ownerId,
+        permission_level: r.permission_level ?? "editor",
+      };
+    })
+    .sort((a, b) => (a.is_owner === b.is_owner ? 0 : a.is_owner ? -1 : 1));
+}
+
+/**
+ * Bulk version of `getCollaborators` — returns a Map keyed by file_id so
+ * the file-list endpoint can enrich each row with an avatar stack without
+ * doing N+1 queries.
+ */
+export async function getCollaboratorsBulk(
+  fileIds: string[]
+): Promise<Map<string, CollaboratorRow[]>> {
+  const result = new Map<string, CollaboratorRow[]>();
+  if (fileIds.length === 0) return result;
+
+  const { data: fkRows, error: fkErr } = await supabase
+    .from("file_keys")
+    .select("file_id, user_id, permission_level")
+    .in("file_id", fileIds);
+  if (fkErr) throw new Error(`Failed to load file_keys: ${fkErr.message}`);
+  if (!fkRows || fkRows.length === 0) return result;
+
+  const userIds = Array.from(
+    new Set((fkRows as { user_id: string }[]).map((r) => r.user_id))
+  );
+  const { data: users, error: usersErr } = await supabase
+    .from("users")
+    .select("id, email, public_encryption_key")
+    .in("id", userIds);
+  if (usersErr) throw new Error(`Failed to load users: ${usersErr.message}`);
+
+  const { data: files } = await supabase
+    .from("files")
+    .select("id, owner_id")
+    .in("id", fileIds);
+  const ownerByFile = new Map(
+    (files as { id: string; owner_id: string }[] | null)?.map((f) => [f.id, f.owner_id]) ?? []
+  );
+
+  const userById = new Map(
+    (users as { id: string; email: string; public_encryption_key: string }[]).map((u) => [u.id, u])
+  );
+
+  for (const row of fkRows as {
+    file_id: string;
+    user_id: string;
+    permission_level: PermissionLevel;
+  }[]) {
+    const u = userById.get(row.user_id);
+    const ownerId = ownerByFile.get(row.file_id);
+    const collab: CollaboratorRow = {
+      user_id: row.user_id,
+      email: u?.email ?? "",
+      public_encryption_key: u?.public_encryption_key ?? "",
+      is_owner: row.user_id === ownerId,
+      permission_level: row.permission_level ?? "editor",
+    };
+    const list = result.get(row.file_id);
+    if (list) list.push(collab);
+    else result.set(row.file_id, [collab]);
+  }
+
+  // Sort: owner first, then by email for stable avatar ordering.
+  for (const list of result.values()) {
+    list.sort((a, b) => {
+      if (a.is_owner !== b.is_owner) return a.is_owner ? -1 : 1;
+      return a.email.localeCompare(b.email);
+    });
+  }
+  return result;
+}
+
+/**
+ * Update a collaborator's permission level. Owner-only. Does not affect
+ * the wrapped session key or cryptographic access — Phase 1 Viewer/Editor
+ * is enforced server-side via ACL on write endpoints.
+ */
+export async function setCollaboratorPermission(
+  fileId: string,
+  userId: string,
+  level: PermissionLevel
+): Promise<void> {
+  const { error } = await supabase
+    .from("file_keys")
+    .update({ permission_level: level })
+    .eq("file_id", fileId)
+    .eq("user_id", userId);
+  if (error) throw new Error(`Failed to update permission: ${error.message}`);
 }
 
 export async function deleteFile(fileId: string, ownerId: string): Promise<string | null> {
@@ -136,6 +507,11 @@ export async function createFolder(data: {
   ownerId: string;
   parentId: string | null;
   encryptedMetadata: string;
+  publicHierarchicalKey: string;
+  encryptedSessionKeyByFile: string;
+  sessionKeyNonce: string;
+  parentKeysClaim?: string | null;
+  parentKeysClaimWrappedBy?: string | null;
 }): Promise<FileRow> {
   return createFile({
     ownerId: data.ownerId,
@@ -144,5 +520,10 @@ export async function createFolder(data: {
     isFolder: true,
     sizeBytes: 0,
     storageKey: null,
+    publicHierarchicalKey: data.publicHierarchicalKey,
+    encryptedSessionKeyByFile: data.encryptedSessionKeyByFile,
+    sessionKeyNonce: data.sessionKeyNonce,
+    parentKeysClaim: data.parentKeysClaim ?? null,
+    parentKeysClaimWrappedBy: data.parentKeysClaimWrappedBy ?? null,
   });
 }

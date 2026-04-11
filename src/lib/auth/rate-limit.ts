@@ -1,32 +1,28 @@
 import "server-only";
+import { supabase } from "@/lib/db/supabase";
 
-// In-memory rate limiter — sufficient for single-instance deployments.
-// For multi-instance, replace with Redis or Supabase-backed store.
-
-const store = new Map<string, { count: number; resetAt: number }>();
-
-export function checkRateLimit(
+/**
+ * Distributed rate limiter backed by Postgres via the `check_rate_limit` RPC
+ * (see README migrations). Atomically increments or resets the counter in a
+ * single statement so concurrent requests cannot slip past the limit.
+ */
+export async function checkRateLimit(
   key: string,
   maxAttempts: number = 10,
   windowMs: number = 60 * 60 * 1000 // 1 hour
-): boolean {
-  const now = Date.now();
-  const entry = store.get(key);
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("check_rate_limit", {
+    p_key: key,
+    p_max: maxAttempts,
+    p_window_ms: windowMs,
+  });
 
-  if (!entry || now > entry.resetAt) {
-    store.set(key, { count: 1, resetAt: now + windowMs });
+  if (error) {
+    // Fail open on DB errors so an outage doesn't lock every user out of
+    // login. Rate limiting is defense-in-depth; auth is still gated by SRP.
+    console.error("Rate limit RPC failed:", error.message);
     return true;
   }
 
-  if (entry.count >= maxAttempts) return false;
-  entry.count++;
-  return true;
+  return data === true;
 }
-
-// Periodic cleanup to prevent memory leak
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of store) {
-    if (now > entry.resetAt) store.delete(key);
-  }
-}, 5 * 60 * 1000); // every 5 min

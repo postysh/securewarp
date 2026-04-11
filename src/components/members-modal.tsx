@@ -1,19 +1,22 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
-import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import { RoleDropdown } from "./role-dropdown";
+
+const WORKSPACE_ROLES = ["Admin", "Editor", "Viewer"] as const;
+type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
 
 interface MembersModalProps {
   open: boolean;
   onClose: () => void;
 }
 
-type Permission = "Admin" | "Editor" | "Viewer";
+type Permission = WorkspaceRole;
 
 interface Member {
   initials: string;
@@ -33,74 +36,6 @@ const allMembers: Member[] = [
   { initials: "LW", name: "Lisa Wang", email: "lisa@example.com", bg: "var(--accent-pink-primary)", permission: "Viewer", online: false },
   { initials: "RJ", name: "Ryan Johnson", email: "ryan@example.com", bg: "var(--accent-dark-blue-primary)", permission: "Editor", online: true },
 ];
-
-function RoleDropdown({ value, onChange, onRemove }: { value: Permission; onChange: (v: Permission) => void; onRemove?: () => void }) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        btnRef.current && !btnRef.current.contains(e.target as Node) &&
-        menuRef.current && !menuRef.current.contains(e.target as Node)
-      ) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const handleToggle = () => {
-    if (!open && btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-    }
-    setOpen(!open);
-  };
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        onClick={handleToggle}
-        className="flex items-center gap-1 px-2 h-[26px] rounded-[6px] text-[11px] text-text-tertiary hover:bg-bg-cell-hover transition-colors cursor-pointer"
-      >
-        {value}
-        <HugeiconsIcon icon={ArrowDown01Icon} size={10} />
-      </button>
-      {open && createPortal(
-        <div
-          ref={menuRef}
-          className="fixed w-[120px] rounded-[8px] bg-bg-l3 border border-border-primary overflow-hidden z-[99999]"
-          style={{ top: pos.top, right: pos.right, boxShadow: "var(--shadow-l2)" }}
-        >
-          {(["Admin", "Editor", "Viewer"] as Permission[]).map((role) => (
-            <button
-              key={role}
-              onClick={() => { onChange(role); setOpen(false); }}
-              className={`w-full text-left px-3 h-[30px] text-[12px] hover:bg-bg-cell-hover transition-colors cursor-pointer ${value === role ? "text-text-primary font-medium" : "text-text-secondary"}`}
-            >
-              {role}
-            </button>
-          ))}
-          {onRemove && (
-            <>
-              <div className="h-px bg-border-tertiary" />
-              <button
-                onClick={() => { onRemove(); setOpen(false); }}
-                className="w-full text-left px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
-              >
-                Remove
-              </button>
-            </>
-          )}
-        </div>,
-        document.body
-      )}
-    </>
-  );
-}
 
 export function MembersModal({ open, onClose }: MembersModalProps) {
   const [members, setMembers] = useState(allMembers);
@@ -207,8 +142,9 @@ export function MembersModal({ open, onClose }: MembersModalProps) {
                 {m.isOwner ? (
                   <span className="text-[11px] text-text-disabled px-2">Owner</span>
                 ) : (
-                  <RoleDropdown
+                  <RoleDropdown<WorkspaceRole>
                     value={m.permission}
+                    options={WORKSPACE_ROLES}
                     onChange={(v) => updateRole(m.email, v)}
                     onRemove={() => removeMember(m.email)}
                   />

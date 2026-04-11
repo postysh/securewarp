@@ -4,6 +4,7 @@ import { getUserById } from "@/lib/db/users";
 import { getSrpSession, deleteSrpSession } from "@/lib/db/srp-sessions";
 import { verifyClientAndDeriveSession } from "@/lib/srp/server";
 import { createSession } from "@/lib/auth/session";
+import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
   try {
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
       publicSigningKey: user.public_signing_key,
     });
   } catch (err: unknown) {
-    console.error("Login verify error:", err);
+    logError("auth.login.verify", err);
     return NextResponse.json({ error: "Authentication failed" }, { status: 500 });
   }
 }

@@ -9,6 +9,7 @@ import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import Share01Icon from "@hugeicons/core-free-icons/Share01Icon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
+import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
 import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
 import MoreHorizontalIcon from "@hugeicons/core-free-icons/MoreHorizontalIcon";
@@ -29,7 +30,8 @@ import { CommandPalette } from "./command-palette";
 import { NewFolderModal } from "./new-folder-modal";
 import { ShareModal } from "./share-modal";
 import { MembersModal } from "./members-modal";
-import { useFiles } from "@/hooks/use-files";
+import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
+import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { useUserKeys } from "@/hooks/use-user-keys";
 import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import HardDriveIcon from "@hugeicons/core-free-icons/HardDriveIcon";
@@ -66,15 +68,86 @@ function formatDate(dateStr: string): string {
 
 type SortField = "name" | "type" | "size" | "modified";
 
+function roleLabel(c: FileCollaboratorPreview): string {
+  if (c.isOwner) return "Owner";
+  if (c.permissionLevel === "viewer") return "Viewer";
+  return "Editor";
+}
+
+function CollaboratorAvatar({ c, size = 24 }: { c: FileCollaboratorPreview; size?: number }) {
+  const textSize = size >= 28 ? "10px" : "9px";
+  const content = (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[12px] text-text-primary font-medium truncate">{c.email || "Unknown"}</span>
+      <span className="text-[11px] text-text-disabled">{roleLabel(c)}</span>
+    </div>
+  );
+  return (
+    <Tooltip label={c.email || "Unknown"} content={content} side="bottom">
+      <div
+        className="rounded-full border-2 border-bg-main flex items-center justify-center font-bold text-white"
+        style={{
+          width: size,
+          height: size,
+          backgroundColor: colorForEmail(c.email),
+          fontSize: textSize,
+        }}
+      >
+        {initialsFromEmail(c.email)}
+      </div>
+    </Tooltip>
+  );
+}
+
+function CollaboratorStack({ collaborators }: { collaborators: FileCollaboratorPreview[] }) {
+  if (!collaborators || collaborators.length === 0) {
+    return <span className="text-[11px] text-text-disabled">Private</span>;
+  }
+  // A lone owner means nobody else has access — treat as private so the
+  // owner's own avatar doesn't feel like the file has "members".
+  if (collaborators.length === 1 && collaborators[0].isOwner) {
+    return <span className="text-[11px] text-text-disabled">Private</span>;
+  }
+
+  const MAX = 3;
+  const visible = collaborators.slice(0, MAX);
+  const overflow = collaborators.slice(MAX);
+  const overflowContent = (
+    <div className="flex flex-col gap-1">
+      {overflow.map((c) => (
+        <div key={c.userId} className="flex flex-col">
+          <span className="text-[12px] text-text-primary truncate">{c.email || "Unknown"}</span>
+          <span className="text-[11px] text-text-disabled">{roleLabel(c)}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="flex items-center -space-x-1.5">
+      {visible.map((c) => (
+        <CollaboratorAvatar key={c.userId} c={c} />
+      ))}
+      {overflow.length > 0 && (
+        <Tooltip label={`+${overflow.length} more`} content={overflowContent} side="bottom">
+          <div className="w-6 h-6 rounded-full border-2 border-bg-main bg-bg-field flex items-center justify-center text-[9px] font-bold text-text-tertiary">
+            +{overflow.length}
+          </div>
+        </Tooltip>
+      )}
+    </div>
+  );
+}
+
 export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean; onToggleSidebar: () => void }) {
   const keys = useUserKeys();
-  const fileOps = useFiles(keys ? { encryptionPublicKey: keys.encryptionPublicKey, encryptionPrivateKey: keys.encryptionPrivateKey } : null);
+  const fileOps = useFilesContext();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortAsc, setSortAsc] = useState(true);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState<DecryptedFile | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -98,6 +171,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     isFolder: f.isFolder,
     uploading: f.uploading,
     uploadProgress: f.uploadProgress,
+    collaborators: f.collaborators,
   }));
 
   const selectAll = () => setSelected(new Set(displayFiles.map((f) => f.id)));
@@ -138,6 +212,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     e.preventDefault();
     dragCounter.current = 0;
     setIsDragging(false);
+    // Drag-drop uploads only make sense in the owned drive. In "Shared with
+    // me" the user has no write target — silently drop the files.
+    if (fileOps.viewMode === "shared") return;
     const files = e.dataTransfer.files;
     if (!files.length) return;
     for (const file of Array.from(files)) {
@@ -211,7 +288,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             const visible = collapsed ? [crumbs[0], ...crumbs.slice(-2)] : crumbs;
 
             return visible.map((crumb, i) => (
-              <span key={crumb.id ?? "root"} className="flex items-center gap-1.5">
+              // Key by (position, id) — defends against transient duplicate
+              // breadcrumb entries without hiding the bug in state.
+              <span key={`${i}-${crumb.id ?? "root"}`} className="flex items-center gap-1.5">
                 {i > 0 && <span className="text-text-disabled">/</span>}
                 {i === 1 && collapsed && (
                   <>
@@ -247,18 +326,30 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         <div className="flex items-center gap-2 shrink-0 z-10">
           {/* Facepile */}
           <Facepile onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
-          <button onClick={() => setShareOpen(true)} className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer">
-            <HugeiconsIcon icon={UserAdd01Icon} size={14} />
-            Invite
-          </button>
-          <button onClick={() => setNewFolderOpen(true)} className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer">
-            <HugeiconsIcon icon={FolderAddIcon} size={14} />
-            New folder
-          </button>
-          <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer">
-            <HugeiconsIcon icon={Upload04Icon} size={14} />
-            Upload
-          </button>
+          {fileOps.viewMode === "own" && (
+            <button
+              onClick={() => {
+                const first = fileOps.files.find((f) => selected.has(f.id));
+                if (first) setShareTarget(first);
+              }}
+              className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={UserAdd01Icon} size={14} />
+              Invite
+            </button>
+          )}
+          {fileOps.viewMode === "own" && (
+            <>
+              <button onClick={() => setNewFolderOpen(true)} className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer">
+                <HugeiconsIcon icon={FolderAddIcon} size={14} />
+                New folder
+              </button>
+              <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer">
+                <HugeiconsIcon icon={Upload04Icon} size={14} />
+                Upload
+              </button>
+            </>
+          )}
           <NotificationBell />
         </div>
       </div>
@@ -319,6 +410,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 Size <SortArrow field="size" />
               </button>
             </div>
+            <div className="w-[110px] justify-end hidden md:flex">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">Shared</span>
+            </div>
             <div className="w-[100px] justify-end hidden lg:flex">
               <button onClick={() => toggleSort("modified")} className="flex items-center gap-1 text-[11px] font-mono uppercase text-text-disabled hover:text-text-tertiary cursor-pointer transition-colors">
                 Modified <SortArrow field="modified" />
@@ -349,7 +443,11 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 {/* Front card */}
                 <div className="absolute left-[26px] top-[28px] w-[160px] h-[90px] rounded-xl border border-border-tertiary bg-bg-main rotate-[3deg] flex flex-col items-center justify-center">
                   <div className="w-10 h-10 rounded-xl bg-accent-green/10 flex items-center justify-center mb-1">
-                    <HugeiconsIcon icon={LockIcon} size={20} color="var(--accent-green-primary)" />
+                    <HugeiconsIcon
+                      icon={fileOps.viewMode === "shared" ? UserGroupIcon : LockIcon}
+                      size={20}
+                      color="var(--accent-green-primary)"
+                    />
                   </div>
                   <div className="flex items-center gap-1">
                     <span className="relative flex h-1 w-1"><span className="animate-ping absolute h-full w-full rounded-full bg-accent-green opacity-75" /><span className="relative h-1 w-1 rounded-full bg-accent-green" /></span>
@@ -358,29 +456,47 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 </div>
               </div>
 
-              <h3 className="text-[18px] font-semibold text-text-primary mb-2">Your vault is empty</h3>
-              <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
-                Upload your first file or create a folder. Everything is end-to-end encrypted before it leaves your browser.
-              </p>
-
-              <div className="flex items-center justify-center gap-2.5">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] flex items-center gap-2"
-                >
-                  <HugeiconsIcon icon={Upload04Icon} size={15} /> Upload files
-                </button>
-                <button
-                  onClick={() => setNewFolderOpen(true)}
-                  className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer flex items-center gap-2"
-                >
-                  <HugeiconsIcon icon={FolderAddIcon} size={15} /> New folder
-                </button>
-              </div>
-
-              <p className="text-[11px] text-text-disabled mt-4">
-                Drag and drop files anywhere on this page
-              </p>
+              {fileOps.viewMode === "shared" ? (
+                <>
+                  <h3 className="text-[18px] font-semibold text-text-primary mb-2">Nothing shared with you yet</h3>
+                  <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
+                    When someone shares a file with your email, it shows up here — decrypted in your
+                    browser using your private key. Ask a collaborator to send you something.
+                  </p>
+                  <div className="flex items-center justify-center">
+                    <button
+                      onClick={() => fileOps.setViewMode("own")}
+                      className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer flex items-center gap-2"
+                    >
+                      Back to My Drive
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-[18px] font-semibold text-text-primary mb-2">Your vault is empty</h3>
+                  <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
+                    Upload your first file or create a folder. Everything is end-to-end encrypted before it leaves your browser.
+                  </p>
+                  <div className="flex items-center justify-center gap-2.5">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] flex items-center gap-2"
+                    >
+                      <HugeiconsIcon icon={Upload04Icon} size={15} /> Upload files
+                    </button>
+                    <button
+                      onClick={() => setNewFolderOpen(true)}
+                      className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer flex items-center gap-2"
+                    >
+                      <HugeiconsIcon icon={FolderAddIcon} size={15} /> New folder
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-text-disabled mt-4">
+                    Drag and drop files anywhere on this page
+                  </p>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -469,6 +585,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <div className="w-[100px] flex justify-end">
                   <span className="text-[12px] text-text-disabled">{file.size}</span>
                 </div>
+                <div className="w-[110px] justify-end hidden md:flex">
+                  <CollaboratorStack collaborators={file.collaborators} />
+                </div>
                 <div className="w-[100px] justify-end hidden lg:flex group-hover:opacity-0 transition-opacity">
                   <span className="text-[12px] text-text-disabled">{file.modified}</span>
                 </div>
@@ -478,9 +597,18 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   <button onClick={(e) => { e.stopPropagation(); }} className="p-1.5 rounded-md text-icon-tertiary hover:text-accent-yellow hover:bg-cta-nav-hover transition-colors cursor-pointer">
                     <HugeiconsIcon icon={StarIcon} size={15} />
                   </button>
-                  <button onClick={(e) => { e.stopPropagation(); }} className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer">
-                    <HugeiconsIcon icon={Share01Icon} size={15} />
-                  </button>
+                  {fileOps.viewMode === "own" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const full = fileOps.files.find((f) => f.id === file.id);
+                        if (full) setShareTarget(full);
+                      }}
+                      className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+                    >
+                      <HugeiconsIcon icon={Share01Icon} size={15} />
+                    </button>
+                  )}
                   <button onClick={(e) => {
                     e.stopPropagation();
                     if (contextMenu?.fileId === file.id) {
@@ -518,9 +646,20 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
             <HugeiconsIcon icon={StarIcon} size={14} color="var(--icon-tertiary)" /> Star
           </button>
-          <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
-            <HugeiconsIcon icon={Share01Icon} size={14} color="var(--icon-tertiary)" /> Share
-          </button>
+          {fileOps.viewMode === "own" && (
+            <button
+              onClick={() => {
+                if (contextMenu) {
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                  if (full) setShareTarget(full);
+                }
+                setContextMenu(null);
+              }}
+              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={Share01Icon} size={14} color="var(--icon-tertiary)" /> Share
+            </button>
+          )}
           {!contextMenu?.isFolder && (
             <button onClick={() => { if (contextMenu) { fileOps.downloadFile(contextMenu.fileId); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
               <HugeiconsIcon icon={Download04Icon} size={14} color="var(--icon-tertiary)" /> Download
@@ -533,15 +672,38 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <HugeiconsIcon icon={InformationCircleIcon} size={14} color="var(--icon-tertiary)" /> Details
           </button>
           <div className="h-px bg-border-tertiary my-1" />
-          <button onClick={() => { if (contextMenu) { fileOps.deleteItem(contextMenu.fileId); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer">
-            <HugeiconsIcon icon={Delete02Icon} size={14} /> Trash
-          </button>
+          {fileOps.viewMode === "shared" ? (
+            <button
+              onClick={async () => {
+                if (!contextMenu) return;
+                const fileId = contextMenu.fileId;
+                setContextMenu(null);
+                const res = await fileOps.leaveShare(fileId);
+                if (res.ok) await fileOps.fetchFiles(null, "shared");
+              }}
+              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={14} /> Remove from shared
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                if (contextMenu) {
+                  fileOps.deleteItem(contextMenu.fileId);
+                  setContextMenu(null);
+                }
+              }}
+              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={14} /> Trash
+            </button>
+          )}
         </div>,
         document.body
       )}
 
       <NewFolderModal open={newFolderOpen} onClose={() => setNewFolderOpen(false)} onCreate={(name) => fileOps.createFolder(name, fileOps.currentFolder)} />
-      <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
+      <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
       <MembersModal open={membersOpen} onClose={() => setMembersOpen(false)} />
       <CommandPalette
         open={commandPaletteOpen}
@@ -551,7 +713,11 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           switch (action) {
             case "a1": fileInputRef.current?.click(); break;
             case "a2": setNewFolderOpen(true); break;
-            case "a3": setShareOpen(true); break;
+            case "a3": {
+              const first = fileOps.files[0];
+              if (first) setShareTarget(first);
+              break;
+            }
           }
         }}
       />
