@@ -5,16 +5,31 @@ import { getFileById, createLink } from "@/lib/db/files";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
-const CreateSchema = z.object({
-  fileId: z.string().uuid(),
-  // Combined b64(ciphertext) + separate b64(nonce) — the client wraps
-  // the file's private hierarchical key with a random symmetric linkKey
-  // via nacl.secretbox. The server never sees linkKey.
-  encryptedPrivateHierarchicalKey: z.string().min(1),
-  linkKeyNonce: z.string().min(1),
-  // ISO timestamp. Optional — null means link never expires unless revoked.
-  expiresAt: z.string().datetime().optional(),
-});
+const CreateSchema = z
+  .object({
+    fileId: z.string().uuid(),
+    // Combined b64(ciphertext) + separate b64(nonce) — the client wraps
+    // the file's private hierarchical key with a random symmetric linkKey
+    // via nacl.secretbox. The server never sees linkKey.
+    encryptedPrivateHierarchicalKey: z.string().min(1),
+    linkKeyNonce: z.string().min(1),
+    // ISO timestamp. Optional — null means link never expires unless revoked.
+    expiresAt: z.string().datetime().optional(),
+    // Phase 4.1 password wrap. All three must be present or all absent.
+    passwordSalt: z.string().min(1).optional(),
+    passwordWrappedLinkKey: z.string().min(1).optional(),
+    passwordWrapNonce: z.string().min(1).optional(),
+  })
+  .refine(
+    (v) =>
+      (v.passwordSalt === undefined &&
+        v.passwordWrappedLinkKey === undefined &&
+        v.passwordWrapNonce === undefined) ||
+      (v.passwordSalt !== undefined &&
+        v.passwordWrappedLinkKey !== undefined &&
+        v.passwordWrapNonce !== undefined),
+    { message: "Password fields must all be present or all absent" }
+  );
 
 /**
  * Any user who can decrypt a file (owner or collaborator) may create a
@@ -55,6 +70,9 @@ export async function POST(request: Request) {
       encryptedPrivateHierarchicalKey: parsed.data.encryptedPrivateHierarchicalKey,
       linkKeyNonce: parsed.data.linkKeyNonce,
       expiresAt: parsed.data.expiresAt,
+      passwordSalt: parsed.data.passwordSalt,
+      passwordWrappedLinkKey: parsed.data.passwordWrappedLinkKey,
+      passwordWrapNonce: parsed.data.passwordWrapNonce,
     });
 
     return NextResponse.json({ id });

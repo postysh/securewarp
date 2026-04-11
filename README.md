@@ -437,17 +437,37 @@ returning data: a link to folder A cannot be used as a bearer token to
 read a sibling folder B. Descendant verification walks upward from the
 target through `parent_id` with a 64-level depth cap.
 
-**What's still deferred to Phase 4.1+**:
+**Password-protected links (Phase 4.1)**:
 
-- **Password-protected links** via SRP (server stores only salt + verifier,
-  not a password-derivable key). The current link URL is the sole bearer
-  token — anyone with the URL gains access.
-- **Editor-level links.** Phase 4 links are Viewer-only at the ACL level;
-  the CHECK constraint rejects other values. A viewer distinction here
-  is cosmetic until there's a write surface the server can gate on.
-- **Forward-secret revocation.** Revoke is an ACL delete — the server
-  refuses new fetches, but a visitor who already cached the ciphertext
-  before revoke can still decrypt. Same caveat as Phase 1 unshare.
+Any link can optionally require a password. When a password is set:
+
+1. The client generates a fresh 16-byte salt.
+2. `argon2id(password, salt, {t: 2, m: 32 MB, p: 1, dkLen: 32})` → a
+   32-byte wrapping key. Uses `@noble/hashes/argon2` so the exact
+   same code paths run in the browser and in Node tests.
+3. The linkKey is symmetrically wrapped under the derived key via
+   `nacl.secretbox`. The ciphertext + salt + nonce live in three new
+   `file_links` columns, locked together by a CHECK constraint.
+4. **The URL has no fragment.** A password-protected link is
+   `/share/${id}` with no `#linkKey`. The password is the sole key
+   material the visitor needs to provide, and it's never transmitted
+   to the server.
+5. On the visitor side, `/share/[id]` detects `hasPassword: true` in
+   the link payload and shows a password prompt. On submit, it runs
+   the same Argon2id derivation locally, unwraps the linkKey, and
+   proceeds with the normal two-step unwrap flow.
+
+Password links are strictly stronger than URL-fragment links: the URL
+alone is not sufficient. Brute-forcing the password requires Argon2id
+per attempt, which bounds the attacker's throughput to whatever
+hardware they're willing to burn.
+
+**What's still deferred to Phase 4.2+ / Phase 4.3**:
+
+- **Editor-level links.** SecureWarp has no anonymous write surface
+  yet — the `file_links.permission_level` CHECK constraint still only
+  admits `"viewer"`. Editor-level links will land when there's an
+  anonymous chunked-upload endpoint to gate them on (Phase 4.3).
 - **Link retrieval.** The URL is shown exactly once at creation and
   cannot be recovered server-side. This is intentional: Skiff does the
   same, and it prevents link leakage via the share modal of a
@@ -460,6 +480,60 @@ key format is `link:get:${ip}` / `link:children:${ip}` /
 `link:download:${ip}`. On shared-IP networks the limit is lax (300/hr)
 to avoid cross-user interference; the 128-bit random link IDs make
 enumeration infeasible regardless.
+
+### Forward-secret revocation (Phase 5)
+
+The default `/api/files/unshare` is an ACL delete. It's cheap but it
+doesn't invalidate anything a revoked user may have cached — old
+ciphertext, old session keys, and old private hierarchical keys all
+remain usable against their cached copies.
+
+Phase 5 ships an **opt-in** "Revoke" button in the share modal that
+triggers a full client-side key rotation:
+
+1. Owner downloads and decrypts every chunk of the file to reassemble
+   the plaintext.
+2. Generates a new random session key + a new hierarchical keypair.
+3. Re-encrypts the plaintext under the new session key, chunk-by-chunk.
+4. Wraps the new session key to the new public hierarchical key.
+5. Re-wraps the new private hier key for each remaining collaborator
+   (including the owner) and updates the `parent_keys_claim` on the
+   row if the file has a parent.
+6. POSTs `/api/files/[id]/rotate-init` → gets a fresh set of
+   presigned R2 URLs under a new prefix (`v<timestamp>/`).
+7. Uploads the newly-encrypted chunks.
+8. POSTs `/api/files/[id]/rotate-commit` with every new ciphertext +
+   the remaining collaborator wraps + the revoked user id.
+9. Server atomically swaps: updates the files row, replaces
+   `file_chunks`, deletes the revoked user's `file_keys` row, upserts
+   the remaining rows, and fires a background cleanup of the old R2
+   blobs.
+
+**Invariants enforced on commit**:
+
+- Caller is the file owner.
+- File is not a folder (flagged for a future pass).
+- `remainingCollaborators ∪ {revokedUserId}` must exactly equal the
+  current `file_keys` set. If a collaborator was added or removed
+  between init and commit, the server returns 409 and the client can
+  retry with a fresh list.
+- The owner must stay in the collaborator set — you cannot revoke
+  yourself through this endpoint.
+
+**What's still deferred**:
+
+- **Folder rotation.** Rotating a folder's hier keypair would require
+  re-wrapping the `parent_keys_claim` on every descendant since those
+  claims use the folder's public hier key as the nacl.box recipient.
+  It's doable but not trivial and hasn't been built yet — the rotate
+  endpoints reject `is_folder = true` with a clear error.
+- **Orphan R2 cleanup on partial failure.** If the DB sequence fails
+  mid-way after uploading new chunks, the new R2 blobs become orphans.
+  The daily cleanup cron doesn't currently target them — a manual
+  cleanup or a future sweep job covers the gap.
+- **Link-key rotation on `unshare`.** Revoking a link (Phase 4) still
+  just marks `revoked_at`; it doesn't rotate the linkKey or re-wrap
+  the file. The same rotate flow could be extended to links later.
 
 ### Testing
 

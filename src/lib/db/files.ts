@@ -542,6 +542,11 @@ export interface FileLinkRow {
   expires_at: string | null;
   revoked_at: string | null;
   created_at: string;
+  // Phase 4.1 — password wrap. All three are present together (CHECK)
+  // or all NULL (regular link).
+  password_salt: string | null;
+  password_wrapped_link_key: string | null;
+  password_wrap_nonce: string | null;
 }
 
 /**
@@ -575,6 +580,9 @@ export async function createLink(data: {
   encryptedPrivateHierarchicalKey: string;
   linkKeyNonce: string;
   expiresAt?: string | null;
+  passwordSalt?: string | null;
+  passwordWrappedLinkKey?: string | null;
+  passwordWrapNonce?: string | null;
 }): Promise<{ id: string }> {
   const { data: row, error } = await supabase
     .from("file_links")
@@ -584,6 +592,9 @@ export async function createLink(data: {
       encrypted_private_hierarchical_key: data.encryptedPrivateHierarchicalKey,
       link_key_nonce: data.linkKeyNonce,
       expires_at: data.expiresAt ?? null,
+      password_salt: data.passwordSalt ?? null,
+      password_wrapped_link_key: data.passwordWrappedLinkKey ?? null,
+      password_wrap_nonce: data.passwordWrapNonce ?? null,
     })
     .select("id")
     .single();

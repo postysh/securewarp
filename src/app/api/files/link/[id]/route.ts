@@ -39,6 +39,7 @@ export async function GET(
       return NextResponse.json({ error: "Link not found" }, { status: 404 });
     }
 
+    const hasPassword = payload.link.password_salt !== null;
     return NextResponse.json({
       id: payload.link.id,
       fileId: payload.file.id,
@@ -46,6 +47,15 @@ export async function GET(
       encryptedPrivateHierarchicalKey: payload.link.encrypted_private_hierarchical_key,
       linkKeyNonce: payload.link.link_key_nonce,
       expiresAt: payload.link.expires_at,
+      // Phase 4.1: when hasPassword is true, the visitor prompts for a
+      // password, derives the wrapping key client-side via Argon2id +
+      // passwordSalt, and unwraps `passwordWrappedLinkKey` to recover
+      // the linkKey before proceeding with the normal two-step unwrap.
+      // The URL fragment is empty for password-protected links.
+      hasPassword,
+      passwordSalt: payload.link.password_salt,
+      passwordWrappedLinkKey: payload.link.password_wrapped_link_key,
+      passwordWrapNonce: payload.link.password_wrap_nonce,
       file: {
         encryptedMetadata: payload.file.encrypted_metadata,
         publicHierarchicalKey: payload.file.public_hierarchical_key,

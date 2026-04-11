@@ -46,6 +46,11 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
   // Skiff UX: links cannot be recovered server-side.
   const [freshLinkUrl, setFreshLinkUrl] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [linkPassword, setLinkPassword] = useState("");
+  const [showPasswordField, setShowPasswordField] = useState(false);
+  // userId currently being rotated out (for inline spinner state). null
+  // when no rotation is in flight.
+  const [rotatingUserId, setRotatingUserId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const open = file !== null;
@@ -57,6 +62,8 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
     setInfo("");
     setFreshLinkUrl(null);
     setLinkCopied(false);
+    setLinkPassword("");
+    setShowPasswordField(false);
     setLoadingCollabs(true);
     fileOps
       .loadCollaborators(file.id)
@@ -113,19 +120,55 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
     setInfo(`Removed ${c.email}`);
   };
 
+  /**
+   * Phase 5 — rotate the file's keys and drop the revoked user in a
+   * single forward-secret operation. Unlike `removeCollab`, any
+   * ciphertext the revoked user cached before this completes is no
+   * longer decryptable against the current state of the file.
+   * Scoped to non-folder files — the share modal greys the action
+   * out for folders with a tooltip explaining why.
+   */
+  const rotateOutCollab = async (c: Collaborator) => {
+    if (c.isOwner || !file) return;
+    if (file.isFolder) {
+      setInputError("Secure revoke for folders isn't supported yet");
+      return;
+    }
+    if (!confirm(
+      `Securely revoke ${c.email}?\n\nThis re-encrypts the file and re-wraps keys for everyone else. ` +
+      `Large files may take a while.`
+    )) return;
+
+    setRotatingUserId(c.userId);
+    setInputError("");
+    const result = await fileOps.rotateAndRevoke(file, c.userId);
+    setRotatingUserId(null);
+    if (!result.ok) {
+      setInputError(result.error);
+      return;
+    }
+    setCollaborators((prev) => prev.filter((x) => x.userId !== c.userId));
+    setInfo(`Securely revoked ${c.email}`);
+  };
+
   const handleCreateLink = async () => {
     if (!file || creatingLink) return;
     setCreatingLink(true);
     setLinkCopied(false);
-    const result = await fileOps.createLink(file);
+    // Argon2id runs on the main thread — it takes ~200-400ms on a
+    // modern laptop with the Phase 4.1 parameters (32 MB / 2 iters).
+    // Worth flagging to the user via the "Creating…" spinner already
+    // on the button.
+    const password = showPasswordField && linkPassword.length > 0 ? linkPassword : undefined;
+    const result = await fileOps.createLink(file, { password });
     setCreatingLink(false);
     if (!result.ok) {
       setInputError(result.error);
       return;
     }
     setFreshLinkUrl(result.url);
-    // Auto-copy so the user doesn't accidentally close the modal before
-    // grabbing it — the URL is unrecoverable after the modal closes.
+    setLinkPassword("");
+    setShowPasswordField(false);
     try {
       await navigator.clipboard.writeText(result.url);
       setLinkCopied(true);
@@ -263,13 +306,25 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                   {c.isOwner ? (
                     <span className="text-[11px] text-text-disabled px-2">Owner</span>
                   ) : (
-                    <RoleDropdown<PermissionLevel>
-                      value={c.permissionLevel === "owner" ? "editor" : c.permissionLevel}
-                      options={ROLE_OPTIONS}
-                      labels={ROLE_LABELS}
-                      onChange={(v) => changePermission(c, v)}
-                      onRemove={() => removeCollab(c)}
-                    />
+                    <div className="flex items-center gap-1">
+                      <RoleDropdown<PermissionLevel>
+                        value={c.permissionLevel === "owner" ? "editor" : c.permissionLevel}
+                        options={ROLE_OPTIONS}
+                        labels={ROLE_LABELS}
+                        onChange={(v) => changePermission(c, v)}
+                        onRemove={() => removeCollab(c)}
+                      />
+                      {!file.isFolder && (
+                        <button
+                          onClick={() => rotateOutCollab(c)}
+                          disabled={rotatingUserId !== null}
+                          title="Revoke & rotate keys (forward-secret)"
+                          className="text-[10px] text-accent-red hover:underline px-1.5 h-[26px] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {rotatingUserId === c.userId ? "Rotating…" : "Revoke"}
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               ))
@@ -283,14 +338,38 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                 <HugeiconsIcon icon={Link04Icon} size={14} color="var(--icon-tertiary)" />
                 <span className="text-[12px] font-medium text-text-primary">Public link</span>
               </div>
-              <button
-                onClick={handleCreateLink}
-                disabled={creatingLink}
-                className="text-[11px] text-accent-green hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {creatingLink ? "Creating…" : "Create link"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowPasswordField((v) => !v)}
+                  className="text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer"
+                >
+                  {showPasswordField ? "No password" : "Add password"}
+                </button>
+                <button
+                  onClick={handleCreateLink}
+                  disabled={creatingLink || (showPasswordField && linkPassword.length === 0)}
+                  className="text-[11px] text-accent-green hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {creatingLink ? "Creating…" : "Create link"}
+                </button>
+              </div>
             </div>
+
+            {showPasswordField && (
+              <div className="mb-2">
+                <input
+                  type="password"
+                  value={linkPassword}
+                  onChange={(e) => setLinkPassword(e.target.value)}
+                  placeholder="Set a password"
+                  className="w-full px-3 py-2 rounded-[10px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40"
+                />
+                <p className="mt-1 text-[10px] text-text-disabled">
+                  Visitors must enter this password. Store it separately — we
+                  can&apos;t recover it if lost.
+                </p>
+              </div>
+            )}
 
             {freshLinkUrl && (
               <div className="mb-2 p-2.5 rounded-[10px] bg-bg-field border border-border-tertiary">

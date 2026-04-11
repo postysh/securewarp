@@ -17,6 +17,7 @@
  */
 
 import nacl from "tweetnacl";
+import { argon2id } from "@noble/hashes/argon2.js";
 import { toBase64, fromBase64, randomBytes } from "./utils";
 
 export interface EncryptedFile {
@@ -322,6 +323,77 @@ export function decodeLinkKeyFromFragment(fragment: string): Uint8Array {
   const padded = fragment.replace(/-/g, "+").replace(/_/g, "/");
   const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
   return fromBase64(padded + pad);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 4.1 — password-protected links
+// ──────────────────────────────────────────────────────────────────────
+
+// Argon2id parameters for link password derivation. Deliberately lighter
+// than the SRP main-key parameters (64 MB / 3 iters) because link password
+// entry is interactive on a variety of devices, but still strong enough
+// to make offline brute force expensive. 32 MB / 2 iters is the RFC 9106
+// "memory-constrained" recommendation.
+const LINK_ARGON2_MEMORY_KB = 32 * 1024; // 32 MB
+const LINK_ARGON2_ITERATIONS = 2;
+const LINK_ARGON2_PARALLELISM = 1;
+const LINK_KEY_LENGTH = nacl.secretbox.keyLength;
+
+/**
+ * Derive a 32-byte symmetric key from a link password using Argon2id.
+ * Used to wrap the actual linkKey before storing on the server — the
+ * password itself never leaves the browser and isn't stored anywhere.
+ */
+export function deriveLinkWrappingKey(password: string, salt: Uint8Array): Uint8Array {
+  return argon2id(password, salt, {
+    t: LINK_ARGON2_ITERATIONS,
+    m: LINK_ARGON2_MEMORY_KB,
+    p: LINK_ARGON2_PARALLELISM,
+    dkLen: LINK_KEY_LENGTH,
+  });
+}
+
+/**
+ * Wrap a linkKey under a password-derived key. Returns all three fields
+ * that live on a password-protected `file_links` row.
+ */
+export function wrapLinkKeyWithPassword(
+  linkKey: Uint8Array,
+  password: string
+): { passwordSalt: string; passwordWrappedLinkKey: string; passwordWrapNonce: string } {
+  const salt = randomBytes(16);
+  const wrappingKey = deriveLinkWrappingKey(password, salt);
+  const nonce = randomBytes(nacl.secretbox.nonceLength);
+  const ciphertext = nacl.secretbox(linkKey, nonce, wrappingKey);
+  wrappingKey.fill(0);
+  if (!ciphertext) throw new Error("Password wrap failed");
+  return {
+    passwordSalt: toBase64(salt),
+    passwordWrappedLinkKey: toBase64(ciphertext),
+    passwordWrapNonce: toBase64(nonce),
+  };
+}
+
+/**
+ * Recover a linkKey from its password wrap. Throws on wrong password —
+ * the caller should translate that into a user-visible "wrong password"
+ * without retrying (rate-limiting is the server's job).
+ */
+export function unwrapLinkKeyWithPassword(
+  passwordWrappedLinkKey: string,
+  passwordSalt: string,
+  passwordWrapNonce: string,
+  password: string
+): Uint8Array {
+  const wrappingKey = deriveLinkWrappingKey(password, fromBase64(passwordSalt));
+  const plain = nacl.secretbox.open(
+    fromBase64(passwordWrappedLinkKey),
+    fromBase64(passwordWrapNonce),
+    wrappingKey
+  );
+  wrappingKey.fill(0);
+  if (!plain) throw new Error("Wrong link password");
+  return plain;
 }
 
 // ──────────────────────────────────────────────────────────────────────

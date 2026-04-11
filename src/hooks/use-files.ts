@@ -15,6 +15,7 @@ import {
   generateLinkKey,
   wrapPrivateHierarchicalKeyForLink,
   encodeLinkKeyForFragment,
+  wrapLinkKeyWithPassword,
 } from "@/lib/crypto/file-crypto";
 import {
   fileChunkGenerator,
@@ -25,6 +26,7 @@ import {
   MAX_FILE_SIZE_FREE,
   CONCURRENT_CHUNK_UPLOADS,
 } from "@/lib/crypto/chunked-encryption";
+import { decryptFileContent } from "@/lib/crypto/file-crypto";
 import { toBase64, fromBase64 } from "@/lib/crypto/utils";
 
 export interface FileCollaboratorPreview {
@@ -758,6 +760,228 @@ export function useFiles(keys: {
   );
 
   /**
+   * Phase 5 — forward-secret revocation. Owner-only, single file only.
+   *
+   * Rotates the file's hierarchical keypair + session key, re-encrypts
+   * every chunk, re-wraps the new private hier key for each remaining
+   * collaborator, and finally deletes the revoked user's file_keys row.
+   * After this completes, any ciphertext the revoked user cached (their
+   * old private hier key, the old session key, the old encrypted chunks)
+   * is useless against the current state of the file.
+   *
+   * Folder rotation is rejected — it requires a recursive
+   * parent_keys_claim re-wrap across the whole descendant set, which
+   * hasn't been implemented yet.
+   */
+  const rotateAndRevoke = useCallback(
+    async (
+      file: DecryptedFile,
+      revokedUserId: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
+      if (!keys) return { ok: false, error: "Not signed in" };
+      if (file.isFolder) {
+        return { ok: false, error: "Folder rotation isn't supported yet" };
+      }
+      if (revokedUserId === file.ownerId) {
+        return { ok: false, error: "Cannot revoke the owner" };
+      }
+
+      try {
+        // 1. Download + decrypt + reassemble current plaintext.
+        const dlRes = await fetch(`/api/files/chunk-download?fileId=${file.id}`);
+        const dlData = await dlRes.json();
+        if (!dlRes.ok) return { ok: false, error: dlData.error || "Download failed" };
+
+        const oldPrivHier = unwrapPrivateHierarchicalKey(
+          dlData.encryptedPrivateHierarchicalKey,
+          dlData.wrappedByPublicKey,
+          keys.encryptionPrivateKey
+        );
+        const oldSessionKey = unwrapSessionKeyFromFile(
+          dlData.encryptedSessionKeyByFile,
+          dlData.sessionKeyNonce,
+          dlData.ownerPublicKey,
+          oldPrivHier
+        );
+
+        let plaintext: Uint8Array;
+        if (dlData.chunked) {
+          const chunks = dlData.chunks as {
+            sequence: number;
+            downloadUrl: string;
+            encryptionNonce: string;
+            isFinal: boolean;
+          }[];
+          const decryptedChunks: Uint8Array[] = [];
+          for (const chunk of chunks) {
+            const r2 = await fetch(chunk.downloadUrl);
+            const encrypted = new Uint8Array(await r2.arrayBuffer());
+            decryptedChunks.push(
+              decryptChunk(
+                encrypted,
+                chunk.encryptionNonce,
+                chunk.sequence,
+                chunk.isFinal,
+                oldSessionKey
+              )
+            );
+          }
+          const total = decryptedChunks.reduce((s, c) => s + c.length, 0);
+          plaintext = new Uint8Array(total);
+          let offset = 0;
+          for (const c of decryptedChunks) {
+            plaintext.set(c, offset);
+            offset += c.length;
+          }
+        } else {
+          const r2 = await fetch(dlData.downloadUrl);
+          const encrypted = new Uint8Array(await r2.arrayBuffer());
+          plaintext = decryptFileContent(encrypted, dlData.encryptionNonce, oldSessionKey);
+        }
+        oldSessionKey.fill(0);
+
+        // 2. Generate new keys and re-encrypt metadata.
+        const newSessionKey = generateSessionKey();
+        const newHier = generateHierarchicalKeypair();
+        const encryptedMetadata = encryptMetadata(
+          { name: file.name, type: file.type, size: plaintext.length },
+          newSessionKey
+        );
+
+        const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(
+          newSessionKey,
+          newHier.publicKey,
+          keys.encryptionPrivateKey
+        );
+
+        // 3. Re-wrap parent_keys_claim if this file has a parent.
+        let parentKeysClaim: string | null = null;
+        let parentKeysClaimWrappedBy: string | null = null;
+        if (file.parentId) {
+          const parentEntry = folderPrivHierCache.current.get(file.parentId);
+          if (!parentEntry) {
+            plaintext.fill(0);
+            newSessionKey.fill(0);
+            return {
+              ok: false,
+              error: "Parent folder not loaded — open it before rotating",
+            };
+          }
+          parentKeysClaim = wrapParentKeysClaim(
+            newSessionKey,
+            newHier.privateKey,
+            parentEntry.publicHierarchicalKey,
+            keys.encryptionPrivateKey
+          );
+          parentKeysClaimWrappedBy = keys.encryptionPublicKey;
+        }
+
+        // 4. Build remaining-collaborator wraps (owner re-wraps to
+        //    themselves, everyone else gets a new per-user wrap).
+        const currentCollabs = await fetch(
+          `/api/files/collaborators?fileId=${file.id}`
+        ).then((r) => r.json());
+        type RawCollab = {
+          userId: string;
+          publicEncryptionKey: string;
+          permissionLevel: "owner" | "editor" | "viewer";
+          isOwner: boolean;
+        };
+        const remainingCollaborators = (currentCollabs.collaborators as RawCollab[])
+          .filter((c) => c.userId !== revokedUserId)
+          .map((c) => ({
+            userId: c.userId,
+            encryptedPrivateHierarchicalKey: wrapPrivateHierarchicalKeyForUser(
+              newHier.privateKey,
+              c.publicEncryptionKey,
+              keys.encryptionPrivateKey
+            ),
+            wrappedByPublicKey: keys.encryptionPublicKey,
+            permissionLevel: c.permissionLevel,
+          }));
+
+        // 5. Chunk, encrypt, upload. Chunk boundaries are re-derived
+        //    from the newly plaintext bytes — the old chunk count and
+        //    the new one might differ if CHUNK_SIZE ever changes, but
+        //    today they match.
+        const totalChunks = Math.ceil(plaintext.length / CHUNK_SIZE) || 1;
+        const initRes = await fetch(`/api/files/${file.id}/rotate-init`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chunkCount: totalChunks }),
+        });
+        const initData = await initRes.json();
+        if (!initRes.ok) {
+          plaintext.fill(0);
+          newSessionKey.fill(0);
+          return { ok: false, error: initData.error || "Rotate init failed" };
+        }
+
+        const newChunks: {
+          sequence: number;
+          storageKey: string;
+          encryptionNonce: string;
+          sizeBytes: number;
+          isFinal: boolean;
+        }[] = [];
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, plaintext.length);
+          const chunkData = plaintext.subarray(start, end);
+          const isFinal = i === totalChunks - 1;
+          const encrypted = encryptChunk(chunkData, i, isFinal, newSessionKey);
+          const target = initData.chunkUrls[i];
+          const r2Res = await fetch(target.uploadUrl, {
+            method: "PUT",
+            body: encrypted.ciphertext as unknown as BodyInit,
+            headers: { "Content-Type": "application/octet-stream" },
+          });
+          if (!r2Res.ok) throw new Error(`Rotate upload failed at chunk ${i}`);
+          newChunks.push({
+            sequence: i,
+            storageKey: target.storageKey,
+            encryptionNonce: encrypted.nonce,
+            sizeBytes: encrypted.sizeBytes,
+            isFinal,
+          });
+        }
+
+        // 6. Commit the swap.
+        const commitRes = await fetch(`/api/files/${file.id}/rotate-commit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            encryptedMetadata: JSON.stringify(encryptedMetadata),
+            publicHierarchicalKey: newHier.publicKey,
+            encryptedSessionKeyByFile,
+            sessionKeyNonce,
+            parentKeysClaim,
+            parentKeysClaimWrappedBy,
+            newChunks,
+            remainingCollaborators,
+            revokedUserId,
+          }),
+        });
+        const commitData = await commitRes.json();
+        if (!commitRes.ok) {
+          plaintext.fill(0);
+          newSessionKey.fill(0);
+          return { ok: false, error: commitData.error || "Rotate commit failed" };
+        }
+
+        plaintext.fill(0);
+        newSessionKey.fill(0);
+        await fetchFiles(state.currentFolder, state.viewMode);
+        return { ok: true };
+      } catch (err) {
+        console.error("rotateAndRevoke", err);
+        return { ok: false, error: "Revoke rotation failed" };
+      }
+    },
+    [keys, fetchFiles, state.currentFolder, state.viewMode]
+  );
+
+  /**
    * Collaborator removes themselves from a shared file ("remove from
    * shared with me"). Distinct from unshare — no target user, and the
    * server rejects the call if the caller owns the file.
@@ -821,7 +1045,7 @@ export function useFiles(keys: {
   const createLink = useCallback(
     async (
       file: DecryptedFile,
-      opts?: { expiresAt?: string }
+      opts?: { expiresAt?: string; password?: string }
     ): Promise<{ ok: true; url: string; id: string } | { ok: false; error: string }> => {
       if (!keys) return { ok: false, error: "Not signed in" };
       try {
@@ -834,6 +1058,16 @@ export function useFiles(keys: {
         const { encryptedPrivateHierarchicalKey, linkKeyNonce } =
           wrapPrivateHierarchicalKeyForLink(privHier, linkKey);
 
+        // Phase 4.1: if a password is set, wrap the linkKey under a
+        // password-derived key and omit it from the URL fragment.
+        // Visitors will be prompted for the password on the share page.
+        let passwordPayload:
+          | { passwordSalt: string; passwordWrappedLinkKey: string; passwordWrapNonce: string }
+          | undefined;
+        if (opts?.password) {
+          passwordPayload = wrapLinkKeyWithPassword(linkKey, opts.password);
+        }
+
         const res = await fetch("/api/files/link/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -842,6 +1076,7 @@ export function useFiles(keys: {
             encryptedPrivateHierarchicalKey,
             linkKeyNonce,
             expiresAt: opts?.expiresAt,
+            ...(passwordPayload ?? {}),
           }),
         });
         const data = await res.json();
@@ -850,13 +1085,14 @@ export function useFiles(keys: {
           return { ok: false, error: data.error || "Failed to create link" };
         }
 
-        const fragment = encodeLinkKeyForFragment(linkKey);
+        // Password-protected links use an empty fragment — the password
+        // provides the key material, not the URL.
+        const fragment = passwordPayload ? "" : encodeLinkKeyForFragment(linkKey);
         linkKey.fill(0);
-        return {
-          ok: true,
-          id: data.id,
-          url: `${window.location.origin}/share/${data.id}#${fragment}`,
-        };
+        const url = passwordPayload
+          ? `${window.location.origin}/share/${data.id}`
+          : `${window.location.origin}/share/${data.id}#${fragment}`;
+        return { ok: true, id: data.id, url };
       } catch (err) {
         console.error("Create link error:", err);
         return { ok: false, error: "Failed to create link" };
@@ -983,6 +1219,7 @@ export function useFiles(keys: {
     shareFile,
     unshareFile,
     leaveShare,
+    rotateAndRevoke,
     setPermission,
     createLink,
     revokeLink,

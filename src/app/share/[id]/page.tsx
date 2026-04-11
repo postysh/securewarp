@@ -16,6 +16,7 @@ import {
   unwrapPrivateHierarchicalKeyFromLink,
   unwrapSessionKeyFromFile,
   unwrapParentKeysClaim,
+  unwrapLinkKeyWithPassword,
   decryptMetadata,
 } from "@/lib/crypto/file-crypto";
 import { decryptChunk } from "@/lib/crypto/chunked-encryption";
@@ -50,9 +51,29 @@ interface FileMeta {
   isFolder: boolean;
 }
 
+interface LinkMetadataPayload {
+  id: string;
+  fileId: string;
+  isFolder: boolean;
+  encryptedPrivateHierarchicalKey: string;
+  linkKeyNonce: string;
+  hasPassword: boolean;
+  passwordSalt: string | null;
+  passwordWrappedLinkKey: string | null;
+  passwordWrapNonce: string | null;
+  file: {
+    encryptedMetadata: string;
+    publicHierarchicalKey: string;
+    encryptedSessionKeyByFile: string;
+    sessionKeyNonce: string;
+    ownerPublicKey: string;
+  };
+}
+
 type ShareState =
   | { kind: "loading" }
   | { kind: "invalid"; reason: string }
+  | { kind: "password-required"; payload: LinkMetadataPayload; error?: string; submitting?: boolean }
   | { kind: "file"; meta: FileMeta }
   | { kind: "folder"; meta: FileMeta; stack: { id: string; name: string }[]; items: DecryptedChild[] };
 
@@ -65,6 +86,54 @@ function formatBytes(bytes: number): string {
   return `${size.toFixed(size < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
+function PasswordPrompt({
+  error,
+  submitting,
+  onSubmit,
+}: {
+  error?: string;
+  submitting: boolean;
+  onSubmit: (password: string) => void | Promise<void>;
+}) {
+  const [password, setPassword] = useState("");
+  return (
+    <div className="text-center">
+      <div className="w-14 h-14 mx-auto rounded-xl bg-accent-green/10 flex items-center justify-center mb-4">
+        <HugeiconsIcon icon={LockIcon} size={26} color="var(--accent-green-primary)" />
+      </div>
+      <div className="text-[14px] font-semibold text-text-primary mb-1">Password required</div>
+      <div className="text-[12px] text-text-disabled mb-4">
+        Enter the password to unlock this shared item.
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!submitting && password) onSubmit(password);
+        }}
+        className="flex flex-col items-center gap-3"
+      >
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
+          autoFocus
+          disabled={submitting}
+          className="w-full max-w-[280px] px-3 py-2 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40 disabled:opacity-60"
+        />
+        {error && <div className="text-[11px] text-accent-red">{error}</div>}
+        <button
+          type="submit"
+          disabled={submitting || password.length === 0}
+          className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {submitting ? "Unlocking…" : "Unlock"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default function SharePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [state, setState] = useState<ShareState>({ kind: "loading" });
@@ -74,71 +143,103 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
   // payloads. Used by both folder browsing and file downloads.
   const [folderPrivHier, setFolderPrivHier] = useState<Map<string, string>>(new Map());
 
+  // Deriving a linkKey from the link payload + caller's input (URL
+  // fragment OR password) is the single decryption entry point. Split
+  // out so the password-prompt path can re-run it after the user types.
+  const decryptAndEnter = async (payload: LinkMetadataPayload, linkKey: Uint8Array) => {
+    const privHier = unwrapPrivateHierarchicalKeyFromLink(
+      payload.encryptedPrivateHierarchicalKey,
+      payload.linkKeyNonce,
+      linkKey
+    );
+    const sessionKey = unwrapSessionKeyFromFile(
+      payload.file.encryptedSessionKeyByFile,
+      payload.file.sessionKeyNonce,
+      payload.file.ownerPublicKey,
+      privHier
+    );
+    const encMeta =
+      typeof payload.file.encryptedMetadata === "string"
+        ? JSON.parse(payload.file.encryptedMetadata)
+        : payload.file.encryptedMetadata;
+    const meta = decryptMetadata(encMeta, sessionKey);
+    sessionKey.fill(0);
+    linkKey.fill(0);
+
+    const fileMeta: FileMeta = {
+      id: payload.fileId,
+      name: meta.name,
+      type: meta.type,
+      size: meta.size,
+      isFolder: payload.isFolder,
+    };
+    setFolderPrivHier(new Map([[payload.fileId, privHier]]));
+    if (payload.isFolder) {
+      setState({
+        kind: "folder",
+        meta: fileMeta,
+        stack: [{ id: payload.fileId, name: meta.name }],
+        items: [],
+      });
+    } else {
+      setState({ kind: "file", meta: fileMeta });
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
-        const fragment = window.location.hash.replace(/^#/, "");
-        if (!fragment) {
-          setState({ kind: "invalid", reason: "Missing link key" });
-          return;
-        }
-
         const res = await fetch(`/api/files/link/${id}`);
         if (!res.ok) {
           setState({ kind: "invalid", reason: "This link is no longer valid" });
           return;
         }
-        const data = await res.json();
+        const payload = (await res.json()) as LinkMetadataPayload;
 
-        const linkKey = decodeLinkKeyFromFragment(fragment);
-        const privHier = unwrapPrivateHierarchicalKeyFromLink(
-          data.encryptedPrivateHierarchicalKey,
-          data.linkKeyNonce,
-          linkKey
-        );
-        const sessionKey = unwrapSessionKeyFromFile(
-          data.file.encryptedSessionKeyByFile,
-          data.file.sessionKeyNonce,
-          data.file.ownerPublicKey,
-          privHier
-        );
-
-        const encMeta =
-          typeof data.file.encryptedMetadata === "string"
-            ? JSON.parse(data.file.encryptedMetadata)
-            : data.file.encryptedMetadata;
-        const meta = decryptMetadata(encMeta, sessionKey);
-        sessionKey.fill(0);
-        linkKey.fill(0);
-
-        const fileMeta: FileMeta = {
-          id: data.fileId,
-          name: meta.name,
-          type: meta.type,
-          size: meta.size,
-          isFolder: data.isFolder,
-        };
-        // Seed the priv hier cache for the link's root file regardless
-        // of whether it's a folder or a single file. Folder children use
-        // this to walk parent_keys_claim; file downloads use it to
-        // unwrap the session key without re-fetching the link.
-        setFolderPrivHier(new Map([[data.fileId as string, privHier]]));
-        if (data.isFolder) {
-          setState({
-            kind: "folder",
-            meta: fileMeta,
-            stack: [{ id: data.fileId, name: meta.name }],
-            items: [],
-          });
-        } else {
-          setState({ kind: "file", meta: fileMeta });
+        if (payload.hasPassword) {
+          // URL fragment is intentionally empty on password-protected
+          // links. Prompt the user for the password instead of reading
+          // the fragment.
+          setState({ kind: "password-required", payload });
+          return;
         }
+
+        const fragment = window.location.hash.replace(/^#/, "");
+        if (!fragment) {
+          setState({ kind: "invalid", reason: "Missing link key" });
+          return;
+        }
+        const linkKey = decodeLinkKeyFromFragment(fragment);
+        await decryptAndEnter(payload, linkKey);
       } catch (err) {
         console.error("share-page load", err);
         setState({ kind: "invalid", reason: "Failed to decrypt link content" });
       }
     })();
   }, [id]);
+
+  const submitPassword = async (password: string) => {
+    if (state.kind !== "password-required") return;
+    setState({ ...state, submitting: true, error: undefined });
+    // Give the browser a tick to render the "Unlocking…" label before
+    // Argon2id hogs the main thread for ~300ms.
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      const payload = state.payload;
+      if (!payload.passwordWrappedLinkKey || !payload.passwordSalt || !payload.passwordWrapNonce) {
+        throw new Error("Missing password wrap");
+      }
+      const linkKey = unwrapLinkKeyWithPassword(
+        payload.passwordWrappedLinkKey,
+        payload.passwordSalt,
+        payload.passwordWrapNonce,
+        password
+      );
+      await decryptAndEnter(payload, linkKey);
+    } catch {
+      setState({ ...state, submitting: false, error: "Wrong password" });
+    }
+  };
 
   // When the state becomes folder, fetch the current folder's children.
   useEffect(() => {
@@ -312,6 +413,13 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
                 <div className="text-[14px] text-text-primary mb-2">Link unavailable</div>
                 <div className="text-[12px] text-text-disabled">{state.reason}</div>
               </div>
+            )}
+            {state.kind === "password-required" && (
+              <PasswordPrompt
+                error={state.error}
+                submitting={state.submitting ?? false}
+                onSubmit={submitPassword}
+              />
             )}
             {state.kind === "file" && (
               <div className="text-center">

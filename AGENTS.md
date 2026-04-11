@@ -179,6 +179,30 @@ server.
     recipient who already visited the link. Phase 5 will rotate the
     linkKey + re-wrap content on revoke.
 
+14. **Forward-secret revocation is a separate flow (Phase 5).**
+    `unshare`/`leave` is still the fast ACL-only path. The
+    cryptographic rotation lives in `rotateAndRevoke` on the client +
+    `/api/files/[id]/rotate-init` and `/rotate-commit` on the server.
+    The rotate-commit endpoint MUST validate that
+    `remainingCollaborators ∪ {revokedUserId}` equals the current
+    `file_keys` set to prevent the client from sneaking in an
+    unauthorised grant. The owner MUST remain in the collaborator set.
+    Folders are rejected — folder rotation requires recursively
+    re-wrapping every descendant's `parent_keys_claim` and hasn't
+    been implemented yet. Don't loosen the is_folder check without
+    also implementing that walk.
+
+13. **Password-protected links (Phase 4.1).** When
+    `file_links.password_salt IS NOT NULL`, the link URL has no
+    fragment — the password is the sole key material. The Argon2id
+    derivation uses `@noble/hashes/argon2` (Node + browser compatible)
+    with `{ t: 2, m: 32 MB, p: 1, dkLen: 32 }`. Don't swap these
+    parameters without a migration path: the stored ciphertexts can
+    only be unwrapped with the exact same derivation that wrapped
+    them. The plaintext password never reaches the server — the only
+    server-side witness is the salt (which is random and useless
+    alone) and the wrapped ciphertext.
+
 ## Touching the sharing surface — checklist
 
 Before changing any of `src/lib/crypto/file-crypto.ts`,

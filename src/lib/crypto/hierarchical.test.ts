@@ -12,6 +12,8 @@ import {
   generateLinkKey,
   wrapPrivateHierarchicalKeyForLink,
   unwrapPrivateHierarchicalKeyFromLink,
+  wrapLinkKeyWithPassword,
+  unwrapLinkKeyWithPassword,
   encodeLinkKeyForFragment,
   decodeLinkKeyFromFragment,
   encryptMetadata,
@@ -546,6 +548,88 @@ describe("Phase 4 link sharing (symmetric linkKey)", () => {
     expect(toBase64(recoveredSessionKey)).toBe(toBase64(sessionKey));
     expect(meta.name).toBe("leaked.txt");
     expect(meta.size).toBe(42);
+  });
+
+  it("password-wrap roundtrips a linkKey through Argon2id + secretbox", () => {
+    const linkKey = generateLinkKey();
+    const wrap = wrapLinkKeyWithPassword(linkKey, "correct horse battery staple");
+    const recovered = unwrapLinkKeyWithPassword(
+      wrap.passwordWrappedLinkKey,
+      wrap.passwordSalt,
+      wrap.passwordWrapNonce,
+      "correct horse battery staple"
+    );
+    expect(toBase64(recovered)).toBe(toBase64(linkKey));
+  });
+
+  it("wrong password is rejected by the password wrap", () => {
+    const linkKey = generateLinkKey();
+    const wrap = wrapLinkKeyWithPassword(linkKey, "hunter2");
+    expect(() =>
+      unwrapLinkKeyWithPassword(
+        wrap.passwordWrappedLinkKey,
+        wrap.passwordSalt,
+        wrap.passwordWrapNonce,
+        "hunter3"
+      )
+    ).toThrow(/Wrong link password/);
+  });
+
+  it("password-wrap produces different ciphertext each call (fresh salt)", () => {
+    const linkKey = generateLinkKey();
+    const a = wrapLinkKeyWithPassword(linkKey, "same-password");
+    const b = wrapLinkKeyWithPassword(linkKey, "same-password");
+    // Salts, nonces, and ciphertexts should all differ; the only
+    // thing in common is that both unwrap to the original linkKey.
+    expect(a.passwordSalt).not.toBe(b.passwordSalt);
+    expect(a.passwordWrapNonce).not.toBe(b.passwordWrapNonce);
+    expect(a.passwordWrappedLinkKey).not.toBe(b.passwordWrappedLinkKey);
+  });
+
+  it("phase 5: key rotation produces ciphertext the old session key cannot decrypt", () => {
+    // Sanity-check the forward-secrecy property that Phase 5 relies on.
+    // The actual rotate flow lives in the hook + server routes; this
+    // test pins the primitive-level invariant the flow depends on: a
+    // fresh session key cannot be opened with the old one, no matter
+    // what the attacker has cached.
+    const oldSessionKey = generateSessionKey();
+    const oldHier = generateHierarchicalKeypair();
+    const owner = makeUser();
+
+    const { encryptedSessionKeyByFile: oldWrap, sessionKeyNonce: oldNonce } =
+      wrapSessionKeyToFile(oldSessionKey, oldHier.publicKey, owner.privateKey);
+
+    // Rotate — brand new keys.
+    const newSessionKey = generateSessionKey();
+    const newHier = generateHierarchicalKeypair();
+    const { encryptedSessionKeyByFile: newWrap, sessionKeyNonce: newNonce } =
+      wrapSessionKeyToFile(newSessionKey, newHier.publicKey, owner.privateKey);
+
+    // The revoked user is simulated as an attacker holding the OLD
+    // private hier key and trying it against the NEW wrap.
+    expect(() =>
+      unwrapSessionKeyFromFile(newWrap, newNonce, owner.publicKey, oldHier.privateKey)
+    ).toThrow(/Box decryption failed/);
+
+    // Positive control: the current owner using the new key unwraps fine.
+    const recovered = unwrapSessionKeyFromFile(
+      newWrap,
+      newNonce,
+      owner.publicKey,
+      newHier.privateKey
+    );
+    expect(toBase64(recovered)).toBe(toBase64(newSessionKey));
+
+    // And the old wrap still works with the old key — rotation doesn't
+    // touch old ciphertext; the server deletes it after commit, but any
+    // cached copy remains self-consistent.
+    const oldRecovered = unwrapSessionKeyFromFile(
+      oldWrap,
+      oldNonce,
+      owner.publicKey,
+      oldHier.privateKey
+    );
+    expect(toBase64(oldRecovered)).toBe(toBase64(oldSessionKey));
   });
 
   it("revoking (simulating link deletion) has no effect on already-copied URLs cryptographically", () => {
