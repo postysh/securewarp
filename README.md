@@ -399,11 +399,12 @@ The endpoint supports both `GET` and `POST` so it works with Vercel Cron
 (which uses `GET` and forwards `Authorization: Bearer $CRON_SECRET`
 automatically) as well as external tooling.
 
-On **Vercel**, it's already wired: `vercel.json` declares an hourly cron at
-`0 * * * *` hitting `/api/admin/cleanup-stale`. Set the `CRON_SECRET` project
-env var (any ≥16-char string) and Vercel will inject the Bearer token. You
-can leave `CLEANUP_SECRET` unset in that environment, or set it to the same
-value for manual invocations.
+On **Vercel**, it's already wired: `vercel.json` declares a daily cron at
+`0 3 * * *` (03:00 UTC) hitting `/api/admin/cleanup-stale`. Daily is the
+Hobby plan cap — Pro unlocks sub-daily schedules if you need them. Set
+the `CRON_SECRET` project env var (any ≥16-char string) and Vercel will
+inject the Bearer token. You can leave `CLEANUP_SECRET` unset in that
+environment, or set it to the same value for manual invocations.
 
 Elsewhere (systemd timer, GitHub Actions, `cron`, etc.):
 
