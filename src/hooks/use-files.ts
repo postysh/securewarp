@@ -286,19 +286,24 @@ export function useFiles(keys: {
           files: decrypted,
           loading: false,
           currentFolder: mode !== "own" ? null : parentId,
-          viewMode: mode,
+          viewMode: mode === "own" && parentId ? s.viewMode : mode,
           breadcrumb:
-            mode === "starred"
-              ? [{ id: null, name: "Starred" }]
-              : mode === "recent"
-                ? [{ id: null, name: "Recent" }]
-                : mode === "trash"
-                  ? [{ id: null, name: "Trash" }]
-                  : mode === "shared"
-                    ? [{ id: null, name: "Shared with me" }]
-                    : s.viewMode !== "own" && mode === "own"
-                      ? [{ id: null, name: "My Drive" }]
-                      : s.breadcrumb,
+            // When navigating into a folder (parentId set), the
+            // breadcrumb was already updated by navigateToFolder —
+            // don't overwrite it here.
+            mode === "own" && parentId
+              ? s.breadcrumb
+              : mode === "starred"
+                ? [{ id: null, name: "Starred" }]
+                : mode === "recent"
+                  ? [{ id: null, name: "Recent" }]
+                  : mode === "trash"
+                    ? [{ id: null, name: "Trash" }]
+                    : mode === "shared"
+                      ? [{ id: null, name: "Shared with me" }]
+                      : s.viewMode !== "own" && mode === "own"
+                        ? [{ id: null, name: "My Drive" }]
+                        : s.breadcrumb,
         }));
       } catch (err) {
         console.error("Fetch files error:", err);
@@ -1758,15 +1763,23 @@ export function useFiles(keys: {
         // render keys by crumb.id and duplicates crash React.
         const lastCrumb = s.breadcrumb[s.breadcrumb.length - 1];
         if (lastCrumb?.id === folderId) {
-          return { ...s, currentFolder: folderId, viewMode: "own" };
+          return { ...s, currentFolder: folderId };
         }
+        const isNonOwn = s.viewMode !== "own";
+        const rootName =
+          s.viewMode === "starred" ? "Starred"
+            : s.viewMode === "recent" ? "Recent"
+              : s.viewMode === "shared" ? "Shared with me"
+                : null;
         return {
           ...s,
           currentFolder: folderId,
-          viewMode: "own",
+          // Keep the view mode so sidebar highlight stays correct.
+          // The server fetch always uses "own" for parentId-based
+          // queries, but the UI state remembers where we came from.
           breadcrumb:
-            s.viewMode !== "own"
-              ? [{ id: null, name: "My Drive" }, { id: folderId, name: folderName }]
+            isNonOwn && rootName
+              ? [{ id: null, name: rootName }, { id: folderId, name: folderName }]
               : [...s.breadcrumb, { id: folderId, name: folderName }],
         };
       });
@@ -1781,12 +1794,15 @@ export function useFiles(keys: {
     }));
     const target = state.breadcrumb[index];
     const targetId = target?.id ?? null;
-    // Breadcrumb root tells us which view we're returning to. "Shared with
-    // me" is the only other root besides "My Drive".
+    const rootName = state.breadcrumb[0]?.name;
     const rootMode: ViewMode =
-      state.breadcrumb[0]?.name === "Shared with me" ? "shared" : "own";
-    if (targetId === null && rootMode === "shared") {
-      await fetchFiles(null, "shared");
+      rootName === "Starred" ? "starred"
+        : rootName === "Recent" ? "recent"
+          : rootName === "Shared with me" ? "shared"
+            : rootName === "Trash" ? "trash"
+              : "own";
+    if (targetId === null) {
+      await fetchFiles(null, rootMode);
     } else {
       await fetchFiles(targetId, "own");
     }
