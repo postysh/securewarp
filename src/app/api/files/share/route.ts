@@ -6,6 +6,7 @@ import { getPublicUserByEmail } from "@/lib/db/users";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
 import { createNotification } from "@/lib/db/notifications";
+import { supabase } from "@/lib/db/supabase";
 import { logError } from "@/lib/log";
 
 const ShareSchema = z.object({
@@ -74,6 +75,15 @@ export async function POST(request: Request) {
       );
     }
 
+    // Check if the recipient already has access (re-share vs new share)
+    const { data: existingKey } = await supabase
+      .from("file_keys")
+      .select("user_id")
+      .eq("file_id", fileId)
+      .eq("user_id", recipient.id)
+      .single();
+    const isNewShare = !existingKey;
+
     await grantFileAccess({
       fileId,
       userId: recipient.id,
@@ -90,14 +100,16 @@ export async function POST(request: Request) {
       detail: permissionLevel ?? "editor",
     });
 
-    createNotification({
-      userId: recipient.id,
-      type: "file_shared",
-      title: "File shared with you",
-      description: `${session.email} shared a file with you`,
-      fileId,
-      actorUserId: session.userId,
-    });
+    if (isNewShare) {
+      createNotification({
+        userId: recipient.id,
+        type: "file_shared",
+        title: "File shared with you",
+        description: `${session.email} shared a file with you`,
+        fileId,
+        actorUserId: session.userId,
+      });
+    }
 
     return NextResponse.json({
       success: true,
