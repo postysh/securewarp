@@ -1187,13 +1187,14 @@ export function useFiles(keys: {
 
         const data = await res.json();
         if (!res.ok) return { ok: false, error: data.error || "Share failed" };
+        await fetchFiles(state.currentFolder, state.viewMode);
         return { ok: true };
       } catch (err) {
         console.error("Share error:", err);
         return { ok: false, error: "Share failed — check your keys and try again" };
       }
     },
-    [keys]
+    [keys, fetchFiles, state.currentFolder, state.viewMode]
   );
 
   /**
@@ -1212,13 +1213,14 @@ export function useFiles(keys: {
         });
         const data = await res.json();
         if (!res.ok) return { ok: false, error: data.error || "Unshare failed" };
+        await fetchFiles(state.currentFolder, state.viewMode);
         return { ok: true };
       } catch (err) {
         console.error("Unshare error:", err);
         return { ok: false, error: "Unshare failed" };
       }
     },
-    []
+    [fetchFiles, state.currentFolder, state.viewMode]
   );
 
   /**
@@ -1734,6 +1736,11 @@ export function useFiles(keys: {
         });
         const data = await res.json();
         if (!res.ok) return { ok: false, error: data.error || "Failed to remove" };
+        // Remove the file from local state immediately
+        setState((s) => ({
+          ...s,
+          files: s.files.filter((f) => f.id !== fileId),
+        }));
         return { ok: true };
       } catch (err) {
         console.error("Leave share error:", err);
@@ -1761,13 +1768,14 @@ export function useFiles(keys: {
         });
         const data = await res.json();
         if (!res.ok) return { ok: false, error: data.error || "Failed to update" };
+        await fetchFiles(state.currentFolder, state.viewMode);
         return { ok: true };
       } catch (err) {
         console.error("Permission error:", err);
         return { ok: false, error: "Failed to update" };
       }
     },
-    []
+    [fetchFiles, state.currentFolder, state.viewMode]
   );
 
   /**
