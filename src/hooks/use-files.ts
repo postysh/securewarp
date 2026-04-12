@@ -142,9 +142,28 @@ export function useFiles(keys: {
   //     must never inherit cached material from a prior session.
   //   - Cleared on unmount (logout triggers the provider unmount).
   //   - Not persisted anywhere — memory-only, tab-scoped.
-  const folderPrivHierCache = useRef<
-    Map<string, { publicHierarchicalKey: string; privateHierarchicalKey: string }>
-  >(new Map());
+  // LRU cache for folder hierarchical keys. Bounded to 128 entries
+  // to prevent unbounded memory growth for users with hundreds of
+  // folders. Evicts least-recently-used entries automatically.
+  const folderPrivHierCache = useRef((() => {
+    const MAX = 128;
+    const map = new Map<string, { publicHierarchicalKey: string; privateHierarchicalKey: string }>();
+    return {
+      get(key: string) {
+        const val = map.get(key);
+        if (val) { map.delete(key); map.set(key, val); } // move to end (most recent)
+        return val;
+      },
+      set(key: string, val: { publicHierarchicalKey: string; privateHierarchicalKey: string }) {
+        map.delete(key);
+        map.set(key, val);
+        if (map.size > MAX) { const first = map.keys().next().value; if (first) map.delete(first); }
+      },
+      has(key: string) { return map.has(key); },
+      clear() { map.clear(); },
+      get current() { return this; },
+    };
+  })());
 
   // File list cache — stale-while-revalidate. Keyed by
   // `${mode}:${parentId}`. Shows cached data instantly on navigation,
@@ -155,11 +174,11 @@ export function useFiles(keys: {
     // Wipe on key change (which covers logout → login swap) and on
     // unmount. Plaintext private hierarchical keys live here and must
     // not outlive the session they were decrypted in.
-    folderPrivHierCache.current = new Map();
-    fileListCache.current = new Map();
+    folderPrivHierCache.current.clear();
+    fileListCache.current.clear();
     return () => {
-      folderPrivHierCache.current = new Map();
-      fileListCache.current = new Map();
+      folderPrivHierCache.current.clear();
+      fileListCache.current.clear();
     };
   }, [keys]);
 
@@ -381,17 +400,27 @@ export function useFiles(keys: {
           size: 0,
         });
 
-        // Two-pass decrypt. First pass processes everything it can
-        // and populates folderPrivHierCache. Second pass retries
-        // files that couldn't decrypt because their parent wasn't
-        // cached yet (ordering issue in starred/recent views).
+        // Streaming two-pass decrypt. Flush results to the UI every
+        // BATCH_SIZE files so the first items appear in <50ms instead
+        // of waiting for the entire list to decrypt.
+        const BATCH_SIZE = 15;
         const results: DecryptedFile[] = [];
         const deferred: Record<string, unknown>[] = [];
+        let batchCount = 0;
         for (const f of sorted) {
           try {
             const result = tryDecrypt(f);
             if (result) {
               results.push(result);
+              batchCount++;
+              if (batchCount >= BATCH_SIZE) {
+                // Flush batch to UI
+                const snapshot = [...results];
+                setState((s) => ({ ...s, files: snapshot, loading: false }));
+                batchCount = 0;
+                // Yield to the event loop so React can paint
+                await new Promise((r) => setTimeout(r, 0));
+              }
             } else {
               deferred.push(f);
             }
@@ -2004,8 +2033,14 @@ export function useFiles(keys: {
         ? [{ id: null as string | null, name: rootName }, { id: folderId, name: folderName }]
         : [...state.breadcrumb, { id: folderId, name: folderName }];
       await fetchFiles(folderId, "own", bc);
+      // Prefetch sibling folders in the background so the next
+      // navigation is instant too.
+      const siblings = state.files.filter((f) => f.isFolder && f.id !== folderId);
+      for (const sib of siblings.slice(0, 5)) {
+        prefetchFolder(sib.id);
+      }
     }
-  }, [fetchFiles, state.activeWorkspace, state.breadcrumb, state.viewMode]);
+  }, [fetchFiles, prefetchFolder, state.activeWorkspace, state.breadcrumb, state.viewMode, state.files]);
 
   /**
    * Switch to a workspace. Sets the workspace root folder as the

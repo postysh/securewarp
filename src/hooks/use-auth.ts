@@ -26,6 +26,7 @@ import {
   readLockCacheMeta,
   unlockKeys,
 } from "@/lib/auth/lock-cache";
+import { clearMetadataCache } from "@/lib/cache/metadata-cache";
 
 import type { UserKeys } from "./use-user-keys";
 
@@ -353,6 +354,7 @@ export function useAuth() {
       // blob that was encrypted under the previous password — its
       // key material is no longer derivable.
       clearLockCache();
+    clearMetadataCache();
       saveLockCache({
         email,
         argon2Salt: toBase64(newArgon2Salt),
@@ -437,6 +439,7 @@ export function useAuth() {
       // The previous blob was encrypted under the OLD unlockCacheKey
       // and is no longer recoverable from the new password.
       clearLockCache();
+    clearMetadataCache();
       saveLockCache({
         email,
         argon2Salt: toBase64(newArgon2Salt),
@@ -566,6 +569,7 @@ export function useAuth() {
     // silently unlock without a fresh login. "Log out" means
     // log out, not "lock."
     clearLockCache();
+    clearMetadataCache();
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
   }

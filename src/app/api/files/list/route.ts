@@ -110,7 +110,11 @@ export async function GET(request: Request) {
       callerPermission = await getEffectivePermission(parentId, session.userId);
     }
 
-    return NextResponse.json({ files: enriched, callerPermission });
+    const response = NextResponse.json({ files: enriched, callerPermission });
+    // Edge cache — response is encrypted ciphertext, safe to cache
+    // per-user for 15 seconds. Mutations invalidate via client refetch.
+    response.headers.set("Cache-Control", "private, s-maxage=15, stale-while-revalidate=30");
+    return response;
   } catch (err) {
     logError("files.list", err);
     return NextResponse.json({ error: "Failed to list files" }, { status: 500 });
