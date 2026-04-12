@@ -32,9 +32,14 @@ export default function DriveClient() {
     // persisting the plaintext keys in localStorage — doing so would
     // survive any XSS payload, which defeats the purpose of
     // zero-knowledge client-side-only key storage.
-    const stored = sessionStorage.getItem("securewarp_keys");
-    if (stored) setKeys(JSON.parse(stored));
+    const refresh = () => {
+      const stored = sessionStorage.getItem("securewarp_keys");
+      setKeys(stored ? JSON.parse(stored) : null);
+    };
+    refresh();
     setHydrated(true);
+    window.addEventListener("securewarp-keys-updated", refresh);
+    return () => window.removeEventListener("securewarp-keys-updated", refresh);
   }, []);
 
   // Single useFiles instance shared between sidebar (for "Shared with me"
@@ -55,10 +60,7 @@ export default function DriveClient() {
   if (hydrated && !keys) {
     return (
       <ThemeProvider>
-        <AuthScreen mode="login" onUnlocked={() => {
-          const stored = sessionStorage.getItem("securewarp_keys");
-          if (stored) setKeys(JSON.parse(stored));
-        }} />
+        <AuthScreen mode="login" />
       </ThemeProvider>
     );
   }

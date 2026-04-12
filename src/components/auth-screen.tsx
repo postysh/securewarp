@@ -34,7 +34,7 @@ function FadeIn({ children, keyVal }: { children: React.ReactNode; keyVal: strin
   );
 }
 
-export function AuthScreen({ mode: initialMode = "login", onUnlocked }: { mode?: Mode; onUnlocked?: () => void }) {
+export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
@@ -86,8 +86,6 @@ export function AuthScreen({ mode: initialMode = "login", onUnlocked }: { mode?:
       if (unlockPassword.length === 0) return;
       await auth.unlock(unlockPassword);
       setUnlockPassword("");
-      const stored = sessionStorage.getItem("securewarp_keys");
-      if (stored && onUnlocked) onUnlocked();
       return;
     }
 

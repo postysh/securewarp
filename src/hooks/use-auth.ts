@@ -500,6 +500,19 @@ export function useAuth() {
         email: meta.email,
       };
       sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
+      window.dispatchEvent(new Event("securewarp-keys-updated"));
+
+      // Check if the server session is still valid. If the JWT
+      // expired, run a full SRP login with the same password to
+      // get a fresh JWT before navigating.
+      const sessionRes = await fetch("/api/auth/session");
+      if (!sessionRes.ok) {
+        setStep("Refreshing session...");
+        await login(meta.email, password);
+        // login() handles navigation on success
+        return;
+      }
+
       setState({
         loading: false,
         error: null,
@@ -507,7 +520,7 @@ export function useAuth() {
         recoveryKey: null,
         userKeys: keys,
       });
-      window.dispatchEvent(new Event("securewarp-keys-updated"));
+      router.push("/drive");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Unlock failed";
       setError(message.includes("Wrong") ? "Wrong password" : message);
