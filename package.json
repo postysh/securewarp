@@ -24,7 +24,7 @@
     "jose": "^6.2.2",
     "next": "16.2.2",
     "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "react-dom": "19.2.5",
     "secure-remote-password": "^0.3.1",
     "server-only": "^0.0.1",
     "tweetnacl": "^1.0.3",
