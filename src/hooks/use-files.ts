@@ -168,6 +168,61 @@ export function useFiles(keys: {
     fileListCache.current.clear();
   }, []);
 
+  /** Prefetch a folder's contents in the background (hover intent).
+   *  Runs the full fetch + decrypt + cache pipeline silently. When the
+   *  user clicks, the stale-while-revalidate shows cached data instantly. */
+  const prefetchingRef = useRef<Set<string>>(new Set());
+  const prefetchFolder = useCallback(
+    async (folderId: string) => {
+      const cacheKey = `own:${folderId}`;
+      if (fileListCache.current.has(cacheKey)) return;
+      if (prefetchingRef.current.has(cacheKey)) return;
+      if (!keys) return;
+      prefetchingRef.current.add(cacheKey);
+      try {
+        const res = await fetch(`/api/files/list?parentId=${folderId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.files) return;
+
+        const sorted = [...data.files].sort(
+          (a: Record<string, unknown>, b: Record<string, unknown>) =>
+            (b.is_folder ? 1 : 0) - (a.is_folder ? 1 : 0)
+        );
+        const results: DecryptedFile[] = [];
+        for (const f of sorted) {
+          const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
+          if (!encPrivHier) continue;
+          try {
+            const privHier = unwrapPrivateHierarchicalKey(encPrivHier, (f.wrapped_by_public_key as string) || "", keys.encryptionPrivateKey);
+            const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file as string, f.session_key_nonce as string, (f.owner_public_key as string) || "", privHier);
+            const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata as string) : f.encrypted_metadata;
+            const meta = decryptMetadata(encMeta, sk);
+            sk.fill(0);
+            if ((f.is_folder as boolean) && privHier && f.public_hierarchical_key) {
+              folderPrivHierCache.current.set(f.id as string, { publicHierarchicalKey: f.public_hierarchical_key as string, privateHierarchicalKey: privHier });
+            }
+            results.push({
+              id: f.id as string, isFolder: f.is_folder as boolean, parentId: (f.parent_id as string | null) ?? null,
+              ownerId: (f.owner_id as string) || "", createdAt: f.created_at as string, updatedAt: f.updated_at as string,
+              encryptedPrivateHierarchicalKey: encPrivHier, wrappedByPublicKey: (f.wrapped_by_public_key as string) || "",
+              ownerPublicKey: (f.owner_public_key as string) || "", publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
+              encryptedSessionKeyByFile: f.encrypted_session_key_by_file as string, sessionKeyNonce: f.session_key_nonce as string,
+              parentKeysClaim: (f.parent_keys_claim as string | null) ?? null, parentKeysClaimWrappedBy: (f.parent_keys_claim_wrapped_by as string | null) ?? null,
+              isStarred: !!(f.is_starred), fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
+              isShared: false, collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
+              name: meta.name, type: meta.type, size: meta.size,
+            } as DecryptedFile);
+          } catch { /* skip */ }
+        }
+        fileListCache.current.set(cacheKey, results);
+      } catch { /* silent */ } finally {
+        prefetchingRef.current.delete(cacheKey);
+      }
+    },
+    [keys]
+  );
+
   const fetchFiles = useCallback(
     async (parentId: string | null = null, mode: ViewMode = "own", breadcrumbOverride?: { id: string | null; name: string }[], viewModeOverride?: ViewMode) => {
       if (!keys) return;
@@ -2289,6 +2344,7 @@ export function useFiles(keys: {
     clearError,
     searchFiles,
     exportAllAsZip,
+    prefetchFolder,
   };
 }
 

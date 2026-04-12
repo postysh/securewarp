@@ -170,6 +170,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [userLabels, setUserLabels] = useState<{ id: string; name: string; color: string }[]>([]);
   const [filterLabel, setFilterLabel] = useState<{ id: string; name: string; color: string } | null>(null);
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -774,6 +775,14 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 if (!source || !dest) return;
                 setDragFileId(null);
                 await fileOps.moveFile(source, dest.id, dest.publicHierarchicalKey);
+              }}
+              onMouseEnter={() => {
+                if (file.isFolder && fileOps.viewMode === "own") {
+                  prefetchTimerRef.current = setTimeout(() => fileOps.prefetchFolder(file.id), 200);
+                }
+              }}
+              onMouseLeave={() => {
+                if (prefetchTimerRef.current) { clearTimeout(prefetchTimerRef.current); prefetchTimerRef.current = null; }
               }}
               onClick={() => {
                 if (file.isFolder && fileOps.viewMode !== "trash") {
