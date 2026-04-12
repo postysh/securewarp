@@ -91,44 +91,55 @@ export function NotificationBell() {
     }
   }, []);
 
-  // Initial fetch + Supabase Realtime subscription
+  // Initial fetch + polling + optional Supabase Realtime
   useEffect(() => {
     fetchNotifications();
 
-    let channel: ReturnType<typeof supabaseClient.channel> | null = null;
+    // Poll every 10 seconds as the reliable baseline. Realtime
+    // (below) delivers sub-second updates when connected, but
+    // polling covers env-var-missing, connection failures, and
+    // Vercel cold starts where the websocket hasn't connected yet.
+    const interval = setInterval(fetchNotifications, 10_000);
 
-    // Get the user's ID from the session endpoint so we can filter
-    // realtime events to only this user's notifications.
-    (async () => {
-      try {
-        const sessionRes = await fetch("/api/auth/session");
-        if (!sessionRes.ok) return;
-        const session = await sessionRes.json();
-        if (!session.userId) return;
+    // Realtime layer — additive, not a replacement
+    let channel: ReturnType<NonNullable<typeof supabaseClient>["channel"]> | null = null;
 
-        channel = supabaseClient
-          .channel(`notifications-${session.userId}`)
-          .on(
-            "postgres_changes",
-            {
-              event: "INSERT",
-              schema: "public",
-              table: "notifications",
-              filter: `user_id=eq.${session.userId}`,
-            },
-            (payload) => {
-              const row = payload.new as Notification;
-              setNotifications((prev) => [row, ...prev]);
-            }
-          )
-          .subscribe();
-      } catch {
-        // Realtime failed — fall back to polling
-      }
-    })();
+    if (supabaseClient) {
+      (async () => {
+        try {
+          const sessionRes = await fetch("/api/auth/session");
+          if (!sessionRes.ok) return;
+          const session = await sessionRes.json();
+          if (!session.userId) return;
+
+          channel = supabaseClient
+            .channel(`notifications-${session.userId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "INSERT",
+                schema: "public",
+                table: "notifications",
+                filter: `user_id=eq.${session.userId}`,
+              },
+              (payload) => {
+                const row = payload.new as Notification;
+                setNotifications((prev) => {
+                  if (prev.some((n) => n.id === row.id)) return prev;
+                  return [row, ...prev];
+                });
+              }
+            )
+            .subscribe();
+        } catch {
+          // Realtime failed — polling covers it
+        }
+      })();
+    }
 
     return () => {
-      if (channel) supabaseClient.removeChannel(channel);
+      clearInterval(interval);
+      if (channel && supabaseClient) supabaseClient.removeChannel(channel);
     };
   }, [fetchNotifications, userKeys]);
 
