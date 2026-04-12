@@ -86,7 +86,8 @@ export function AuthScreen({ mode: initialMode = "login", onUnlocked }: { mode?:
       if (unlockPassword.length === 0) return;
       await auth.unlock(unlockPassword);
       setUnlockPassword("");
-      if (onUnlocked) onUnlocked();
+      const stored = sessionStorage.getItem("securewarp_keys");
+      if (stored && onUnlocked) onUnlocked();
       return;
     }
 

@@ -454,6 +454,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
         ))}
       </nav>
 
+
       {/* Storage */}
       {collapsed ? (
         <div className="flex justify-center mb-1">
