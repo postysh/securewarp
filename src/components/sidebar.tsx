@@ -277,7 +277,10 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
       {/* Nav */}
       <nav className={`flex-1 py-3 overflow-y-auto overflow-x-hidden transition-all duration-200 ${collapsed ? "px-[10px]" : "px-2"}`}>
         <div className={`flex flex-col gap-[2px] ${collapsed ? "items-center" : ""}`}>
-          {navItems.map((item) => {
+          {navItems
+            // In a workspace, only show Drive and Trash
+            .filter((item) => !fileOps.activeWorkspace || item.id === "drive" || item.id === "trash")
+            .map((item) => {
             const handleClick = () => {
               if (item.id === "drive") fileOps.setViewMode("own");
               else if (item.id === "recent") fileOps.setViewMode("recent");
@@ -311,8 +314,8 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           })}
         </div>
 
-        {/* Pinned */}
-        {collapsed ? (
+        {/* Pinned (personal context only) */}
+        {!fileOps.activeWorkspace && (collapsed ? (
           pins.length > 0 && (
             <div className="flex flex-col items-center gap-[2px] mt-3 pt-3 border-t border-border-tertiary">
               <Tooltip label="Pinned">
@@ -350,10 +353,10 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
               </div>
             )}
           </div>
-        )}
+        ))}
 
-        {/* Labels */}
-        {collapsed ? (
+        {/* Labels (personal context only) */}
+        {!fileOps.activeWorkspace && (collapsed ? (
           labels.length > 0 && (
             <div className="flex flex-col items-center gap-[2px] mt-3 pt-3 border-t border-border-tertiary">
               <Tooltip label="Labels">
@@ -448,7 +451,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
               </div>
             )}
           </div>
-        )}
+        ))}
       </nav>
 
       {/* Storage */}

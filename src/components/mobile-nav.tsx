@@ -37,7 +37,10 @@ export function MobileNav({ onSearch }: MobileNavProps) {
     <>
       <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-bg-side border-t border-border-tertiary safe-area-bottom">
         <div className="flex items-center justify-around h-[56px]">
-          {navItems.map((item) => {
+          {navItems
+            .filter((item) => !fileOps.activeWorkspace || item.id === "drive" || item.id === "search" || item.id === "settings" || item.id === "trash")
+            .filter((item) => !fileOps.activeWorkspace || item.id !== "shared")
+            .map((item) => {
             const isActive = item.id === active;
             return (
               <button
