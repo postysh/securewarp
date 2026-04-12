@@ -70,6 +70,7 @@ const csp = [
   `script-src ${scriptSources.join(" ")}`,
   `style-src 'self' 'unsafe-inline'`,
   `img-src 'self' data: blob:`,
+  `media-src 'self' blob:`,
   `font-src 'self' data:`,
   `connect-src ${connectSources.join(" ")}`,
   `frame-src ${frameSources.join(" ")}`,

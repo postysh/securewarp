@@ -8,6 +8,8 @@ import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
+import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
+import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import { useFilesContext } from "@/hooks/use-files";
 
 interface FilePreviewProps {
@@ -17,19 +19,15 @@ interface FilePreviewProps {
   onNavigate: (fileId: string) => void;
 }
 
-function isPreviewable(type: string): boolean {
-  if (type.startsWith("image/")) return true;
-  if (type === "application/pdf") return true;
-  if (type.startsWith("text/")) return true;
-  if (type === "application/json") return true;
-  if (type === "application/xml" || type === "text/xml") return true;
-  return false;
-}
-
 function isImage(type: string): boolean {
   return type.startsWith("image/");
 }
-
+function isVideo(type: string): boolean {
+  return type.startsWith("video/");
+}
+function isAudio(type: string): boolean {
+  return type.startsWith("audio/");
+}
 function isText(type: string): boolean {
   return (
     type.startsWith("text/") ||
@@ -38,6 +36,19 @@ function isText(type: string): boolean {
     type === "text/xml"
   );
 }
+function isPreviewable(type: string): boolean {
+  return (
+    isImage(type) ||
+    isVideo(type) ||
+    isAudio(type) ||
+    type === "application/pdf" ||
+    isText(type)
+  );
+}
+
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 5;
+const ZOOM_STEP = 0.25;
 
 export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePreviewProps) {
   const fileOps = useFilesContext();
@@ -49,7 +60,9 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
     type: string;
   } | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
   const blobUrlRef = useRef<string | null>(null);
+  const imgContainerRef = useRef<HTMLDivElement>(null);
 
   const cleanup = useCallback(() => {
     if (blobUrlRef.current) {
@@ -59,6 +72,7 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
     setPreview(null);
     setTextContent(null);
     setError(null);
+    setZoom(1);
   }, []);
 
   const loadPreview = useCallback(
@@ -105,20 +119,52 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
     if (hasNext) onNavigate(fileIds[currentIndex + 1]);
   }, [hasNext, currentIndex, fileIds, onNavigate]);
 
+  const zoomIn = useCallback(() => setZoom((z) => Math.min(z + ZOOM_STEP, MAX_ZOOM)), []);
+  const zoomOut = useCallback(() => setZoom((z) => Math.max(z - ZOOM_STEP, MIN_ZOOM)), []);
+  const zoomReset = useCallback(() => setZoom(1), []);
+
   useEffect(() => {
     if (!fileId) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
       if (e.key === "ArrowLeft") goPrev();
       if (e.key === "ArrowRight") goNext();
+      if (e.key === "+" || e.key === "=") zoomIn();
+      if (e.key === "-") zoomOut();
+      if (e.key === "0") zoomReset();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [fileId, onClose, goPrev, goNext]);
+  }, [fileId, onClose, goPrev, goNext, zoomIn, zoomOut, zoomReset]);
+
+  // Scroll-wheel zoom on images
+  useEffect(() => {
+    const el = imgContainerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+      setZoom((z) => Math.min(Math.max(z + delta, MIN_ZOOM), MAX_ZOOM));
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  });
 
   if (!fileId) return null;
 
   const fileName = preview?.name ?? fileOps.files.find((f) => f.id === fileId)?.name ?? "File";
+  const showZoom = preview && isImage(preview.type);
+  const zoomPct = Math.round(zoom * 100);
+
+  const triggerDownload = () => {
+    if (!preview) return;
+    const a = document.createElement("a");
+    a.href = preview.blobUrl;
+    a.download = preview.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex flex-col bg-black/90 animate-fade-in">
@@ -133,18 +179,33 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
             {fileName}
           </span>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Zoom controls — images only */}
+          {showZoom && (
+            <div className="flex items-center gap-0.5 mr-2">
+              <button
+                onClick={zoomOut}
+                className="flex items-center justify-center w-[28px] h-[28px] rounded-[6px] text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={MinusSignIcon} size={14} />
+              </button>
+              <button
+                onClick={zoomReset}
+                className="flex items-center justify-center h-[28px] px-2 rounded-[6px] text-[11px] font-mono text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer min-w-[48px]"
+              >
+                {zoomPct}%
+              </button>
+              <button
+                onClick={zoomIn}
+                className="flex items-center justify-center w-[28px] h-[28px] rounded-[6px] text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={PlusSignIcon} size={14} />
+              </button>
+            </div>
+          )}
           {preview && (
             <button
-              onClick={() => {
-                if (!preview) return;
-                const a = document.createElement("a");
-                a.href = preview.blobUrl;
-                a.download = preview.name;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-              }}
+              onClick={triggerDownload}
               className="flex items-center gap-1.5 h-[32px] px-3 rounded-[8px] text-[12px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             >
               <HugeiconsIcon icon={Download04Icon} size={14} />
@@ -196,14 +257,56 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
           </div>
         )}
 
-        {/* Image preview */}
+        {/* Image preview with zoom */}
         {!loading && preview && isImage(preview.type) && (
-          <img
+          <div
+            ref={imgContainerRef}
+            className="flex items-center justify-center overflow-auto w-full h-full"
+            onDoubleClick={zoomReset}
+          >
+            <img
+              src={preview.blobUrl}
+              alt={preview.name}
+              className="select-none transition-transform duration-150"
+              style={{
+                transform: `scale(${zoom})`,
+                maxWidth: zoom <= 1 ? "90vw" : undefined,
+                maxHeight: zoom <= 1 ? "85vh" : undefined,
+              }}
+              draggable={false}
+            />
+          </div>
+        )}
+
+        {/* Video preview */}
+        {!loading && preview && isVideo(preview.type) && (
+          <video
             src={preview.blobUrl}
-            alt={preview.name}
-            className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg select-none"
-            draggable={false}
-          />
+            controls
+            autoPlay
+            className="max-w-[90vw] max-h-[85vh] rounded-lg"
+          >
+            Your browser does not support this video format.
+          </video>
+        )}
+
+        {/* Audio preview */}
+        {!loading && preview && isAudio(preview.type) && (
+          <div className="flex flex-col items-center gap-6 max-w-[400px]">
+            <div className="w-24 h-24 rounded-2xl bg-white/5 flex items-center justify-center">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 18V5l12-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="16" r="3" />
+              </svg>
+            </div>
+            <span className="text-[14px] text-white/70 text-center truncate max-w-full">
+              {preview.name}
+            </span>
+            <audio src={preview.blobUrl} controls autoPlay className="w-full">
+              Your browser does not support this audio format.
+            </audio>
+          </div>
         )}
 
         {/* PDF preview */}
@@ -232,14 +335,7 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
               {preview.type || "Unknown type"} — {preview.name}
             </p>
             <button
-              onClick={() => {
-                const a = document.createElement("a");
-                a.href = preview.blobUrl;
-                a.download = preview.name;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-              }}
+              onClick={triggerDownload}
               className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-white/10 text-white hover:bg-white/20 transition-colors cursor-pointer"
             >
               Download instead
