@@ -503,14 +503,47 @@ export function useAuth() {
       window.dispatchEvent(new Event("securewarp-keys-updated"));
 
       // Check if the server session is still valid. If the JWT
-      // expired, run a full SRP login with the same password to
-      // get a fresh JWT before navigating.
+      // expired, run a full SRP handshake (without Turnstile) to
+      // get a fresh JWT. The user already proved they know the
+      // password via Argon2 + lock cache unseal.
       const sessionRes = await fetch("/api/auth/session");
       if (!sessionRes.ok) {
         setStep("Refreshing session...");
-        await login(meta.email, password);
-        // login() handles navigation on success
-        return;
+        // Re-derive SRP key from the same master key chain
+        const masterKey2 = await deriveMainKey(password, fromBase64(meta.argon2Salt));
+        const { srpKey: srpKey2 } = splitMasterKey(masterKey2);
+
+        const { generateClientEphemeral, deriveClientSession, verifyServerProof } = await import("@/lib/srp/client");
+        const { clientSecretEphemeral, clientPublicEphemeral } = generateClientEphemeral();
+
+        // Init (no Turnstile)
+        const initRes = await fetch("/api/auth/login/init-refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: meta.email, clientPublicEphemeral }),
+        });
+        const initData = await initRes.json();
+        if (!initRes.ok) throw new Error(initData.error || "Session refresh failed");
+
+        // Derive + verify
+        const { clientSession, clientProof } = deriveClientSession(
+          clientSecretEphemeral,
+          clientPublicEphemeral,
+          initData.serverPublicEphemeral,
+          initData.srpSalt,
+          srpKey2
+        );
+
+        const verifyRes = await fetch("/api/auth/login/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ srpSessionId: initData.srpSessionId, clientProof }),
+        });
+        const verifyData = await verifyRes.json();
+        if (!verifyRes.ok) throw new Error(verifyData.error || "Session refresh failed");
+
+        verifyServerProof(clientPublicEphemeral, clientSession, verifyData.serverProof);
+        // JWT is now set via the verify endpoint's createSession call
       }
 
       setState({
