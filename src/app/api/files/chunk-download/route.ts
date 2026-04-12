@@ -65,9 +65,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ chunked: true, chunks: chunkDownloads, ...base });
     }
 
-    // Legacy single-blob file
+    // Folder or file without content — return key data only (used
+    // by the client's parent-chain fetch to populate the hier key
+    // cache for inherited children).
     if (!file.storage_key) {
-      return NextResponse.json({ error: "File has no content" }, { status: 404 });
+      return NextResponse.json({ chunked: false, noContent: true, ...base });
     }
 
     const downloadUrl = await getDownloadUrl(file.storage_key);
