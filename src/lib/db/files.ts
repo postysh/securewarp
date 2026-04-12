@@ -227,24 +227,25 @@ export async function getInheritedChildren(
   parentId: string,
   userId: string
 ): Promise<FileRowWithKey[]> {
-  // 1. Access check — is the parent accessible to the caller?
-  const parent = await getFileById(parentId, userId);
+  // 1. Access check + fetch children in parallel
+  const [parent, childResult] = await Promise.all([
+    getFileById(parentId, userId),
+    supabase
+      .from("files")
+      .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+      .eq("parent_id", parentId)
+      .eq("upload_complete", true)
+      .is("deleted_at", null)
+      .order("is_folder", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(100),
+  ]);
   if (!parent) return [];
-
-  // 2. All direct children, no file_keys filter (children of an inherited
-  //    folder commonly have no direct row for this user).
-  const { data: files, error } = await supabase
-    .from("files")
-    .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
-    .eq("parent_id", parentId)
-    .eq("upload_complete", true)
-    .is("deleted_at", null)
-    .order("is_folder", { ascending: false })
-    .order("created_at", { ascending: false });
+  const { data: files, error } = childResult;
   if (error) throw new Error(`Failed to fetch children: ${error.message}`);
   if (!files || files.length === 0) return [];
 
-  // 3. Any file_keys rows the caller does hold directly on these children.
+  // 2. Fetch caller's direct file_keys rows on these children
   const fileIds = (files as { id: string }[]).map((f) => f.id);
   const { data: ownRows, error: keysErr } = await supabase
     .from("file_keys")
