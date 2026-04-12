@@ -137,62 +137,62 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
       className="fixed z-[9999] w-[240px] rounded-[10px] bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
       style={{ top: pos.top, left: pos.left, boxShadow: "var(--shadow-l2)" }}
     >
-      <div className="py-1.5">
-        <div className="px-3 py-1.5">
-          <span className="text-[10px] font-mono uppercase text-text-disabled tracking-wider">Workspaces</span>
-        </div>
-        {/* Personal */}
-        <button
-          onClick={switchToPersonal}
-          className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-bg-cell-hover transition-colors cursor-pointer"
-        >
-          <div className="w-7 h-7 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ backgroundColor: "var(--accent-green-primary)" }}>
-            P
-          </div>
-          <div className="flex-1 min-w-0 text-left">
-            <p className="text-[12px] text-text-primary truncate">Personal</p>
-            <p className="text-[10px] text-text-disabled">My Drive</p>
-          </div>
-          {activeId === null && <HugeiconsIcon icon={Tick01Icon} size={14} color="var(--accent-green-primary)" />}
-        </button>
-        {/* Workspaces */}
-        {workspaces.map((ws) => (
-          <button
-            key={ws.id}
-            onClick={() => switchToWorkspace(ws)}
-            className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-bg-cell-hover transition-colors cursor-pointer"
-          >
-            <div className="w-7 h-7 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ backgroundColor: colorForName(ws.name) }}>
-              {ws.name.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0 text-left">
-              <p className="text-[12px] text-text-primary truncate">{ws.name}</p>
-              <p className="text-[10px] text-text-disabled">{ws.role}</p>
-            </div>
-            {ws.id === activeId && <HugeiconsIcon icon={Tick01Icon} size={14} color="var(--accent-green-primary)" />}
-          </button>
-        ))}
-      </div>
-
-      <div className="py-1.5 border-t border-border-tertiary">
-        <div className="px-3 py-1.5">
+      {/* Create new — always at top */}
+      <div className="px-3 pt-3 pb-2">
+        <div className="flex items-center gap-2">
           <input
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="New workspace name"
-            className="w-full px-2 py-1.5 rounded-[6px] bg-bg-field text-[11px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-green/30"
+            placeholder="New workspace..."
+            className="flex-1 px-2 py-1.5 rounded-[6px] bg-bg-field text-[11px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-green/30"
             onKeyDown={(e) => { if (e.key === "Enter") createWorkspace(); }}
           />
+          <button
+            onClick={createWorkspace}
+            disabled={creating || !newName.trim()}
+            className="h-[28px] px-2.5 rounded-[6px] text-[11px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-40 shrink-0"
+          >
+            {creating ? "..." : <HugeiconsIcon icon={Add01Icon} size={14} />}
+          </button>
         </div>
-        <button
-          onClick={createWorkspace}
-          disabled={creating || !newName.trim()}
-          className="w-full flex items-center gap-2.5 px-3 h-[32px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer disabled:opacity-50"
-        >
-          <HugeiconsIcon icon={Add01Icon} size={14} color="var(--icon-tertiary)" />
-          {creating ? "Creating..." : "Create workspace"}
-        </button>
+      </div>
+
+      {/* Workspace list — scrollable */}
+      <div className="max-h-[240px] overflow-y-auto border-t border-border-tertiary">
+        <div className="py-1.5">
+          {/* Personal */}
+          <button
+            onClick={switchToPersonal}
+            className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-bg-cell-hover transition-colors cursor-pointer"
+          >
+            <div className="w-7 h-7 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ backgroundColor: "var(--accent-green-primary)" }}>
+              P
+            </div>
+            <div className="flex-1 min-w-0 text-left">
+              <p className="text-[12px] text-text-primary truncate">Personal</p>
+              <p className="text-[10px] text-text-disabled">My Drive</p>
+            </div>
+            {activeId === null && <HugeiconsIcon icon={Tick01Icon} size={14} color="var(--accent-green-primary)" />}
+          </button>
+          {/* Workspaces */}
+          {workspaces.map((ws) => (
+            <button
+              key={ws.id}
+              onClick={() => switchToWorkspace(ws)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            >
+              <div className="w-7 h-7 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ backgroundColor: colorForName(ws.name) }}>
+                {ws.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-[12px] text-text-primary truncate">{ws.name}</p>
+                <p className="text-[10px] text-text-disabled">{ws.role}</p>
+              </div>
+              {ws.id === activeId && <HugeiconsIcon icon={Tick01Icon} size={14} color="var(--accent-green-primary)" />}
+            </button>
+          ))}
+        </div>
       </div>
     </div>,
     document.body
