@@ -119,19 +119,19 @@ export function RenameModal({
             Re-encrypted locally. The server never sees the new name.
           </div>
 
-          <div className="flex items-center justify-end gap-2 mt-5">
+          <div className="flex items-center justify-end gap-2 mt-5 flex-wrap">
             <button
               type="button"
               onClick={onClose}
               disabled={busy}
-              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
+              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={disabled}
-              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
+              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] shrink-0 whitespace-nowrap"
             >
               {busy ? "Renaming…" : "Rename"}
             </button>

@@ -214,8 +214,8 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
         )}
 
         {/* Actions */}
-        <div className="flex items-center justify-end gap-2 px-5 pb-5">
-          <button onClick={onClose} disabled={busy} className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50">
+        <div className="flex items-center justify-end gap-2 px-5 pb-5 flex-wrap">
+          <button onClick={onClose} disabled={busy} className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap">
             Cancel
           </button>
           <button

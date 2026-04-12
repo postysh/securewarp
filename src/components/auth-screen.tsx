@@ -475,12 +475,12 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                 resetRef={recoveryTurnstileResetRef}
               />
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              <div className="flex items-center justify-end gap-2 pt-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => setShowRecovery(false)}
                   disabled={auth.loading}
-                  className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
+                  className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
                 >
                   Cancel
                 </button>
@@ -492,7 +492,7 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                     (newPassword !== confirmNewPassword) ||
                     !recoveryWords.trim()
                   }
-                  className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
                 >
                   {auth.loading
                     ? (auth.step || "Processing...")
