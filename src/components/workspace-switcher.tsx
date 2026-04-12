@@ -38,7 +38,10 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const fileOps = useFilesContext();
   const [open, setOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null); // null = personal
+  const [activeId, setActiveId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return sessionStorage.getItem("securewarp_active_workspace") || null;
+  });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -47,9 +50,23 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
 
   useEffect(() => {
     fetch("/api/workspaces").then((r) => r.json()).then((d) => {
-      if (d.workspaces) setWorkspaces(d.workspaces);
+      if (d.workspaces) {
+        setWorkspaces(d.workspaces);
+        // Restore active workspace from sessionStorage after refresh
+        const savedId = sessionStorage.getItem("securewarp_active_workspace");
+        if (savedId) {
+          const ws = d.workspaces.find((w: Workspace) => w.id === savedId);
+          if (ws) {
+            setActiveId(ws.id);
+            fileOps.navigateToWorkspace(ws.id, ws.rootFolderId, ws.name);
+          } else {
+            // Workspace no longer exists
+            sessionStorage.removeItem("securewarp_active_workspace");
+          }
+        }
+      }
     }).catch(() => {});
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updatePos = useCallback(() => {
     if (!btnRef.current) return;
@@ -79,12 +96,14 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
 
   const switchToPersonal = () => {
     setActiveId(null);
+    sessionStorage.removeItem("securewarp_active_workspace");
     fileOps.leaveWorkspace();
     setOpen(false);
   };
 
   const switchToWorkspace = (ws: Workspace) => {
     setActiveId(ws.id);
+    sessionStorage.setItem("securewarp_active_workspace", ws.id);
     fileOps.navigateToWorkspace(ws.id, ws.rootFolderId, ws.name);
     setOpen(false);
   };
