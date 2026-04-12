@@ -1,5 +1,6 @@
 import "server-only";
 import { supabase } from "@/lib/db/supabase";
+import { logError } from "@/lib/log";
 
 /**
  * Distributed rate limiter backed by Postgres via the `check_rate_limit` RPC
@@ -25,7 +26,7 @@ export async function checkRateLimit(
     // against password spraying and recovery-token enumeration; losing
     // it wholesale during an outage is worse than a brief login outage
     // that forces the operator to investigate.
-    console.error("Rate limit RPC failed (failing closed):", error.message);
+    logError("rate-limit.check", new Error(error.message));
     return false;
   }
 
@@ -49,6 +50,6 @@ export async function resetRateLimit(key: string): Promise<void> {
     .delete()
     .eq("key", key);
   if (error) {
-    console.error("Rate limit reset failed:", error.message);
+    logError("rate-limit.reset", new Error(error.message));
   }
 }

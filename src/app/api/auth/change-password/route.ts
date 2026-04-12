@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { updateUserAuth } from "@/lib/db/users";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const ChangePasswordSchema = z.object({
@@ -29,6 +31,10 @@ export async function POST(request: Request) {
 
     const data = parsed.data;
 
+    if (!(await checkRateLimit(`change-pw:${session.userId}`, 5))) {
+      return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
+    }
+
     await updateUserAuth(session.userId, {
       srpSalt: data.newSrpSalt,
       srpVerifier: data.newSrpVerifier,
@@ -38,6 +44,7 @@ export async function POST(request: Request) {
       recoveryEncryptedData: data.newRecoveryEncryptedData,
     });
 
+    auditEvent({ event: "auth.password_change", actorUserId: session.userId });
     return NextResponse.json({ success: true });
   } catch (err) {
     logError("auth.change-password", err);

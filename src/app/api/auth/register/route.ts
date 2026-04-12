@@ -4,6 +4,7 @@ import { createUser, getUserByEmail } from "@/lib/db/users";
 import { createSession } from "@/lib/auth/session";
 import { normalizeEmail } from "@/lib/auth/email";
 import { verifyTurnstile } from "@/lib/auth/turnstile";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -34,6 +35,12 @@ export async function POST(request: Request) {
     // distinct accounts. The DB `users.email` unique constraint is
     // case-sensitive so the only defence lives at this boundary.
     const email = normalizeEmail(data.email);
+
+    // Rate limit by IP to prevent mass account creation
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    if (!(await checkRateLimit(`register:${ip}`, 5))) {
+      return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
+    }
 
     // Check if user already exists — don't reveal email existence
     const existing = await getUserByEmail(email);
