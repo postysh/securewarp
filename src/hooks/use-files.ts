@@ -609,7 +609,8 @@ export function useFiles(keys: {
    */
   const previewFile = useCallback(
     async (
-      fileId: string
+      fileId: string,
+      onProgress?: (pct: number) => void
     ): Promise<
       { ok: true; blobUrl: string; name: string; type: string } | { ok: false; error: string }
     > => {
@@ -648,7 +649,8 @@ export function useFiles(keys: {
             isFinal: boolean;
           }[];
           const decryptedChunks: Uint8Array[] = [];
-          for (const chunk of chunks) {
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
             const r2Res = await fetch(chunk.downloadUrl);
             const encrypted = new Uint8Array(await r2Res.arrayBuffer());
             decryptedChunks.push(
@@ -660,6 +662,7 @@ export function useFiles(keys: {
                 sessionKey
               )
             );
+            onProgress?.(Math.round(((i + 1) / chunks.length) * 100));
           }
           const totalSize = decryptedChunks.reduce((s, c) => s + c.length, 0);
           decryptedContent = new Uint8Array(totalSize);

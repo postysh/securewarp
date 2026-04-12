@@ -53,6 +53,7 @@ const ZOOM_STEP = 0.25;
 export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePreviewProps) {
   const fileOps = useFilesContext();
   const [loading, setLoading] = useState(false);
+  const [decryptProgress, setDecryptProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
     blobUrl: string;
@@ -79,8 +80,10 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
     async (id: string) => {
       cleanup();
       setLoading(true);
-      const result = await fileOps.previewFile(id);
+      setDecryptProgress(null);
+      const result = await fileOps.previewFile(id, (pct) => setDecryptProgress(pct));
       setLoading(false);
+      setDecryptProgress(null);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -244,8 +247,24 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
         {/* Loading */}
         {loading && (
           <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
-            <span className="text-[13px] text-white/50">Decrypting…</span>
+            {decryptProgress !== null ? (
+              <>
+                <div className="w-[200px] h-[4px] bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-white/70 rounded-full transition-all duration-200"
+                    style={{ width: `${decryptProgress}%` }}
+                  />
+                </div>
+                <span className="text-[13px] text-white/50">
+                  Decrypting… {decryptProgress}%
+                </span>
+              </>
+            ) : (
+              <>
+                <div className="w-8 h-8 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
+                <span className="text-[13px] text-white/50">Decrypting…</span>
+              </>
+            )}
           </div>
         )}
 
@@ -311,10 +330,10 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
 
         {/* PDF preview */}
         {!loading && preview && preview.type === "application/pdf" && (
-          <iframe
-            src={preview.blobUrl}
-            title={preview.name}
-            className="w-[90vw] h-[85vh] max-w-[1000px] rounded-lg bg-white"
+          <embed
+            src={`${preview.blobUrl}#view=FitH`}
+            type="application/pdf"
+            className="w-[90vw] h-[85vh] max-w-[1000px] rounded-lg"
           />
         )}
 
