@@ -154,6 +154,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [shareTarget, setShareTarget] = useState<DecryptedFile | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [dragFileId, setDragFileId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; fileId: string; isFolder: boolean } | null>(null);
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false);
@@ -228,6 +230,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     // Drag-drop uploads only make sense in the owned drive. In "Shared with
     // me" the user has no write target — silently drop the files.
     if (fileOps.viewMode === "shared" || fileOps.viewMode === "trash") return;
+    // Ignore internal file-move drags (they set text/plain with a UUID).
+    if (e.dataTransfer.types.includes("text/plain") && !e.dataTransfer.files.length) return;
     const files = e.dataTransfer.files;
     if (!files.length) return;
     for (const file of Array.from(files)) {
@@ -566,9 +570,37 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           return (
             <div
               key={file.id}
+              draggable={fileOps.viewMode === "own" && !file.uploading}
+              onDragStart={(e) => {
+                setDragFileId(file.id);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", file.id);
+              }}
+              onDragEnd={() => {
+                setDragFileId(null);
+                setDropTargetId(null);
+              }}
+              onDragOver={(e) => {
+                if (!dragFileId || !file.isFolder || dragFileId === file.id) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setDropTargetId(file.id);
+              }}
+              onDragLeave={() => {
+                if (dropTargetId === file.id) setDropTargetId(null);
+              }}
+              onDrop={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDropTargetId(null);
+                if (!dragFileId || !file.isFolder || dragFileId === file.id) return;
+                const source = fileOps.files.find((f) => f.id === dragFileId);
+                const dest = fileOps.files.find((f) => f.id === file.id);
+                if (!source || !dest) return;
+                setDragFileId(null);
+                await fileOps.moveFile(source, dest.id, dest.publicHierarchicalKey);
+              }}
               onClick={() => {
-                // No folder drill-down from the trash view — the
-                // trashed subtree is flat-rooted there.
                 if (file.isFolder && fileOps.viewMode !== "trash") {
                   fileOps.navigateToFolder(file.id, file.name);
                 }
@@ -578,7 +610,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
               className={`group flex items-center h-[56px] px-4 rounded-xl border cursor-pointer transition-all mb-1.5 ${
-                isSelected ? "border-accent-green/20 bg-bg-overlay-tertiary" : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
+                dropTargetId === file.id
+                  ? "border-accent-green bg-accent-green/5"
+                  : dragFileId === file.id
+                    ? "opacity-40 border-border-tertiary"
+                    : isSelected
+                      ? "border-accent-green/20 bg-bg-overlay-tertiary"
+                      : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
               }`}
             >
               {/* Checkbox */}
