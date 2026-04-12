@@ -66,7 +66,8 @@ export async function POST(request: Request) {
 
     const recipient = await getPublicUserByEmail(recipientEmail);
     if (!recipient) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      // Don't reveal whether the email exists — generic error
+      return NextResponse.json({ error: "Share failed" }, { status: 400 });
     }
     if (recipient.id === session.userId) {
       return NextResponse.json(

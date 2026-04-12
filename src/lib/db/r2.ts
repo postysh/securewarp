@@ -24,7 +24,7 @@ export async function getUploadUrl(storageKey: string): Promise<string> {
     ContentType: "application/octet-stream",
   });
 
-  return getSignedUrl(r2, command, { expiresIn: 3600 });
+  return getSignedUrl(r2, command, { expiresIn: 600 }); // 10 minutes
 }
 
 /**
@@ -36,7 +36,7 @@ export async function getDownloadUrl(storageKey: string): Promise<string> {
     Key: storageKey,
   });
 
-  return getSignedUrl(r2, command, { expiresIn: 3600 });
+  return getSignedUrl(r2, command, { expiresIn: 600 }); // 10 minutes
 }
 
 /**

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { createFolder, createFileKey, getFileById, getEffectivePermission } from "@/lib/db/files";
+import { assertWithinQuota } from "@/lib/db/quota";
 import { logError } from "@/lib/log";
 
 const FolderSchema = z.object({
@@ -34,6 +35,14 @@ export async function POST(request: Request) {
     }
 
     const data = parsed.data;
+
+    // Quota check — same as file uploads
+    try {
+      await assertWithinQuota(session.userId, 0);
+    } catch (e) {
+      const status = (e as { status?: number }).status ?? 500;
+      return NextResponse.json({ error: (e as Error).message }, { status });
+    }
 
     // If creating inside a parent folder, verify the caller has
     // access to it (owns it or holds a file_keys row). This gate

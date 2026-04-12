@@ -76,7 +76,7 @@ export function MembersModal({ open, onClose }: MembersModalProps) {
       <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={onClose} />
 
       <div
-        className="relative w-full h-full md:h-auto max-w-none md:max-w-[440px] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in flex flex-col"
+        role="dialog" aria-modal="true" aria-label="Members" className="relative w-full h-full md:h-auto max-w-none md:max-w-[440px] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in flex flex-col"
         style={{ boxShadow: "var(--shadow-l2)", maxHeight: "80vh" }}
       >
         {/* Header */}

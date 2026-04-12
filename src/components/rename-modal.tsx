@@ -67,7 +67,7 @@ export function RenameModal({
         onClick={() => !busy && onClose()}
       />
       <div
-        className="relative w-full h-full md:h-auto max-w-none md:max-w-[420px] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in"
+        role="dialog" aria-modal="true" aria-label="Rename" className="relative w-full h-full md:h-auto max-w-none md:max-w-[420px] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in"
         style={{ boxShadow: "var(--shadow-l2)" }}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-tertiary">

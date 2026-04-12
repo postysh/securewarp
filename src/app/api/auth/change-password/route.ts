@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession } from "@/lib/auth/session";
+import { getSession, revokeAllSessions, createSession } from "@/lib/auth/session";
 import { updateUserAuth } from "@/lib/db/users";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
@@ -43,6 +43,11 @@ export async function POST(request: Request) {
       recoveryKeyHash: data.newRecoveryKeyHash,
       recoveryEncryptedData: data.newRecoveryEncryptedData,
     });
+
+    // Revoke all existing sessions (forces re-login on other devices)
+    // then issue a fresh session for this device.
+    await revokeAllSessions(session.userId);
+    await createSession({ userId: session.userId, email: session.email });
 
     auditEvent({ event: "auth.password_change", actorUserId: session.userId });
     return NextResponse.json({ success: true });

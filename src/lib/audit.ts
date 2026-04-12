@@ -17,6 +17,7 @@ export type AuditEventType =
   | "auth.recovery.verify.fail"
   | "auth.recovery.update"
   | "auth.delete_account"
+  | "auth.revoke_all"
   | "files.share"
   | "files.unshare"
   | "files.leave"

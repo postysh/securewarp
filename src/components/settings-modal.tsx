@@ -473,7 +473,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={onClose} />
 
       <div
-        className="relative w-full max-w-[720px] mx-4 rounded-2xl bg-bg-l2 border border-border-primary overflow-hidden animate-fade-in flex flex-col md:flex-row"
+        role="dialog" aria-modal="true" aria-label="Settings" className="relative w-full max-w-[720px] mx-4 rounded-2xl bg-bg-l2 border border-border-primary overflow-hidden animate-fade-in flex flex-col md:flex-row"
         style={{ boxShadow: "var(--shadow-l2)", height: "min(85vh, 600px)", minHeight: 420 }}
       >
         {/* Sidebar */}

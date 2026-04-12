@@ -74,7 +74,7 @@ export function NewFolderModal({ open, onClose, onCreate }: NewFolderModalProps)
 
       {/* Modal */}
       <div
-        className="relative w-full h-full md:h-auto max-w-none md:max-w-[440px] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in"
+        role="dialog" aria-modal="true" aria-label="New folder" className="relative w-full h-full md:h-auto max-w-none md:max-w-[440px] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in"
         style={{ boxShadow: "var(--shadow-l2)" }}
       >
         {/* Header */}

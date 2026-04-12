@@ -929,8 +929,9 @@ export function useFiles(keys: {
   const createFolder = useCallback(async (name: string, parentId: string | null = null) => {
     if (!keys) return;
 
+    let sessionKey: Uint8Array | null = null;
     try {
-      const sessionKey = generateSessionKey();
+      sessionKey = generateSessionKey();
       const hier = generateHierarchicalKeypair();
 
       const encryptedMetadata = encryptMetadata(
@@ -974,7 +975,6 @@ export function useFiles(keys: {
             ...s,
             error: "Cannot access parent folder",
           }));
-          sessionKey.fill(0);
           return;
         }
         parentKeysClaim = wrapParentKeysClaim(
@@ -1008,11 +1008,12 @@ export function useFiles(keys: {
         return;
       }
 
-      sessionKey.fill(0);
       await fetchFiles(parentId);
     } catch (err) {
       console.error("Create folder error:", err);
       setState((s) => ({ ...s, error: "Failed to create folder" }));
+    } finally {
+      if (sessionKey) sessionKey.fill(0);
     }
   }, [keys, fetchFiles]);
 
@@ -1206,7 +1207,8 @@ export function useFiles(keys: {
           ),
         }));
         return { ok: true };
-      } catch {
+      } catch (err) {
+        console.warn("toggleStar failed:", err);
         return { ok: false };
       }
     },
