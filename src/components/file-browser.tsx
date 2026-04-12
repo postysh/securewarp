@@ -18,6 +18,7 @@ import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import StarIcon from "@hugeicons/core-free-icons/StarIcon";
 import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
 import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
+import PinIcon from "@hugeicons/core-free-icons/PinIcon";
 import Move01Icon from "@hugeicons/core-free-icons/Move01Icon";
 import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
@@ -930,6 +931,20 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   const f = fileOps.files.find((f) => f.id === contextMenu?.fileId);
                   return f?.isStarred ? "Unstar" : "Star";
                 })()}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!contextMenu) return;
+                  await fetch("/api/pins", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ fileId: contextMenu.fileId }),
+                  });
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={PinIcon} size={14} color="var(--icon-tertiary)" /> Pin to sidebar
               </button>
             </>
           )}
