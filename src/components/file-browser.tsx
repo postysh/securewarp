@@ -724,8 +724,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           </div>
         )}
 
-        {/* Loading skeleton — Skiff-style slow pulse */}
-        {(fileOps.loading || !fileOps.initialized) && (
+        {/* Loading skeleton — only show when no files to display yet */}
+        {(fileOps.loading || !fileOps.initialized) && displayFiles.length === 0 && (
           <div className="space-y-1.5">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="flex items-center h-[56px] px-4 rounded-xl border border-border-tertiary" style={{ animationDelay: `${i * 0.15}s` }}>
