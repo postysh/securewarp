@@ -556,10 +556,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
       {/* Table */}
-      <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
-        {/* Table header — hide when empty, hide entirely on mobile */}
-        {displayFiles.length > 0 && (
-        <div className="hidden md:flex items-center h-[40px] px-4 box-border select-none">
+      {/* Table header — sticky above scroll area */}
+      {displayFiles.length > 0 && (
+        <div className="hidden md:flex items-center h-[40px] px-4 mx-3 md:mx-5 box-border select-none shrink-0">
           {/* Checkbox */}
           <button
             onClick={(e) => { e.stopPropagation(); allSelected || someSelected ? selectNone() : selectAll(); }}
@@ -596,7 +595,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             </div>
           </div>
         </div>
-        )}
+      )}
+
+      {/* Scrollable file list */}
+      <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
 
         {/* Empty state */}
         {!fileOps.loading && fileOps.initialized && displayFiles.length === 0 && (
@@ -928,6 +930,18 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             </div>
           );
         })}
+
+        {/* Load more button for paginated results */}
+        {fileOps.nextCursor && (
+          <div className="flex justify-center py-4">
+            <button
+              onClick={() => fileOps.loadMore()}
+              className="h-[34px] px-5 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
+            >
+              Load more files
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Context menu: bottom sheet on mobile, floating dropdown on desktop */}

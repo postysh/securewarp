@@ -29,32 +29,26 @@ export async function GET(request: Request) {
     const recent = searchParams.get("recent") === "true";
     const all = searchParams.get("all") === "true";
     const parentId = searchParams.get("parentId") || null;
+    const cursor = searchParams.get("cursor") || undefined;
 
     let files: FileRowWithKey[];
+    let nextCursor: string | null = null;
+
     if (all) {
-      // Search index — all files the user can access, flat.
       files = await getAllAccessibleFiles(session.userId);
     } else if (starred) {
       files = await getStarredForUser(session.userId);
     } else if (recent) {
-      // Recent: same as own-files root but sorted by updated_at desc,
-      // limited to 50 most recent across all folders.
       files = await getRecentForUser(session.userId);
     } else if (trash) {
-      // Flat top-of-trash view. Only surfaces roots — if the user
-      // trashed a folder, its recursively-marked children stay
-      // hidden behind it.
       files = await getTrashedForUser(session.userId);
     } else if (shared) {
-      // Flat "Shared with me" view — ignores parentId.
       files = await getSharedWithUser(session.userId);
     } else if (parentId === null) {
-      // Root listing of own files.
-      files = await getFilesForUser(session.userId, null);
+      const result = await getFilesForUser(session.userId, null, cursor);
+      files = result.files;
+      nextCursor = result.nextCursor;
     } else {
-      // Always use getInheritedChildren — it returns ALL children
-      // regardless of owner, so collaborator-created subfolders
-      // are visible. Parallelized internally for speed.
       files = await getInheritedChildren(parentId, session.userId);
     }
 
@@ -101,7 +95,7 @@ export async function GET(request: Request) {
       callerPermission = await getEffectivePermission(parentId, session.userId);
     }
 
-    return NextResponse.json({ files: enriched, callerPermission });
+    return NextResponse.json({ files: enriched, callerPermission, nextCursor });
   } catch (err) {
     logError("files.list", err);
     return NextResponse.json({ error: "Failed to list files" }, { status: 500 });

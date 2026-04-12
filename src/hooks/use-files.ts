@@ -104,6 +104,7 @@ interface UseFilesState {
   // Active workspace context. When set, "My Drive" means the
   // workspace root, not the personal root.
   activeWorkspace: { id: string; rootFolderId: string; name: string } | null;
+  nextCursor: string | null;
 }
 
 /**
@@ -124,6 +125,7 @@ export function useFiles(keys: {
     currentFolder: null,
     callerPermission: null,
     activeWorkspace: null,
+    nextCursor: null,
     breadcrumb: [{ id: null, name: "My Drive" }],
     viewMode: "own",
   });
@@ -469,6 +471,7 @@ export function useFiles(keys: {
           files: results,
           loading: false,
           callerPermission: data.callerPermission ?? null,
+          nextCursor: data.nextCursor ?? null,
           currentFolder: mode !== "own" ? null : parentId,
           viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
           ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
@@ -2338,6 +2341,54 @@ export function useFiles(keys: {
     [keys, unwrapSessionKeyFromDownload]
   );
 
+  /**
+   * Load the next page of files (cursor-based pagination).
+   * Appends to the current file list instead of replacing.
+   */
+  const loadMore = useCallback(async () => {
+    if (!keys || !state.nextCursor) return;
+    try {
+      const url = `/api/files/list?cursor=${encodeURIComponent(state.nextCursor)}${
+        state.currentFolder ? `&parentId=${state.currentFolder}` : ""
+      }`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!res.ok) return;
+
+      const newResults: DecryptedFile[] = [];
+      for (const f of data.files) {
+        const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
+        if (!encPrivHier) continue;
+        try {
+          const privHier = unwrapPrivateHierarchicalKey(encPrivHier, (f.wrapped_by_public_key as string) || "", keys.encryptionPrivateKey);
+          const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file, f.session_key_nonce, (f.owner_public_key as string) || "", privHier);
+          const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata) : f.encrypted_metadata;
+          const meta = decryptMetadata(encMeta, sk);
+          sk.fill(0);
+          if (f.is_folder && privHier && f.public_hierarchical_key) {
+            folderPrivHierCache.current.set(f.id, { publicHierarchicalKey: f.public_hierarchical_key, privateHierarchicalKey: privHier });
+          }
+          newResults.push({
+            id: f.id, name: meta.name, type: meta.type, size: meta.size,
+            isFolder: f.is_folder, parentId: f.parent_id ?? null,
+            ownerId: f.owner_id || "", createdAt: f.created_at, updatedAt: f.updated_at,
+            encryptedPrivateHierarchicalKey: encPrivHier, wrappedByPublicKey: f.wrapped_by_public_key || "",
+            ownerPublicKey: f.owner_public_key || "", publicHierarchicalKey: f.public_hierarchical_key || "",
+            encryptedSessionKeyByFile: f.encrypted_session_key_by_file, sessionKeyNonce: f.session_key_nonce,
+            parentKeysClaim: f.parent_keys_claim ?? null, parentKeysClaimWrappedBy: f.parent_keys_claim_wrapped_by ?? null,
+            isStarred: !!(f.is_starred), fileLabels: f.file_labels ?? [],
+            isShared: false, collaborators: f.collaborators ?? [],
+          } as DecryptedFile);
+        } catch { /* skip */ }
+      }
+      setState((s) => ({
+        ...s,
+        files: [...s.files, ...newResults],
+        nextCursor: data.nextCursor ?? null,
+      }));
+    } catch { /* silent */ }
+  }, [keys, state.nextCursor, state.currentFolder]);
+
   return {
     ...state,
     initialized,
@@ -2370,6 +2421,7 @@ export function useFiles(keys: {
     navigateToBreadcrumb,
     clearError,
     invalidateCache,
+    loadMore,
     searchFiles,
     exportAllAsZip,
     prefetchFolder,

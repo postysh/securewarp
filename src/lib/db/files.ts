@@ -158,10 +158,13 @@ const LIST_SELECT =
   "*, file_keys!inner(encrypted_private_hierarchical_key, wrapped_by_public_key)," +
   " owner:users!files_owner_id_fkey(public_encryption_key)";
 
+export const PAGE_SIZE = 100;
+
 export async function getFilesForUser(
   userId: string,
-  parentId: string | null
-): Promise<FileRowWithKey[]> {
+  parentId: string | null,
+  cursor?: string
+): Promise<{ files: FileRowWithKey[]; nextCursor: string | null }> {
   // Own files only — scoped by owner_id. The file_keys join is still required
   // to surface the caller's wrapped hierarchical private key (which is stored
   // per-user even for the owner so owner and shared decrypt paths match).
@@ -180,13 +183,24 @@ export async function getFilesForUser(
     query = query.is("parent_id", null).eq("is_workspace_root", false);
   }
 
+  // Cursor pagination: cursor is `created_at` of the last item.
+  // Since we order by is_folder DESC, created_at DESC, we filter
+  // items created before the cursor timestamp.
+  if (cursor) {
+    query = query.lt("created_at", cursor);
+  }
+
   const { data, error } = await query
     .order("is_folder", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(100);
+    .limit(PAGE_SIZE + 1); // fetch one extra to detect hasMore
 
   if (error) throw new Error(`Failed to fetch files: ${error.message}`);
-  return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
+  const rows = (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
+  const hasMore = rows.length > PAGE_SIZE;
+  const files = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+  const nextCursor = hasMore && files.length > 0 ? files[files.length - 1].created_at : null;
+  return { files, nextCursor };
 }
 
 /**
