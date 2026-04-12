@@ -11,6 +11,7 @@ import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
 import { useFilesContext, type DecryptedFile, type Collaborator, type PermissionLevel } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { RoleDropdown } from "./role-dropdown";
+import { ConfirmDialog } from "./confirm-dialog";
 
 const ROLE_OPTIONS = ["editor", "viewer"] as const satisfies readonly PermissionLevel[];
 const ROLE_LABELS: Record<PermissionLevel, string> = {
@@ -51,6 +52,9 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
   // userId currently being rotated out (for inline spinner state). null
   // when no rotation is in flight.
   const [rotatingUserId, setRotatingUserId] = useState<string | null>(null);
+  // Themed confirmation dialog state. Holds the collaborator pending
+  // revoke until the user confirms or cancels.
+  const [revokeTarget, setRevokeTarget] = useState<Collaborator | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const open = file !== null;
@@ -128,26 +132,19 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
    * Scoped to non-folder files — the share modal greys the action
    * out for folders with a tooltip explaining why.
    */
-  const rotateOutCollab = async (c: Collaborator) => {
+  /**
+   * Opens the themed ConfirmDialog for destructive revocation. The
+   * actual rotation runs once the user confirms — see `executeRotate`.
+   */
+  const rotateOutCollab = (c: Collaborator) => {
     if (c.isOwner || !file) return;
+    setInputError("");
+    setRevokeTarget(c);
+  };
 
-    // Two flavours of forward-secret revoke: single-file rotation
-    // (re-encrypts the file) and folder shallow rotation (re-wraps
-    // direct child claims without touching their content). Both land
-    // through the same Revoke button but the confirm copy differs
-    // because the threat model is different.
-    const confirmCopy = file.isFolder
-      ? `Securely revoke ${c.email} from this folder?\n\n` +
-        `This rotates the folder's keys and re-wraps access to every direct child. ` +
-        `Existing file contents inside the folder are NOT re-encrypted — if ${c.email} ` +
-        `had already opened and cached a specific file before revocation, they may still ` +
-        `be able to read that exact cached copy. New files added after this point, and ` +
-        `any files they hadn't opened, will be fully protected.`
-      : `Securely revoke ${c.email}?\n\n` +
-        `This re-encrypts the file and re-wraps keys for everyone else. Large files ` +
-        `may take a while.`;
-    if (!confirm(confirmCopy)) return;
-
+  const executeRotate = async () => {
+    if (!file || !revokeTarget) return;
+    const c = revokeTarget;
     setRotatingUserId(c.userId);
     setInputError("");
     const result = file.isFolder
@@ -156,10 +153,12 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
     setRotatingUserId(null);
     if (!result.ok) {
       setInputError(result.error);
+      setRevokeTarget(null);
       return;
     }
     setCollaborators((prev) => prev.filter((x) => x.userId !== c.userId));
     setInfo(`Securely revoked ${c.email}`);
+    setRevokeTarget(null);
   };
 
   const handleCreateLink = async () => {
@@ -458,6 +457,40 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
           </div>
         </div>
       </div>
+
+      {revokeTarget && (
+        <ConfirmDialog
+          open={revokeTarget !== null}
+          destructive
+          title={file.isFolder ? "Revoke folder access" : "Revoke file access"}
+          description={
+            file.isFolder ? (
+              <>
+                Securely revoke <b>{revokeTarget.email}</b> from this folder?
+                {"\n\n"}
+                This rotates the folder&apos;s keys and re-wraps access to every direct
+                child. Existing file contents inside the folder are <b>not</b>{" "}
+                re-encrypted — if {revokeTarget.email} had already opened and cached a
+                specific file before revocation, they may still be able to read that
+                exact cached copy. New files added after this point, and any files
+                they hadn&apos;t opened, will be fully protected.
+              </>
+            ) : (
+              <>
+                Securely revoke <b>{revokeTarget.email}</b>?
+                {"\n\n"}
+                This re-encrypts the file and re-wraps keys for everyone else.
+                Large files may take a while.
+              </>
+            )
+          }
+          confirmLabel="Revoke & rotate"
+          busy={rotatingUserId === revokeTarget.userId}
+          busyLabel="Rotating…"
+          onConfirm={executeRotate}
+          onCancel={() => setRevokeTarget(null)}
+        />
+      )}
     </div>,
     document.body
   );

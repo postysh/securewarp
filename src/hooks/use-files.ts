@@ -1018,7 +1018,8 @@ export function useFiles(keys: {
         return { ok: true };
       } catch (err) {
         console.error("rotateAndRevoke", err);
-        return { ok: false, error: "Revoke rotation failed" };
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `Revoke rotation failed: ${message}` };
       }
     },
     [keys, fetchFiles, state.currentFolder, state.viewMode]
@@ -1274,7 +1275,8 @@ export function useFiles(keys: {
         return { ok: false, error: result.error };
       } catch (err) {
         console.error("rotateAndRevokeFolder", err);
-        return { ok: false, error: "Folder rotation failed" };
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `Folder rotation failed: ${message}` };
       }
     },
     [keys, fetchFiles, state.currentFolder, state.viewMode]
