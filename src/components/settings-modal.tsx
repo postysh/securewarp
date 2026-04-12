@@ -440,14 +440,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={onClose} />
 
       <div
-        className="relative w-full max-w-[720px] mx-4 rounded-2xl bg-bg-l2 border border-border-primary overflow-hidden animate-fade-in flex"
-        style={{ boxShadow: "var(--shadow-l2)", height: "55vh", minHeight: 420 }}
+        className="relative w-full max-w-[720px] mx-4 rounded-2xl bg-bg-l2 border border-border-primary overflow-hidden animate-fade-in flex flex-col md:flex-row"
+        style={{ boxShadow: "var(--shadow-l2)", height: "min(85vh, 600px)", minHeight: 420 }}
       >
         {/* Sidebar */}
-        <div className="w-[200px] shrink-0 bg-bg-side border-r border-border-tertiary flex flex-col overflow-y-auto">
+        <div className="md:w-[200px] shrink-0 bg-bg-side border-b md:border-b-0 md:border-r border-border-tertiary flex md:flex-col overflow-x-auto md:overflow-x-hidden md:overflow-y-auto">
           <div
             onClick={() => setActiveTab("account")}
-            className={`flex items-center gap-3 px-3 py-3 mx-2 mt-2 rounded-[6px] cursor-pointer transition-colors ${activeTab === "account" ? "bg-bg-overlay-tertiary" : "hover:bg-bg-overlay-tertiary"}`}
+            className={`hidden md:flex items-center gap-3 px-3 py-3 mx-2 mt-2 rounded-[6px] cursor-pointer transition-colors ${activeTab === "account" ? "bg-bg-overlay-tertiary" : "hover:bg-bg-overlay-tertiary"}`}
           >
             <div className="w-8 h-8 rounded-[6px] bg-accent-green flex items-center justify-center text-[11px] font-bold text-white shrink-0">
               {initials}
@@ -458,16 +458,16 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
           </div>
 
-          <div className="flex-1 px-2 py-2">
+          <div className="flex-1 px-2 py-2 flex md:block gap-1 md:gap-0 overflow-x-auto">
             {sections.map((section) => (
-              <div key={section} className="mb-2">
-                <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider px-2 py-1.5">{section}</p>
-                <div className="flex flex-col gap-[2px]">
+              <div key={section} className="md:mb-2 flex md:block gap-1 md:gap-0 shrink-0">
+                <p className="hidden md:block text-[10px] font-mono uppercase text-text-disabled tracking-wider px-2 py-1.5">{section}</p>
+                <div className="flex md:flex-col gap-[2px]">
                   {tabs.filter((t) => t.section === section && t.id !== "account").map((tab) => (
                     <button
                       key={tab.id}
                       onClick={() => setActiveTab(tab.id)}
-                      className={`w-full flex items-center gap-2.5 px-2 h-[32px] rounded-[6px] text-[12px] transition-colors cursor-pointer ${
+                      className={`md:w-full flex items-center gap-2 md:gap-2.5 px-3 md:px-2 h-[32px] rounded-[6px] text-[12px] transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                         activeTab === tab.id
                           ? "bg-bg-overlay-tertiary text-text-primary font-medium"
                           : "text-text-secondary hover:bg-bg-overlay-tertiary"

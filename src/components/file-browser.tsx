@@ -314,9 +314,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
       {/* Header bar */}
-      <div className="relative flex items-center justify-between px-5 h-[52px] shrink-0">
+      <div className="relative flex items-center justify-between px-3 md:px-5 h-[52px] shrink-0">
         {/* Left: sidebar toggle + breadcrumb */}
-        <div className="flex items-center gap-1.5 text-[13px] shrink-0 z-10">
+        <div className="flex items-center gap-1.5 text-[13px] shrink-0 z-10 min-w-0 overflow-hidden">
           <button onClick={onToggleSidebar} className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer mr-1">
             <HugeiconsIcon icon={SidebarLeft01Icon} size={16} />
           </button>
@@ -349,8 +349,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           })()}
         </div>
 
-        {/* Center: search trigger */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        {/* Center: search trigger (hidden on mobile, use Cmd+K or search icon) */}
+        <div className="absolute inset-0 hidden md:flex items-center justify-center pointer-events-none">
           <button
             onClick={() => setCommandPaletteOpen(true)}
             className="flex h-8 w-full max-w-[360px] items-center rounded-lg bg-bg-overlay-tertiary px-3 gap-2 text-text-disabled text-[13px] cursor-pointer pointer-events-auto hover:bg-bg-cell-hover transition-colors"
@@ -362,16 +362,22 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         </div>
 
         {/* Right: actions */}
-        <div className="flex items-center gap-2 shrink-0 z-10">
+        <div className="flex items-center gap-1 md:gap-2 shrink-0 z-10">
+          {/* Mobile search icon */}
+          <button onClick={() => setCommandPaletteOpen(true)} className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer md:hidden">
+            <HugeiconsIcon icon={Search01Icon} size={16} />
+          </button>
           {/* Facepile */}
-          <Facepile onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
+          <div className="hidden md:block">
+            <Facepile onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
+          </div>
           {fileOps.viewMode === "own" && (
             <button
               onClick={() => {
                 const first = fileOps.files.find((f) => selected.has(f.id));
                 if (first) setShareTarget(first);
               }}
-              className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
+              className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
             >
               <HugeiconsIcon icon={UserAdd01Icon} size={14} />
               Invite
@@ -379,13 +385,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           )}
           {(fileOps.viewMode === "own" || fileOps.currentFolder) && fileOps.viewMode !== "trash" && fileOps.callerPermission !== "viewer" && (
             <>
-              <button onClick={() => setNewFolderOpen(true)} className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer">
+              <button onClick={() => setNewFolderOpen(true)} className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer">
                 <HugeiconsIcon icon={FolderAddIcon} size={14} />
                 New folder
               </button>
               <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer">
                 <HugeiconsIcon icon={Upload04Icon} size={14} />
-                Upload
+                <span className="hidden md:inline">Upload</span>
               </button>
             </>
           )}
@@ -414,7 +420,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
       {/* Selection bar */}
       {selected.size > 0 && (
-        <div className="mx-5 mt-2 flex items-center gap-3 px-4 h-[36px] rounded-[8px] bg-bg-overlay-tertiary text-[12px] text-text-secondary animate-fade-in">
+        <div className="hidden md:flex mx-5 mt-2 items-center gap-3 px-4 h-[36px] rounded-[8px] bg-bg-overlay-tertiary text-[12px] text-text-secondary animate-fade-in">
           <span className="font-medium text-text-primary">{selected.size} selected</span>
           <button onClick={selectNone} className="text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer">Clear</button>
           <button onClick={selectAll} className="text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer">Select all</button>
@@ -467,10 +473,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
       {/* Table */}
-      <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
-        {/* Table header — hide when empty */}
+      <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
+        {/* Table header — hide when empty, hide entirely on mobile */}
         {displayFiles.length > 0 && (
-        <div className="flex items-center h-[40px] px-4 box-border select-none">
+        <div className="hidden md:flex items-center h-[40px] px-4 box-border select-none">
           {/* Checkbox */}
           <button
             onClick={(e) => { e.stopPropagation(); allSelected || someSelected ? selectNone() : selectAll(); }}
@@ -708,10 +714,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                       : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
               }`}
             >
-              {/* Checkbox */}
+              {/* Checkbox (hidden on mobile) */}
               <button
                 onClick={(e) => { e.stopPropagation(); toggleSelect(file.id); }}
-                className={`w-[18px] h-[18px] rounded-[4px] border flex items-center justify-center mr-4 cursor-pointer transition-all shrink-0 ${
+                className={`hidden md:flex w-[18px] h-[18px] rounded-[4px] border items-center justify-center mr-4 cursor-pointer transition-all shrink-0 ${
                   isSelected ? "border-accent-green bg-accent-green" : "border-border-primary opacity-0 group-hover:opacity-100 hover:border-border-hover"
                 }`}
               >
@@ -751,7 +757,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               </div>
 
               {/* Metadata */}
-              <div className="flex items-center gap-[46px] relative">
+              <div className="hidden md:flex items-center gap-[46px] relative">
                 <div className="w-[100px] flex justify-end">
                   {file.fileType !== "FOLDER" && (
                     <span className="flex h-5 items-center justify-center rounded bg-bg-field px-1.5 py-0.5 text-[11px] font-mono uppercase text-text-disabled">
@@ -810,6 +816,17 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   </button>
                 </div>
               </div>
+              {/* Mobile three-dot menu (touch devices have no hover) */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setContextMenu({ x: rect.right - 180, y: rect.bottom + 4, fileId: file.id, isFolder: !!file.isFolder });
+                }}
+                className="md:hidden p-1.5 rounded-md text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer shrink-0 ml-2"
+              >
+                <HugeiconsIcon icon={MoreHorizontalIcon} size={15} />
+              </button>
             </div>
           );
         })}

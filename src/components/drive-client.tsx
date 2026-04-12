@@ -69,10 +69,20 @@ export default function DriveClient() {
       <UserKeysContext.Provider value={keys}>
         <FilesContext.Provider value={fileOps}>
           <div className="flex h-full bg-bg-side">
-            <div className="relative z-20 h-full">
+            {/* Desktop sidebar — inline */}
+            <div className="relative z-20 h-full hidden md:block">
               <Sidebar collapsed={!sidebarOpen} />
             </div>
-            <div className={`flex-1 p-2 ${sidebarOpen ? "pl-0" : ""} relative z-10`}>
+            {/* Mobile sidebar — overlay */}
+            {sidebarOpen && (
+              <div className="fixed inset-0 z-30 md:hidden">
+                <div className="absolute inset-0 bg-black/40" onClick={toggleSidebar} />
+                <div className="relative z-10 h-full w-[220px] bg-bg-side">
+                  <Sidebar collapsed={false} />
+                </div>
+              </div>
+            )}
+            <div className={`flex-1 p-2 ${sidebarOpen ? "md:pl-0" : ""} relative z-10`}>
               <div className="h-full rounded-xl border border-border-secondary bg-bg-main overflow-hidden">
                 <FileBrowser sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
               </div>

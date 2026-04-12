@@ -134,7 +134,7 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
       )}
 
       {/* Card */}
-      <div className="w-full max-w-[960px] h-[600px] rounded-3xl border border-border-tertiary overflow-hidden flex bg-bg-main" style={{ boxShadow: "var(--shadow-l2)" }}>
+      <div className="w-full max-w-[960px] min-h-0 max-h-[95vh] md:h-[600px] rounded-3xl border border-border-tertiary overflow-hidden flex bg-bg-main" style={{ boxShadow: "var(--shadow-l2)" }}>
         {/* Left branding panel */}
         <div className="hidden lg:flex lg:w-[45%] bg-cta-primary relative overflow-hidden flex-col p-12 rounded-l-2xl">
           <div className="relative z-10 flex items-center gap-2.5 mb-auto">
