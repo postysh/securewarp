@@ -224,6 +224,12 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
       </button>
       {dropdown}
       {createModal}
+      <WorkspaceSettings
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        workspace={activeId ? workspaces.find((w) => w.id === activeId) ?? null : null}
+        onDeleted={() => { setActiveId(null); fileOps.leaveWorkspace(); refreshWorkspaces(); }}
+      />
     </>
   );
 }
