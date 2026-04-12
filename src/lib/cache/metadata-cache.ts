@@ -9,6 +9,7 @@
  */
 
 import nacl from "tweetnacl";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { toBase64, fromBase64, randomBytes } from "@/lib/crypto/utils";
 
 const DB_NAME = "securewarp_metadata_cache";
@@ -88,6 +89,16 @@ export interface CachedFileEntry {
   ownerId: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Derive a 32-byte cache encryption key from the user's private
+ * encryption key. Deterministic so the same user always gets the
+ * same cache key without storing it separately.
+ */
+export function deriveCacheKey(encryptionPrivateKey: string): Uint8Array {
+  const input = new TextEncoder().encode("securewarp-idb-cache-v1:" + encryptionPrivateKey);
+  return sha256(input);
 }
 
 let dbInstance: IDBDatabase | null = null;

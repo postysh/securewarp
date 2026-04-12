@@ -28,6 +28,12 @@ import {
 } from "@/lib/crypto/chunked-encryption";
 import { decryptFileContent } from "@/lib/crypto/file-crypto";
 import { toBase64, fromBase64 } from "@/lib/crypto/utils";
+import {
+  getCachedFiles,
+  setCachedFiles,
+  deriveCacheKey,
+  type CachedFileEntry,
+} from "@/lib/cache/metadata-cache";
 
 export interface FileCollaboratorPreview {
   userId: string;
@@ -165,6 +171,22 @@ export function useFiles(keys: {
     };
   })());
 
+  // Web Worker for off-main-thread decryption
+  const workerRef = useRef<Worker | null>(null);
+  const workerIdRef = useRef(0);
+  useEffect(() => {
+    try {
+      workerRef.current = new Worker(
+        new URL("@/lib/crypto/decrypt-worker.ts", import.meta.url)
+      );
+    } catch {
+      // Worker creation failed (SSR, unsupported browser) — fall back
+      // to main-thread decryption.
+      workerRef.current = null;
+    }
+    return () => { workerRef.current?.terminate(); workerRef.current = null; };
+  }, []);
+
   // File list cache — stale-while-revalidate. Keyed by
   // `${mode}:${parentId}`. Shows cached data instantly on navigation,
   // refreshes in background. Cleared on key change (login swap).
@@ -248,8 +270,9 @@ export function useFiles(keys: {
       const cacheKey = `${mode}:${parentId ?? "root"}`;
       const cached = fileListCache.current.get(cacheKey);
 
-      // Show cached data immediately if available (stale-while-revalidate)
+      // Three-tier cache: 1) in-memory Map, 2) IndexedDB, 3) server fetch
       if (cached) {
+        // Tier 1: in-memory — instant
         setState((s) => ({
           ...s,
           files: cached,
@@ -261,9 +284,45 @@ export function useFiles(keys: {
         }));
         setInitialized(true);
       } else {
-        const isFirstLoad = !initialized;
-        setState((s) => ({ ...s, loading: isFirstLoad, error: null }));
-        setInitialized(true);
+        // Tier 2: IndexedDB — fast, encrypted at rest
+        try {
+          const idbCacheKey = deriveCacheKey(keys.encryptionPrivateKey);
+          const idbCached = await getCachedFiles(cacheKey, idbCacheKey);
+          if (idbCached) {
+            // Hydrate in-memory cache and show immediately
+            const hydrated = idbCached.map((c) => ({
+              ...c,
+              encryptedPrivateHierarchicalKey: "",
+              wrappedByPublicKey: "",
+              ownerPublicKey: "",
+              publicHierarchicalKey: "",
+              encryptedSessionKeyByFile: "",
+              sessionKeyNonce: "",
+              parentKeysClaim: null,
+              parentKeysClaimWrappedBy: null,
+              isStarred: false,
+              fileLabels: [] as { id: string; name: string; color: string }[],
+              isShared: mode === "shared",
+              collaborators: [] as FileListCollabShape[],
+            } as DecryptedFile));
+            setState((s) => ({
+              ...s,
+              files: hydrated,
+              loading: false,
+              error: null,
+              currentFolder: mode !== "own" ? null : parentId,
+              viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
+              ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
+            }));
+            setInitialized(true);
+          }
+        } catch { /* IDB failure is non-fatal, fall through to server */ }
+
+        if (!initialized) {
+          const isFirstLoad = true;
+          setState((s) => ({ ...s, loading: isFirstLoad, error: null }));
+          setInitialized(true);
+        }
       }
 
       try {
@@ -400,33 +459,105 @@ export function useFiles(keys: {
           size: 0,
         });
 
-        // Streaming two-pass decrypt. Flush results to the UI every
-        // BATCH_SIZE files so the first items appear in <50ms instead
-        // of waiting for the entire list to decrypt.
-        const BATCH_SIZE = 15;
-        const results: DecryptedFile[] = [];
-        const deferred: Record<string, unknown>[] = [];
-        let batchCount = 0;
+        // Split files: direct-key files can go to the Web Worker,
+        // deferred files (need parent chain) stay on main thread.
+        const directFiles: Record<string, unknown>[] = [];
+        const deferredFiles: Record<string, unknown>[] = [];
         for (const f of sorted) {
-          try {
-            const result = tryDecrypt(f);
-            if (result) {
-              results.push(result);
-              batchCount++;
-              if (batchCount >= BATCH_SIZE) {
-                // Flush batch to UI
-                const snapshot = [...results];
-                setState((s) => ({ ...s, files: snapshot, loading: false }));
-                batchCount = 0;
-                // Yield to the event loop so React can paint
-                await new Promise((r) => setTimeout(r, 0));
+          const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
+          if (encPrivHier) {
+            directFiles.push(f);
+          } else {
+            deferredFiles.push(f);
+          }
+        }
+
+        const results: DecryptedFile[] = [];
+        const deferred: Record<string, unknown>[] = deferredFiles;
+
+        // Try Web Worker for direct-key files
+        if (workerRef.current && directFiles.length > 0) {
+          const requestId = ++workerIdRef.current;
+          const workerResult = await new Promise<
+            { fileId: string; name: string; type: string; size: number; privHier?: string; publicHierarchicalKey?: string; isFolder: boolean }[]
+          >((resolve) => {
+            const handler = (e: MessageEvent) => {
+              if (e.data.id === requestId) {
+                workerRef.current?.removeEventListener("message", handler);
+                resolve(e.data.results);
               }
-            } else {
-              deferred.push(f);
+            };
+            workerRef.current!.addEventListener("message", handler);
+            workerRef.current!.postMessage({
+              id: requestId,
+              encryptionPrivateKey: keys.encryptionPrivateKey,
+              files: directFiles.map((f) => ({
+                fileId: f.id as string,
+                encryptedPrivHier: (f.encrypted_private_hierarchical_key as string) || "",
+                wrappedByPublicKey: (f.wrapped_by_public_key as string) || "",
+                ownerPublicKey: (f.owner_public_key as string) || "",
+                encSessionKeyByFile: f.encrypted_session_key_by_file as string,
+                sessionKeyNonce: f.session_key_nonce as string,
+                encryptedMetadata: f.encrypted_metadata as string,
+                publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
+                isFolder: f.is_folder as boolean,
+              })),
+            });
+          });
+
+          // Map worker results back to DecryptedFile
+          const fileMap = new Map(directFiles.map((f) => [f.id as string, f]));
+          for (const wr of workerResult) {
+            const f = fileMap.get(wr.fileId);
+            if (!f) continue;
+            if (wr.privHier && wr.publicHierarchicalKey && wr.isFolder) {
+              folderPrivHierCache.current.set(wr.fileId, {
+                publicHierarchicalKey: wr.publicHierarchicalKey,
+                privateHierarchicalKey: wr.privHier,
+              });
             }
-          } catch (err) {
-            console.error("Failed to decrypt file:", f.id, err);
-            results.push(makeErrorEntry(f));
+            results.push({
+              id: wr.fileId, isFolder: wr.isFolder,
+              parentId: (f.parent_id as string | null) ?? null,
+              ownerId: (f.owner_id as string) || "",
+              createdAt: f.created_at as string, updatedAt: f.updated_at as string,
+              encryptedPrivateHierarchicalKey: (f.encrypted_private_hierarchical_key as string) || "",
+              wrappedByPublicKey: (f.wrapped_by_public_key as string) || "",
+              ownerPublicKey: (f.owner_public_key as string) || "",
+              publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
+              encryptedSessionKeyByFile: (f.encrypted_session_key_by_file as string) || "",
+              sessionKeyNonce: (f.session_key_nonce as string) || "",
+              parentKeysClaim: (f.parent_keys_claim as string | null) ?? null,
+              parentKeysClaimWrappedBy: (f.parent_keys_claim_wrapped_by as string | null) ?? null,
+              isStarred: !!(f.is_starred),
+              fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
+              isShared: mode === "shared",
+              collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
+              name: wr.name, type: wr.type, size: wr.size,
+            } as DecryptedFile);
+          }
+          // Flush worker results to UI
+          setState((s) => ({ ...s, files: [...results], loading: false }));
+        } else {
+          // Fallback: main-thread streaming decrypt
+          const BATCH_SIZE = 15;
+          let batchCount = 0;
+          for (const f of directFiles) {
+            try {
+              const result = tryDecrypt(f);
+              if (result) {
+                results.push(result);
+                batchCount++;
+                if (batchCount >= BATCH_SIZE) {
+                  setState((s) => ({ ...s, files: [...results], loading: false }));
+                  batchCount = 0;
+                  await new Promise((r) => setTimeout(r, 0));
+                }
+              }
+            } catch (err) {
+              console.error("Failed to decrypt file:", f.id, err);
+              results.push(makeErrorEntry(f));
+            }
           }
         }
         // Second pass: for deferred items whose parent isn't in the
@@ -475,6 +606,19 @@ export function useFiles(keys: {
 
         // Cache the results for instant navigation next time
         fileListCache.current.set(cacheKey, results);
+
+        // Persist to IndexedDB (encrypted at rest) for cross-session cache
+        try {
+          const idbKey = deriveCacheKey(keys.encryptionPrivateKey);
+          const entries: CachedFileEntry[] = results
+            .filter((r) => r.name !== "[Encrypted]")
+            .map((r) => ({
+              id: r.id, name: r.name, type: r.type, size: r.size,
+              isFolder: r.isFolder, parentId: r.parentId,
+              ownerId: r.ownerId, createdAt: r.createdAt, updatedAt: r.updatedAt,
+            }));
+          setCachedFiles(cacheKey, entries, idbKey);
+        } catch { /* non-fatal */ }
 
         setState((s) => ({
           ...s,

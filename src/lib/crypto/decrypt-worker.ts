@@ -87,40 +87,38 @@ export interface DecryptResult {
   }[];
 }
 
-// Worker message handler
-if (typeof self !== "undefined" && typeof (self as unknown as { onmessage: unknown }).onmessage !== "undefined") {
-  self.onmessage = (e: MessageEvent<DecryptRequest>) => {
-    const { id, files, encryptionPrivateKey } = e.data;
-    const results: DecryptResult["results"] = [];
+// Worker entry point
+self.onmessage = (e: MessageEvent<DecryptRequest>) => {
+  const { id, files, encryptionPrivateKey } = e.data;
+  const results: DecryptResult["results"] = [];
 
-    for (const f of files) {
-      try {
-        if (!f.encryptedPrivHier) continue;
-        const privHier = unwrapPrivHier(f.encryptedPrivHier, f.wrappedByPublicKey, encryptionPrivateKey);
-        const sk = unwrapSessionKey(f.encSessionKeyByFile, f.sessionKeyNonce, f.ownerPublicKey, privHier);
-        const encMeta = typeof f.encryptedMetadata === "string" ? JSON.parse(f.encryptedMetadata) : f.encryptedMetadata;
-        const meta = decryptMeta(encMeta, sk);
-        sk.fill(0);
-        results.push({
-          fileId: f.fileId,
-          name: meta.name,
-          type: meta.type,
-          size: meta.size,
-          privHier: f.isFolder ? privHier : undefined,
-          publicHierarchicalKey: f.isFolder ? f.publicHierarchicalKey : undefined,
-          isFolder: f.isFolder,
-        });
-      } catch {
-        results.push({
-          fileId: f.fileId,
-          name: "[Encrypted]",
-          type: "unknown",
-          size: 0,
-          isFolder: f.isFolder,
-        });
-      }
+  for (const f of files) {
+    try {
+      if (!f.encryptedPrivHier) continue;
+      const privHier = unwrapPrivHier(f.encryptedPrivHier, f.wrappedByPublicKey, encryptionPrivateKey);
+      const sk = unwrapSessionKey(f.encSessionKeyByFile, f.sessionKeyNonce, f.ownerPublicKey, privHier);
+      const encMeta = typeof f.encryptedMetadata === "string" ? JSON.parse(f.encryptedMetadata) : f.encryptedMetadata;
+      const meta = decryptMeta(encMeta, sk);
+      sk.fill(0);
+      results.push({
+        fileId: f.fileId,
+        name: meta.name,
+        type: meta.type,
+        size: meta.size,
+        privHier: f.isFolder ? privHier : undefined,
+        publicHierarchicalKey: f.isFolder ? f.publicHierarchicalKey : undefined,
+        isFolder: f.isFolder,
+      });
+    } catch {
+      results.push({
+        fileId: f.fileId,
+        name: "[Encrypted]",
+        type: "unknown",
+        size: 0,
+        isFolder: f.isFolder,
+      });
     }
+  }
 
-    (self as unknown as { postMessage: (msg: DecryptResult) => void }).postMessage({ id, results });
-  };
-}
+  self.postMessage({ id, results });
+};
