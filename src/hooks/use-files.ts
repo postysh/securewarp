@@ -62,6 +62,7 @@ export interface DecryptedFile {
   // Phase 3 parent_keys_claim. Non-null for any file with a parent.
   parentKeysClaim: string | null;
   parentKeysClaimWrappedBy: string | null;
+  isStarred: boolean;
   isShared: boolean;
   // Everyone who holds a wrapped hierarchical-private-key for this file,
   // owner first. Empty array if the file hasn't finished uploading or we
@@ -69,7 +70,7 @@ export interface DecryptedFile {
   collaborators: FileCollaboratorPreview[];
 }
 
-export type ViewMode = "own" | "shared" | "trash";
+export type ViewMode = "own" | "shared" | "trash" | "starred" | "recent";
 
 export type PermissionLevel = "editor" | "viewer";
 
@@ -157,13 +158,17 @@ export function useFiles(keys: {
 
       try {
         const url =
-          mode === "trash"
-            ? "/api/files/list?trash=true"
-            : mode === "shared"
-              ? "/api/files/list?shared=true"
-              : parentId
-                ? `/api/files/list?parentId=${parentId}`
-                : "/api/files/list";
+          mode === "starred"
+            ? "/api/files/list?starred=true"
+            : mode === "recent"
+              ? "/api/files/list?recent=true"
+              : mode === "trash"
+                ? "/api/files/list?trash=true"
+                : mode === "shared"
+                  ? "/api/files/list?shared=true"
+                  : parentId
+                    ? `/api/files/list?parentId=${parentId}`
+                    : "/api/files/list";
         const res = await fetch(url);
         const data = await res.json();
 
@@ -199,6 +204,7 @@ export function useFiles(keys: {
             sessionKeyNonce,
             parentKeysClaim,
             parentKeysClaimWrappedBy,
+            isStarred: !!(f.is_starred),
             isShared: mode === "shared",
             collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
           };
@@ -279,16 +285,20 @@ export function useFiles(keys: {
           ...s,
           files: decrypted,
           loading: false,
-          currentFolder: mode === "shared" || mode === "trash" ? null : parentId,
+          currentFolder: mode !== "own" ? null : parentId,
           viewMode: mode,
           breadcrumb:
-            mode === "trash"
-              ? [{ id: null, name: "Trash" }]
-              : mode === "shared"
-                ? [{ id: null, name: "Shared with me" }]
-                : (s.viewMode === "shared" || s.viewMode === "trash") && mode === "own"
-                  ? [{ id: null, name: "My Drive" }]
-                  : s.breadcrumb,
+            mode === "starred"
+              ? [{ id: null, name: "Starred" }]
+              : mode === "recent"
+                ? [{ id: null, name: "Recent" }]
+                : mode === "trash"
+                  ? [{ id: null, name: "Trash" }]
+                  : mode === "shared"
+                    ? [{ id: null, name: "Shared with me" }]
+                    : s.viewMode !== "own" && mode === "own"
+                      ? [{ id: null, name: "My Drive" }]
+                      : s.breadcrumb,
         }));
       } catch (err) {
         console.error("Fetch files error:", err);
@@ -327,6 +337,7 @@ export function useFiles(keys: {
       sessionKeyNonce: "",
       parentKeysClaim: null,
       parentKeysClaimWrappedBy: null,
+      isStarred: false,
       isShared: false,
       collaborators: [],
       uploading: true,
@@ -938,6 +949,29 @@ export function useFiles(keys: {
       }
     },
     [keys, fetchFiles, state.currentFolder, state.viewMode]
+  );
+
+  const toggleStar = useCallback(
+    async (fileId: string, starred: boolean): Promise<{ ok: boolean }> => {
+      try {
+        const res = await fetch(`/api/files/${fileId}/star`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ starred }),
+        });
+        if (!res.ok) return { ok: false };
+        setState((s) => ({
+          ...s,
+          files: s.files.map((f) =>
+            f.id === fileId ? { ...f, isStarred: starred } : f
+          ),
+        }));
+        return { ok: true };
+      } catch {
+        return { ok: false };
+      }
+    },
+    []
   );
 
   const deleteItem = useCallback(async (fileId: string) => {
@@ -1846,6 +1880,7 @@ export function useFiles(keys: {
     createFolder,
     renameFile,
     moveFile,
+    toggleStar,
     deleteItem,
     restoreItem,
     purgeItem,

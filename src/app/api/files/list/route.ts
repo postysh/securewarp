@@ -7,6 +7,8 @@ import {
   getFileById,
   getInheritedChildren,
   getTrashedForUser,
+  getStarredForUser,
+  getRecentForUser,
   type FileRowWithKey,
 } from "@/lib/db/files";
 import { logError } from "@/lib/log";
@@ -21,10 +23,18 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const shared = searchParams.get("shared") === "true";
     const trash = searchParams.get("trash") === "true";
+    const starred = searchParams.get("starred") === "true";
+    const recent = searchParams.get("recent") === "true";
     const parentId = searchParams.get("parentId") || null;
 
     let files: FileRowWithKey[];
-    if (trash) {
+    if (starred) {
+      files = await getStarredForUser(session.userId);
+    } else if (recent) {
+      // Recent: same as own-files root but sorted by updated_at desc,
+      // limited to 50 most recent across all folders.
+      files = await getRecentForUser(session.userId);
+    } else if (trash) {
       // Flat top-of-trash view. Only surfaces roots — if the user
       // trashed a folder, its recursively-marked children stay
       // hidden behind it.

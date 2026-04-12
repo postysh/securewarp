@@ -27,8 +27,7 @@ export interface FileRow {
   // root items.
   parent_keys_claim: string | null;
   parent_keys_claim_wrapped_by: string | null;
-  // Phase 6 — soft delete. Null on live rows, set to the deletion
-  // timestamp when the user trashes the file (recursive).
+  is_starred: boolean;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -601,6 +600,56 @@ export async function getTrashedForUser(userId: string): Promise<FileRowWithKey[
   });
 
   return tops.map((row) => shapeRow(row as unknown as FileJoinRow));
+}
+
+/**
+ * Most recently touched files across all folders — flat list, capped
+ * at 50. "Recent" means updated_at desc; the column is bumped on
+ * upload finalize, rename, and move so it's a reasonable proxy for
+ * "last interacted with".
+ */
+export async function getRecentForUser(userId: string): Promise<FileRowWithKey[]> {
+  const { data, error } = await supabase
+    .from("files")
+    .select(LIST_SELECT)
+    .eq("owner_id", userId)
+    .eq("file_keys.user_id", userId)
+    .eq("upload_complete", true)
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(50);
+  if (error) throw new Error(`Failed to fetch recent: ${error.message}`);
+  return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
+}
+
+/**
+ * Toggle the starred flag on a file. Owner-only.
+ */
+export async function toggleStar(fileId: string, ownerId: string, starred: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("files")
+    .update({ is_starred: starred })
+    .eq("id", fileId)
+    .eq("owner_id", ownerId);
+  if (error) throw new Error(`Failed to toggle star: ${error.message}`);
+}
+
+/**
+ * List starred files for a user. Flat list across all folders,
+ * ordered by most-recently starred (updated_at desc as proxy).
+ */
+export async function getStarredForUser(userId: string): Promise<FileRowWithKey[]> {
+  const { data, error } = await supabase
+    .from("files")
+    .select(LIST_SELECT)
+    .eq("owner_id", userId)
+    .eq("file_keys.user_id", userId)
+    .eq("upload_complete", true)
+    .is("deleted_at", null)
+    .eq("is_starred", true)
+    .order("updated_at", { ascending: false });
+  if (error) throw new Error(`Failed to fetch starred: ${error.message}`);
+  return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
 }
 
 /**

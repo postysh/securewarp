@@ -198,14 +198,31 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setCommandPaletteOpen((v) => !v);
+        return;
+      }
+      // Remaining shortcuts only fire outside form fields and modals
+      if (inInput) return;
+      if ((e.metaKey || e.ctrlKey) && e.key === "a") {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0) {
+        e.preventDefault();
+        for (const id of selected) fileOps.deleteItem(id);
+        selectNone();
+        return;
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, []);
+  }, [selected, selectAll, selectNone, fileOps]);
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -399,10 +416,50 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           <button onClick={selectNone} className="text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer">Clear</button>
           <button onClick={selectAll} className="text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer">Select all</button>
           <div className="ml-auto flex items-center gap-1">
-            <button className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"><HugeiconsIcon icon={Download04Icon} size={15} /></button>
-            <button className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"><HugeiconsIcon icon={Share01Icon} size={15} /></button>
-            <button className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"><HugeiconsIcon icon={Move01Icon} size={15} /></button>
-            <button className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-accent-red"><HugeiconsIcon icon={Delete02Icon} size={15} /></button>
+            <button
+              onClick={async () => {
+                for (const id of selected) {
+                  const f = fileOps.files.find((x) => x.id === id);
+                  if (f && !f.isFolder) await fileOps.downloadFile(id);
+                }
+              }}
+              title="Download"
+              className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"
+            >
+              <HugeiconsIcon icon={Download04Icon} size={15} />
+            </button>
+            <button
+              onClick={() => {
+                const first = fileOps.files.find((f) => selected.has(f.id));
+                if (first) setShareTarget(first);
+              }}
+              title="Share"
+              className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"
+            >
+              <HugeiconsIcon icon={Share01Icon} size={15} />
+            </button>
+            <button
+              onClick={() => {
+                const first = fileOps.files.find((f) => selected.has(f.id));
+                if (first) setMoveTarget(first);
+              }}
+              title="Move"
+              className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"
+            >
+              <HugeiconsIcon icon={Move01Icon} size={15} />
+            </button>
+            <button
+              onClick={async () => {
+                for (const id of selected) {
+                  await fileOps.deleteItem(id);
+                }
+                selectNone();
+              }}
+              title="Trash"
+              className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-accent-red"
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={15} />
+            </button>
           </div>
         </div>
       )}
@@ -473,11 +530,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   <div className="w-10 h-10 rounded-xl bg-accent-green/10 flex items-center justify-center mb-1">
                     <HugeiconsIcon
                       icon={
-                        fileOps.viewMode === "trash"
-                          ? Delete02Icon
-                          : fileOps.viewMode === "shared"
-                            ? UserGroupIcon
-                            : LockIcon
+                        fileOps.viewMode === "starred"
+                          ? StarIcon
+                          : fileOps.viewMode === "trash"
+                            ? Delete02Icon
+                            : fileOps.viewMode === "shared"
+                              ? UserGroupIcon
+                              : LockIcon
                       }
                       size={20}
                       color="var(--accent-green-primary)"
@@ -490,7 +549,31 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 </div>
               </div>
 
-              {fileOps.viewMode === "trash" ? (
+              {fileOps.viewMode === "starred" ? (
+                <>
+                  <h3 className="text-[18px] font-semibold text-text-primary mb-2">No starred files</h3>
+                  <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
+                    Star important files from the context menu to find them quickly here.
+                  </p>
+                  <div className="flex items-center justify-center">
+                    <button onClick={() => fileOps.setViewMode("own")} className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer flex items-center gap-2">
+                      Back to My Drive
+                    </button>
+                  </div>
+                </>
+              ) : fileOps.viewMode === "recent" ? (
+                <>
+                  <h3 className="text-[18px] font-semibold text-text-primary mb-2">No recent files</h3>
+                  <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
+                    Files you upload or interact with will appear here.
+                  </p>
+                  <div className="flex items-center justify-center">
+                    <button onClick={() => fileOps.setViewMode("own")} className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer flex items-center gap-2">
+                      Back to My Drive
+                    </button>
+                  </div>
+                </>
+              ) : fileOps.viewMode === "trash" ? (
                 <>
                   <h3 className="text-[18px] font-semibold text-text-primary mb-2">Trash is empty</h3>
                   <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
@@ -603,7 +686,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 await fileOps.moveFile(source, dest.id, dest.publicHierarchicalKey);
               }}
               onClick={() => {
-                if (file.isFolder && fileOps.viewMode !== "trash") {
+                if (file.isFolder && fileOps.viewMode === "own") {
                   fileOps.navigateToFolder(file.id, file.name);
                 } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
                   setPreviewFileId(file.id);
@@ -756,8 +839,20 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               >
                 <HugeiconsIcon icon={Edit02Icon} size={14} color="var(--icon-tertiary)" /> Rename
               </button>
-              <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
-                <HugeiconsIcon icon={StarIcon} size={14} color="var(--icon-tertiary)" /> Star
+              <button
+                onClick={() => {
+                  if (!contextMenu) return;
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                  if (full) fileOps.toggleStar(full.id, !full.isStarred);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={StarIcon} size={14} color="var(--icon-tertiary)" />
+                {(() => {
+                  const f = fileOps.files.find((f) => f.id === contextMenu?.fileId);
+                  return f?.isStarred ? "Unstar" : "Star";
+                })()}
               </button>
             </>
           )}

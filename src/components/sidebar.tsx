@@ -168,9 +168,13 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const active =
     fileOps.viewMode === "trash"
       ? "trash"
-      : fileOps.breadcrumb[0]?.name === "Shared with me"
-        ? "shared"
-        : "drive";
+      : fileOps.viewMode === "starred"
+        ? "starred"
+        : fileOps.viewMode === "recent"
+          ? "recent"
+          : fileOps.breadcrumb[0]?.name === "Shared with me"
+            ? "shared"
+            : "drive";
   const storage = useStorageUsage();
   const usedPct = storage.maxBytes > 0 ? Math.min((storage.usedBytes / storage.maxBytes) * 100, 100) : 0;
   const usedLabel = formatStorageBytes(storage.usedBytes);
@@ -208,9 +212,10 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           {navItems.map((item) => {
             const handleClick = () => {
               if (item.id === "drive") fileOps.setViewMode("own");
+              else if (item.id === "recent") fileOps.setViewMode("recent");
+              else if (item.id === "starred") fileOps.setViewMode("starred");
               else if (item.id === "shared") fileOps.setViewMode("shared");
               else if (item.id === "trash") fileOps.setViewMode("trash");
-              // Other items (recent/starred) are placeholders.
             };
             const btn = (
               <button
