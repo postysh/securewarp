@@ -622,6 +622,39 @@ export async function getRecentForUser(userId: string): Promise<FileRowWithKey[]
 }
 
 /**
+ * All files the user can access — owned + shared, flat, no folder
+ * scoping. Used to build the client-side search index. Capped at
+ * 500 rows to keep the response reasonable.
+ */
+export async function getAllAccessibleFiles(userId: string): Promise<FileRowWithKey[]> {
+  // Owned files
+  const { data: owned, error: ownErr } = await supabase
+    .from("files")
+    .select(LIST_SELECT)
+    .eq("owner_id", userId)
+    .eq("file_keys.user_id", userId)
+    .eq("upload_complete", true)
+    .is("deleted_at", null)
+    .limit(500);
+  if (ownErr) throw new Error(`Failed to fetch owned files: ${ownErr.message}`);
+
+  // Shared files (where user has a direct file_keys row but isn't owner)
+  const { data: shared, error: sharedErr } = await supabase
+    .from("files")
+    .select(LIST_SELECT)
+    .eq("file_keys.user_id", userId)
+    .neq("owner_id", userId)
+    .eq("upload_complete", true)
+    .is("deleted_at", null)
+    .limit(200);
+  if (sharedErr) throw new Error(`Failed to fetch shared files: ${sharedErr.message}`);
+
+  const ownedRows = (owned || []).map((r) => shapeRow(r as unknown as FileJoinRow));
+  const sharedRows = (shared || []).map((r) => shapeRow(r as unknown as FileJoinRow));
+  return [...ownedRows, ...sharedRows];
+}
+
+/**
  * Toggle star for ANY user on ANY file they can access. Per-user
  * stars live in the `user_stars` junction table, so one user's
  * star never affects another's.

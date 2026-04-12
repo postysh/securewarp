@@ -2030,6 +2030,62 @@ export function useFiles(keys: {
     setState((s) => ({ ...s, error: null }));
   }, []);
 
+  // ── Search index ─────────────────────────────────────────────────
+  // Lazily built on first search, cached for the session. Contains
+  // every file the user can access with decrypted names.
+  const searchIndexRef = useRef<{ id: string; name: string; isFolder: boolean; parentId: string | null }[] | null>(null);
+  const searchBuildingRef = useRef(false);
+
+  const searchFiles = useCallback(
+    async (query: string): Promise<{ id: string; name: string; isFolder: boolean; parentId: string | null }[]> => {
+      if (!keys) return [];
+
+      // Build index on first call
+      if (!searchIndexRef.current && !searchBuildingRef.current) {
+        searchBuildingRef.current = true;
+        try {
+          const res = await fetch("/api/files/list?all=true");
+          const data = await res.json();
+          if (!res.ok) { searchBuildingRef.current = false; return []; }
+
+          const index: { id: string; name: string; isFolder: boolean; parentId: string | null }[] = [];
+          for (const f of data.files) {
+            const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
+            if (!encPrivHier) continue;
+            try {
+              const privHier = unwrapPrivateHierarchicalKey(encPrivHier, f.wrapped_by_public_key || "", keys.encryptionPrivateKey);
+              const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file, f.session_key_nonce, f.owner_public_key || "", privHier);
+              const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata) : f.encrypted_metadata;
+              const meta = decryptMetadata(encMeta, sk);
+              sk.fill(0);
+              index.push({ id: f.id, name: meta.name, isFolder: f.is_folder, parentId: f.parent_id ?? null });
+            } catch {
+              // skip undecryptable
+            }
+          }
+          searchIndexRef.current = index;
+        } catch {
+          searchBuildingRef.current = false;
+          return [];
+        }
+        searchBuildingRef.current = false;
+      }
+
+      // Wait for in-progress build
+      if (searchBuildingRef.current) {
+        await new Promise((r) => setTimeout(r, 500));
+        if (!searchIndexRef.current) return [];
+      }
+
+      if (!searchIndexRef.current) return [];
+
+      const q = query.toLowerCase().trim();
+      if (!q) return searchIndexRef.current.slice(0, 20);
+      return searchIndexRef.current.filter((f) => f.name.toLowerCase().includes(q)).slice(0, 50);
+    },
+    [keys]
+  );
+
   return {
     ...state,
     initialized,
@@ -2059,6 +2115,7 @@ export function useFiles(keys: {
     navigateToFolder,
     navigateToBreadcrumb,
     clearError,
+    searchFiles,
   };
 }
 

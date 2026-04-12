@@ -8,6 +8,7 @@ import {
   getTrashedForUser,
   getStarredForUser,
   getRecentForUser,
+  getAllAccessibleFiles,
   getEffectivePermission,
   type FileRowWithKey,
 } from "@/lib/db/files";
@@ -26,10 +27,14 @@ export async function GET(request: Request) {
     const trash = searchParams.get("trash") === "true";
     const starred = searchParams.get("starred") === "true";
     const recent = searchParams.get("recent") === "true";
+    const all = searchParams.get("all") === "true";
     const parentId = searchParams.get("parentId") || null;
 
     let files: FileRowWithKey[];
-    if (starred) {
+    if (all) {
+      // Search index — all files the user can access, flat.
+      files = await getAllAccessibleFiles(session.userId);
+    } else if (starred) {
       files = await getStarredForUser(session.userId);
     } else if (recent) {
       // Recent: same as own-files root but sorted by updated_at desc,

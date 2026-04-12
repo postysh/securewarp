@@ -1,29 +1,26 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import File01Icon from "@hugeicons/core-free-icons/File01Icon";
-import Image01Icon from "@hugeicons/core-free-icons/Image01Icon";
-import Table01Icon from "@hugeicons/core-free-icons/Table01Icon";
-import Pdf01Icon from "@hugeicons/core-free-icons/Pdf01Icon";
-import CodeIcon from "@hugeicons/core-free-icons/CodeIcon";
 import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
 import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
 import Setting07Icon from "@hugeicons/core-free-icons/Setting07Icon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
-import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
 import StarIcon from "@hugeicons/core-free-icons/StarIcon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import ArrowTurnDownIcon from "@hugeicons/core-free-icons/ArrowTurnDownIcon";
+import LockIcon from "@hugeicons/core-free-icons/LockIcon";
+import { useFilesContext } from "@/hooks/use-files";
 
 interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
-  files?: { id: string; name: string; isFolder: boolean }[];
   onAction?: (action: string) => void;
+  onOpenFile?: (fileId: string, isFolder: boolean) => void;
 }
 
 interface SearchItem {
@@ -31,45 +28,34 @@ interface SearchItem {
   label: string;
   icon: unknown;
   iconColor: string;
-  section: "recent" | "files" | "actions";
-  shortcut?: string;
+  section: "files" | "actions";
+  isFolder?: boolean;
 }
 
-const recentFiles: SearchItem[] = [
-  { id: "r1", label: "Architecture Diagram.pdf", icon: Pdf01Icon, iconColor: "var(--accent-red-primary)", section: "recent" },
-  { id: "r2", label: "Q1 overview", icon: Folder01Icon, iconColor: "var(--accent-blue-primary)", section: "recent" },
-  { id: "r3", label: "CapTable.xls", icon: Table01Icon, iconColor: "var(--accent-green-primary)", section: "recent" },
-];
-
-const allFiles: SearchItem[] = [
-  { id: "f1", label: "Q1 overview", icon: Folder01Icon, iconColor: "var(--accent-blue-primary)", section: "files" },
-  { id: "f2", label: "Milestones", icon: Folder01Icon, iconColor: "var(--accent-blue-primary)", section: "files" },
-  { id: "f3", label: "Team review.docx", icon: File01Icon, iconColor: "var(--accent-dark-blue-primary)", section: "files" },
-  { id: "f4", label: "BG-02.png", icon: Image01Icon, iconColor: "var(--accent-green-primary)", section: "files" },
-  { id: "f5", label: "FetchTable.py", icon: CodeIcon, iconColor: "var(--accent-orange-primary)", section: "files" },
-  { id: "f6", label: "CapTable.xls", icon: Table01Icon, iconColor: "var(--accent-green-primary)", section: "files" },
-  { id: "f7", label: "Architecture Diagram.pdf", icon: Pdf01Icon, iconColor: "var(--accent-red-primary)", section: "files" },
-  { id: "f8", label: "Pitch Deck.pptx", icon: File01Icon, iconColor: "var(--accent-orange-primary)", section: "files" },
-];
-
 const quickActions: SearchItem[] = [
-  { id: "a1", label: "Upload file", icon: Upload04Icon, iconColor: "var(--icon-secondary)", section: "actions", shortcut: "U" },
-  { id: "a2", label: "New folder", icon: FolderAddIcon, iconColor: "var(--icon-secondary)", section: "actions", shortcut: "N" },
-  { id: "a3", label: "Invite member", icon: UserAdd01Icon, iconColor: "var(--icon-secondary)", section: "actions", shortcut: "I" },
+  { id: "a1", label: "Upload file", icon: Upload04Icon, iconColor: "var(--icon-secondary)", section: "actions" },
+  { id: "a2", label: "New folder", icon: FolderAddIcon, iconColor: "var(--icon-secondary)", section: "actions" },
+  { id: "a3", label: "Invite member", icon: UserAdd01Icon, iconColor: "var(--icon-secondary)", section: "actions" },
   { id: "a4", label: "Settings", icon: Setting07Icon, iconColor: "var(--icon-secondary)", section: "actions" },
   { id: "a5", label: "Starred files", icon: StarIcon, iconColor: "var(--icon-secondary)", section: "actions" },
   { id: "a6", label: "Trash", icon: Delete02Icon, iconColor: "var(--icon-secondary)", section: "actions" },
 ];
 
-export function CommandPalette({ open, onClose, files: realFiles, onAction }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, onAction, onOpenFile }: CommandPaletteProps) {
+  const fileOps = useFilesContext();
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [searchResults, setSearchResults] = useState<SearchItem[]>([]);
+  const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (open) {
       setQuery("");
       setSelectedIndex(0);
+      setSearchResults([]);
+      setSearching(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
@@ -83,43 +69,52 @@ export function CommandPalette({ open, onClose, files: realFiles, onAction }: Co
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
-  // Keyboard shortcut to open (Cmd+K)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        if (!open) {
-          // parent handles opening
-        } else {
-          onClose();
-        }
+  const doSearch = useCallback(
+    async (q: string) => {
+      if (!q.trim()) {
+        setSearchResults([]);
+        setSearching(false);
+        return;
       }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+      setSearching(true);
+      const results = await fileOps.searchFiles(q);
+      setSearchResults(
+        results.map((f) => ({
+          id: f.id,
+          label: f.name,
+          icon: f.isFolder ? Folder01Icon : File01Icon,
+          iconColor: f.isFolder ? "var(--accent-blue-primary)" : "var(--icon-secondary)",
+          section: "files" as const,
+          isFolder: f.isFolder,
+        }))
+      );
+      setSearching(false);
+    },
+    [fileOps]
+  );
 
-  const liveFiles: SearchItem[] = (realFiles || []).map((f) => ({
-    id: f.id,
-    label: f.name,
-    icon: f.isFolder ? Folder01Icon : File01Icon,
-    iconColor: f.isFolder ? "var(--accent-blue-primary)" : "var(--icon-secondary)",
-    section: "files" as const,
-  }));
+  const handleQueryChange = (value: string) => {
+    setQuery(value);
+    setSelectedIndex(0);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => doSearch(value), 150);
+  };
 
-  const searchableFiles = liveFiles.length > 0 ? liveFiles : allFiles;
+  const hasQuery = query.trim().length > 0;
+  const fileResults = hasQuery ? searchResults : [];
+  const actionResults = hasQuery
+    ? quickActions.filter((a) => a.label.toLowerCase().includes(query.toLowerCase()))
+    : quickActions;
+  const flatResults = [...fileResults, ...actionResults];
 
-  const results = useMemo(() => {
-    if (!query.trim()) {
-      return { recent: liveFiles.length > 0 ? liveFiles.slice(0, 3) : recentFiles, actions: quickActions, files: [] };
+  const handleSelect = (item: SearchItem) => {
+    if (item.section === "actions" && onAction) {
+      onAction(item.id);
+    } else if (item.section === "files" && onOpenFile) {
+      onOpenFile(item.id, item.isFolder ?? false);
     }
-    const q = query.toLowerCase();
-    const matchedFiles = searchableFiles.filter((f) => f.label.toLowerCase().includes(q));
-    const matchedActions = quickActions.filter((a) => a.label.toLowerCase().includes(q));
-    return { recent: [], actions: matchedActions, files: matchedFiles };
-  }, [query, searchableFiles, liveFiles]);
-
-  const flatResults = [...results.recent, ...results.files, ...results.actions];
+    onClose();
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
@@ -131,8 +126,7 @@ export function CommandPalette({ open, onClose, files: realFiles, onAction }: Co
     } else if (e.key === "Enter" && flatResults.length > 0) {
       e.preventDefault();
       const item = flatResults[selectedIndex];
-      if (item?.section === "actions" && onAction) onAction(item.id);
-      onClose();
+      if (item) handleSelect(item);
     }
   };
 
@@ -149,7 +143,7 @@ export function CommandPalette({ open, onClose, files: realFiles, onAction }: Co
             <button
               key={item.id}
               onMouseEnter={() => setSelectedIndex(idx)}
-              onClick={() => { if (item.section === "actions" && onAction) { onAction(item.id); } onClose(); }}
+              onClick={() => handleSelect(item)}
               className={`w-full flex items-center gap-3 px-4 h-[36px] text-[13px] transition-colors cursor-pointer ${
                 selectedIndex === idx ? "bg-bg-overlay-tertiary" : ""
               }`}
@@ -158,11 +152,6 @@ export function CommandPalette({ open, onClose, files: realFiles, onAction }: Co
               <span className={`flex-1 text-left truncate ${selectedIndex === idx ? "text-text-primary" : "text-text-secondary"}`}>
                 {item.label}
               </span>
-              {item.shortcut && (
-                <kbd className="text-[10px] font-mono text-text-disabled bg-bg-field px-1.5 py-0.5 rounded">
-                  {item.shortcut}
-                </kbd>
-              )}
               {selectedIndex === idx && (
                 <HugeiconsIcon icon={ArrowTurnDownIcon} size={12} color="var(--icon-tertiary)" />
               )}
@@ -173,10 +162,8 @@ export function CommandPalette({ open, onClose, files: realFiles, onAction }: Co
     );
   };
 
-  let offset = 0;
-  const recentStart = offset; offset += results.recent.length;
-  const filesStart = offset; offset += results.files.length;
-  const actionsStart = offset;
+  const filesStart = 0;
+  const actionsStart = fileResults.length;
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-[20vh]">
@@ -193,7 +180,7 @@ export function CommandPalette({ open, onClose, files: realFiles, onAction }: Co
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => { setQuery(e.target.value); setSelectedIndex(0); }}
+            onChange={(e) => handleQueryChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search files, folders, and actions..."
             className="flex-1 bg-transparent text-[14px] text-text-primary placeholder:text-text-disabled focus:outline-none"
@@ -205,15 +192,20 @@ export function CommandPalette({ open, onClose, files: realFiles, onAction }: Co
 
         {/* Results */}
         <div className="max-h-[320px] overflow-y-auto">
-          {flatResults.length === 0 && query.trim() && (
+          {searching && (
+            <div className="flex items-center gap-2 px-4 py-3 text-[12px] text-text-disabled">
+              <HugeiconsIcon icon={LockIcon} size={12} />
+              Decrypting file names…
+            </div>
+          )}
+          {!searching && hasQuery && flatResults.length === 0 && (
             <div className="flex flex-col items-center justify-center py-10 text-text-disabled">
               <HugeiconsIcon icon={Search01Icon} size={24} color="var(--icon-tertiary)" />
               <p className="text-[13px] mt-2">No results for &ldquo;{query}&rdquo;</p>
             </div>
           )}
-          {renderSection("Recent", results.recent, recentStart)}
-          {renderSection("Files", results.files, filesStart)}
-          {renderSection("Actions", results.actions, actionsStart)}
+          {renderSection(hasQuery ? "Files" : "Actions", hasQuery ? fileResults : [], filesStart)}
+          {renderSection("Actions", actionResults, actionsStart)}
         </div>
 
         {/* Footer */}

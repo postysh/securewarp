@@ -1044,7 +1044,6 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       <CommandPalette
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
-        files={displayFiles.map((f) => ({ id: f.id, name: f.name, isFolder: f.isFolder }))}
         onAction={(action) => {
           switch (action) {
             case "a1": fileInputRef.current?.click(); break;
@@ -1054,6 +1053,20 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               if (first) setShareTarget(first);
               break;
             }
+            case "a5": fileOps.setViewMode("starred"); break;
+            case "a6": fileOps.setViewMode("trash"); break;
+          }
+        }}
+        onOpenFile={(fileId, isFolder) => {
+          if (isFolder) {
+            const f = fileOps.files.find((x) => x.id === fileId);
+            if (f) {
+              fileOps.navigateToFolder(f.id, f.name);
+            } else {
+              fileOps.navigateToFolder(fileId, "Folder");
+            }
+          } else {
+            setPreviewFileId(fileId);
           }
         }}
       />
