@@ -186,7 +186,8 @@ export function useFiles(keys: {
           (b.is_folder ? 1 : 0) - (a.is_folder ? 1 : 0)
         );
 
-        const decrypted: DecryptedFile[] = sorted.map((f: Record<string, unknown>) => {
+        // Decrypt helper — extracted so we can retry on the second pass.
+        const tryDecrypt = (f: Record<string, unknown>): DecryptedFile | null => {
           const encryptedPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
           const wrappedByPublicKey = (f.wrapped_by_public_key as string) || "";
           const ownerPublicKey = (f.owner_public_key as string) || "";
@@ -198,7 +199,49 @@ export function useFiles(keys: {
           const rowParentId = (f.parent_id as string | null) ?? null;
           const isFolder = f.is_folder as boolean;
 
-          const base = {
+          let sessionKey: Uint8Array;
+          let privHier: string | null = null;
+
+          if (encryptedPrivHier) {
+            privHier = unwrapPrivateHierarchicalKey(
+              encryptedPrivHier,
+              wrappedByPublicKey,
+              keys.encryptionPrivateKey
+            );
+            sessionKey = unwrapSessionKeyFromFile(
+              encryptedSessionKeyByFile,
+              sessionKeyNonce,
+              ownerPublicKey,
+              privHier
+            );
+          } else if (parentKeysClaim && parentKeysClaimWrappedBy && rowParentId) {
+            const parentEntry = folderPrivHierCache.current.get(rowParentId);
+            if (!parentEntry) return null; // defer to second pass
+            const unwrapped = unwrapParentKeysClaim(
+              parentKeysClaim,
+              parentKeysClaimWrappedBy,
+              parentEntry.privateHierarchicalKey
+            );
+            sessionKey = unwrapped.sessionKey;
+            privHier = unwrapped.childPrivateHierarchicalKey;
+          } else {
+            throw new Error("no decrypt path");
+          }
+
+          if (isFolder && privHier && publicHierarchicalKey) {
+            folderPrivHierCache.current.set(f.id as string, {
+              publicHierarchicalKey,
+              privateHierarchicalKey: privHier,
+            });
+          }
+
+          const encMeta = typeof f.encrypted_metadata === "string"
+            ? JSON.parse(f.encrypted_metadata as string)
+            : f.encrypted_metadata;
+          const meta = decryptMetadata(encMeta, sessionKey);
+          sessionKey.fill(0);
+
+          return {
             id: f.id as string,
             isFolder,
             parentId: rowParentId,
@@ -216,83 +259,68 @@ export function useFiles(keys: {
             isStarred: !!(f.is_starred),
             isShared: mode === "shared",
             collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
-          };
+            name: meta.name,
+            type: meta.type,
+            size: meta.size,
+          } as DecryptedFile;
+        };
 
+        const makeErrorEntry = (f: Record<string, unknown>): DecryptedFile => ({
+          id: f.id as string,
+          isFolder: f.is_folder as boolean,
+          parentId: (f.parent_id as string | null) ?? null,
+          ownerId: (f.owner_id as string) || "",
+          createdAt: f.created_at as string,
+          updatedAt: f.updated_at as string,
+          encryptedPrivateHierarchicalKey: (f.encrypted_private_hierarchical_key as string) || "",
+          wrappedByPublicKey: (f.wrapped_by_public_key as string) || "",
+          ownerPublicKey: (f.owner_public_key as string) || "",
+          publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
+          encryptedSessionKeyByFile: (f.encrypted_session_key_by_file as string) || "",
+          sessionKeyNonce: (f.session_key_nonce as string) || "",
+          parentKeysClaim: (f.parent_keys_claim as string | null) ?? null,
+          parentKeysClaimWrappedBy: (f.parent_keys_claim_wrapped_by as string | null) ?? null,
+          isStarred: !!(f.is_starred),
+          isShared: mode === "shared",
+          collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
+          name: "[Encrypted]",
+          type: "unknown",
+          size: 0,
+        });
+
+        // Two-pass decrypt. First pass processes everything it can
+        // and populates folderPrivHierCache. Second pass retries
+        // files that couldn't decrypt because their parent wasn't
+        // cached yet (ordering issue in starred/recent views).
+        const results: DecryptedFile[] = [];
+        const deferred: Record<string, unknown>[] = [];
+        for (const f of sorted) {
           try {
-            let sessionKey: Uint8Array;
-            let privHier: string | null = null;
-
-            if (encryptedPrivHier) {
-              // Direct-row path: owner or direct collaborator. Unwrap the
-              // caller's private-hier-key row, then the session key.
-              privHier = unwrapPrivateHierarchicalKey(
-                encryptedPrivHier,
-                wrappedByPublicKey,
-                keys.encryptionPrivateKey
-              );
-              sessionKey = unwrapSessionKeyFromFile(
-                encryptedSessionKeyByFile,
-                sessionKeyNonce,
-                ownerPublicKey,
-                privHier
-              );
-            } else if (parentKeysClaim && parentKeysClaimWrappedBy && rowParentId) {
-              // Phase 3 inherited path: no direct row, walk the parent
-              // chain. The parent's priv hier key must already be in the
-              // cache (populated earlier in this same decrypt loop, or on
-              // a previous fetchFiles when the caller loaded the parent).
-              const parentEntry = folderPrivHierCache.current.get(rowParentId);
-              if (!parentEntry) {
-                throw new Error(`parent priv hier not cached for ${rowParentId}`);
-              }
-              const unwrapped = unwrapParentKeysClaim(
-                parentKeysClaim,
-                parentKeysClaimWrappedBy,
-                parentEntry.privateHierarchicalKey
-              );
-              sessionKey = unwrapped.sessionKey;
-              privHier = unwrapped.childPrivateHierarchicalKey;
+            const result = tryDecrypt(f);
+            if (result) {
+              results.push(result);
             } else {
-              throw new Error("no decrypt path: neither direct row nor parent claim");
+              deferred.push(f);
             }
-
-            // Populate the folder cache so descendants can walk through
-            // this row on their own decrypt pass AND uploads into this
-            // folder can wrap parent_keys_claim against its pub hier key.
-            if (isFolder && privHier && publicHierarchicalKey) {
-              folderPrivHierCache.current.set(f.id as string, {
-                publicHierarchicalKey,
-                privateHierarchicalKey: privHier,
-              });
-            }
-
-            const encMeta = typeof f.encrypted_metadata === "string"
-              ? JSON.parse(f.encrypted_metadata as string)
-              : f.encrypted_metadata;
-            const meta = decryptMetadata(encMeta, sessionKey);
-
-            sessionKey.fill(0);
-
-            return {
-              ...base,
-              name: meta.name,
-              type: meta.type,
-              size: meta.size,
-            } as DecryptedFile;
           } catch (err) {
             console.error("Failed to decrypt file:", f.id, err);
-            return {
-              ...base,
-              name: "[Encrypted]",
-              type: "unknown",
-              size: 0,
-            } as DecryptedFile;
+            results.push(makeErrorEntry(f));
           }
-        });
+        }
+        // Second pass for deferred items
+        for (const f of deferred) {
+          try {
+            const result = tryDecrypt(f);
+            results.push(result ?? makeErrorEntry(f));
+          } catch (err) {
+            console.error("Failed to decrypt file:", f.id, err);
+            results.push(makeErrorEntry(f));
+          }
+        }
 
         setState((s) => ({
           ...s,
-          files: decrypted,
+          files: results,
           loading: false,
           currentFolder: mode !== "own" ? null : parentId,
           viewMode: mode === "own" && parentId ? s.viewMode : mode,
