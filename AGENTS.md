@@ -250,6 +250,52 @@ or `src/hooks/use-files.ts`:
 - The server must **never** learn the private hierarchical key or the
   plaintext session key. If a code path would need it, redesign.
 
+## Lock cache / unlock flow (tab-reopen session resume)
+
+The decrypted private keys live in `sessionStorage`, which is wiped
+when the tab closes. The auth JWT is a 7-day cookie, so without any
+cache a returning user is "logged in" per the server but has no keys
+to decrypt anything. `src/lib/auth/lock-cache.ts` persists an encrypted
+snapshot of the four key strings in `localStorage`, unsealable with
+the password alone — no SRP, no server round-trip.
+
+16. **`unlockCacheKey` is a third HKDF output of `splitMasterKey`.**
+    The info string is `securewarp-unlock-cache-v1`. Never reuse
+    `srpKey` or `passwordDerivedSecret` for this purpose — domain
+    separation is what makes a disk-level attacker with the cache
+    blob equivalent (not worse) than an attacker with the SRP
+    verifier. If you ever change the info string or Argon2 params,
+    version the constant (`-v2`) and invalidate existing blobs.
+
+17. **The cache blob contains only ciphertext + non-secret metadata.**
+    `email` and `argon2Salt` are stored plaintext alongside — the
+    salt is the same one the server sends during login/init, and
+    the email is visible on the unlock screen anyway. The four key
+    strings are inside a `nacl.secretbox` under `unlockCacheKey`.
+
+18. **Lifecycle: save on login/signup/recover, clear on logout/change.**
+    `use-auth.ts` calls `saveLockCache` after every successful key
+    derivation (login, signup, recover, changePassword) and
+    `clearLockCache` on logout and before re-sealing under a new
+    password. If you add a new auth path, you MUST wire both sides.
+    Missing a `clearLockCache` on password change leaves a blob
+    that unlocks with the OLD password.
+
+19. **`unlockCacheKey` is zeroed in `finally`.** `use-auth.ts`'s
+    `unlock(password)` and all the save-site callers hoist
+    `unlockCacheKey` so it can be `.fill(0)`'d on every exit path.
+    Same hygiene as `passwordDerivedSecret` in the login flow.
+
+20. **Drive renders AuthScreen inline when `sessionStorage` is empty.**
+    `src/components/drive-client.tsx` cannot redirect to `/login` —
+    the middleware would bounce authenticated users right back. It
+    inlines `<AuthScreen />` instead; AuthScreen auto-detects the
+    lock cache and shows the unlock form. After a successful unlock
+    the hook dispatches a `securewarp-keys-updated` window event,
+    which drive-client listens for and re-reads sessionStorage. Do
+    NOT add a `router.push` to /drive from unlock — it's a no-op
+    when you're already there and hides the event wiring.
+
 ## Security hardening rules
 
 - **Email canonicalization.** Every auth boundary (register, login,

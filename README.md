@@ -43,6 +43,12 @@ Your password never leaves your browser — not even as a hash. The SRP protocol
 
 Recovery keys use HKDF to derive separate verification and encryption keys from the BIP39 mnemonic. The server stores a hash of the verification key (not the encryption key), so even a database breach cannot decrypt recovery-encrypted data.
 
+### Session resume (lock cache)
+
+Decrypted private keys live in `sessionStorage` and die when the tab closes, but the auth cookie is a 7-day JWT. To avoid forcing a full SRP handshake on every tab reopen, SecureWarp persists an **encrypted** snapshot of the four key strings in `localStorage`, wrapped under a third HKDF output of the master key (`unlockCacheKey`, info string `securewarp-unlock-cache-v1`). On tab reopen the user enters only their password; the browser re-runs Argon2id + HKDF locally and unseals the blob — no server round-trip.
+
+The threat model is deliberately the same as the SRP verifier's: a disk-level attacker gets a ciphertext and a salt, both useless without the password. An XSS attacker reading `localStorage` gets the same ciphertext, also useless without the password. The cache is cleared on explicit logout, password change, and recovery so the old blob never outlives the password that can unwrap it.
+
 ## Tech Stack
 
 | Layer | Technology |
