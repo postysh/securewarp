@@ -102,6 +102,23 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   async headers() {
+    // Local dev runs over http://localhost:3000 and the security
+    // headers above would break it:
+    //   - `upgrade-insecure-requests` silently rewrites same-origin
+    //     fetches to https://localhost, which the dev server can't
+    //     answer → scripts/styles/HMR all 404.
+    //   - 2-year HSTS caches against `localhost` so subsequent visits
+    //     are forced to https://, same failure mode permanently until
+    //     the user manually clears the HSTS entry.
+    //   - A strict `connect-src` doesn't include `ws://localhost:*`,
+    //     so Turbopack's HMR websocket is blocked.
+    // Dev mode runs on localhost with no third-party scripts loaded
+    // from the internet, so the protections are moot locally anyway.
+    // Ship the full suite on production deployments (Vercel sets
+    // NODE_ENV=production for every build) and nothing in dev.
+    if (process.env.NODE_ENV !== "production") {
+      return [];
+    }
     return [
       {
         // Apply on every route. The Turnstile / R2 / Supabase allowances
