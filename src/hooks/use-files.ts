@@ -63,6 +63,7 @@ export interface DecryptedFile {
   parentKeysClaim: string | null;
   parentKeysClaimWrappedBy: string | null;
   isStarred: boolean;
+  fileLabels: { id: string; name: string; color: string }[];
   isShared: boolean;
   // Everyone who holds a wrapped hierarchical-private-key for this file,
   // owner first. Empty array if the file hasn't finished uploading or we
@@ -259,6 +260,7 @@ export function useFiles(keys: {
             parentKeysClaim,
             parentKeysClaimWrappedBy,
             isStarred: !!(f.is_starred),
+            fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
             isShared: mode === "shared",
             collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
             name: meta.name,
@@ -283,6 +285,7 @@ export function useFiles(keys: {
           parentKeysClaim: (f.parent_keys_claim as string | null) ?? null,
           parentKeysClaimWrappedBy: (f.parent_keys_claim_wrapped_by as string | null) ?? null,
           isStarred: !!(f.is_starred),
+          fileLabels: [],
           isShared: mode === "shared",
           collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
           name: "[Encrypted]",
@@ -416,6 +419,7 @@ export function useFiles(keys: {
       parentKeysClaim: null,
       parentKeysClaimWrappedBy: null,
       isStarred: false,
+      fileLabels: [],
       isShared: false,
       collaborators: [],
       uploading: true,

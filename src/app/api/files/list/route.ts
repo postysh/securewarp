@@ -72,9 +72,24 @@ export async function GET(request: Request) {
       .in("file_id", fileIds);
     const starredSet = new Set((starRows || []).map((r) => r.file_id as string));
 
+    // File labels — which labels are assigned to each file
+    const { data: fileLabelRows } = await supabase
+      .from("file_labels")
+      .select("file_id, label_id, label:labels!file_labels_label_id_fkey(id, name, color)")
+      .in("file_id", fileIds);
+    const labelsByFile = new Map<string, { id: string; name: string; color: string }[]>();
+    for (const row of (fileLabelRows || [])) {
+      const fid = row.file_id as string;
+      const label = (row.label as unknown) as { id: string; name: string; color: string } | null;
+      if (!label) continue;
+      if (!labelsByFile.has(fid)) labelsByFile.set(fid, []);
+      labelsByFile.get(fid)!.push(label);
+    }
+
     const enriched = files.map((f) => ({
       ...f,
       is_starred: starredSet.has(f.id),
+      file_labels: labelsByFile.get(f.id) ?? [],
       collaborators: (collaboratorMap.get(f.id) ?? []).map((c) => ({
         userId: c.user_id,
         email: c.email,

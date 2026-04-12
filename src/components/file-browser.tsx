@@ -168,6 +168,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [moveTarget, setMoveTarget] = useState<DecryptedFile | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [userLabels, setUserLabels] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [filterLabel, setFilterLabel] = useState<{ id: string; name: string; color: string } | null>(null);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -180,10 +181,11 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     }
   }, [keys]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close context menu when files/view changes
+  // Close context menu and clear label filter when navigating
   useEffect(() => {
     setContextMenu(null);
-  }, [fileOps.files, fileOps.viewMode, fileOps.currentFolder]);
+    setFilterLabel(null);
+  }, [fileOps.viewMode, fileOps.currentFolder]);
 
   // Fetch pinned IDs on mount
   useEffect(() => {
@@ -203,7 +205,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   }, [contextMenu]);
 
   // Map decrypted files to display format
-  const displayFiles = fileOps.files.map((f) => ({
+  // Filter by label if active
+  const filteredFiles = filterLabel
+    ? fileOps.files.filter((f) => f.fileLabels.some((l) => l.id === filterLabel.id))
+    : fileOps.files;
+
+  const displayFiles = filteredFiles.map((f) => ({
     id: f.id,
     name: f.name,
     type: getFileKind(f.name, f.type),
@@ -228,11 +235,17 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       const fileId = (e as CustomEvent).detail;
       if (fileId) setPreviewFileId(fileId);
     };
+    const filterByLabel = (e: Event) => {
+      const label = (e as CustomEvent).detail;
+      setFilterLabel(label ?? null);
+    };
     window.addEventListener("securewarp-open-search", openSearch);
     window.addEventListener("securewarp-preview-file", previewFromPin);
+    window.addEventListener("securewarp-filter-label", filterByLabel);
     return () => {
       window.removeEventListener("securewarp-open-search", openSearch);
       window.removeEventListener("securewarp-preview-file", previewFromPin);
+      window.removeEventListener("securewarp-filter-label", filterByLabel);
     };
   }, []);
 
@@ -459,6 +472,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         </div>
       </div>
 
+
+      {/* Label filter banner */}
+      {filterLabel && (
+        <div className="mx-3 md:mx-5 mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-bg-overlay-tertiary animate-fade-in">
+          <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: filterLabel.color }} />
+          <span className="text-[12px] text-text-secondary flex-1">Filtering by <strong>{filterLabel.name}</strong></span>
+          <button onClick={() => setFilterLabel(null)} className="text-[11px] text-text-link hover:underline cursor-pointer">Clear</button>
+        </div>
+      )}
 
       {/* Error banner */}
       {fileOps.error && (
@@ -800,6 +822,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                     {fileOps.files.find((f) => f.id === file.id)?.isStarred && (
                       <HugeiconsIcon icon={StarIcon} size={12} color="var(--accent-yellow-primary)" className="shrink-0" />
                     )}
+                    {(fileOps.files.find((f) => f.id === file.id)?.fileLabels ?? []).map((label) => (
+                      <div key={label.id} className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: label.color }} title={label.name} />
+                    ))}
                   </div>
                   {file.uploading && (
                     <span className="text-[10px] text-accent-green block mt-0.5">{fileOps.uploadStep || "Processing..."}</span>
@@ -999,29 +1024,38 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <HugeiconsIcon icon={PinIcon} size={14} color="var(--icon-tertiary)" />
                 {pinnedIds.has(contextMenu?.fileId ?? "") ? "Unpin from sidebar" : "Pin to sidebar"}
               </button>
-              {userLabels.length > 0 && (
-                <div className="border-t border-border-tertiary mt-1 pt-1">
-                  <p className="px-3 py-1 text-[10px] font-mono uppercase text-text-disabled">Labels</p>
-                  {userLabels.map((label) => (
-                    <button
-                      key={label.id}
-                      onClick={async () => {
-                        if (!contextMenu) return;
-                        await fetch("/api/labels/assign", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ fileId: contextMenu.fileId, labelId: label.id, action: "add" }),
-                        });
-                        setContextMenu(null);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
-                    >
-                      <div className="w-[10px] h-[10px] rounded-full shrink-0" style={{ backgroundColor: label.color }} />
-                      {label.name}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {userLabels.length > 0 && (() => {
+                const fileEntry = fileOps.files.find((f) => f.id === contextMenu?.fileId);
+                const assignedIds = new Set((fileEntry?.fileLabels ?? []).map((l) => l.id));
+                return (
+                  <div className="border-t border-border-tertiary mt-1 pt-1">
+                    <p className="px-3 py-1 text-[10px] font-mono uppercase text-text-disabled">Labels</p>
+                    {userLabels.map((label) => {
+                      const isAssigned = assignedIds.has(label.id);
+                      return (
+                        <button
+                          key={label.id}
+                          onClick={async () => {
+                            if (!contextMenu) return;
+                            await fetch("/api/labels/assign", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ fileId: contextMenu.fileId, labelId: label.id, action: isAssigned ? "remove" : "add" }),
+                            });
+                            await fileOps.fetchFiles(fileOps.currentFolder, fileOps.viewMode);
+                            setContextMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                        >
+                          <div className="w-[10px] h-[10px] rounded-full shrink-0" style={{ backgroundColor: label.color }} />
+                          <span className="flex-1 text-left">{label.name}</span>
+                          {isAssigned && <span className="text-accent-green text-[10px]">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </>
           )}
           {fileOps.viewMode === "trash" && (

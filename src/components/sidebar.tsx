@@ -418,6 +418,10 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
                 {labels.map((tag) => (
                   <button
                     key={tag.id}
+                    onClick={() => {
+                      // Dispatch event to filter by label
+                      window.dispatchEvent(new CustomEvent("securewarp-filter-label", { detail: { id: tag.id, name: tag.name, color: tag.color } }));
+                    }}
                     className="w-full flex items-center gap-3 px-2.5 h-[30px] rounded-[6px] text-[12px] text-text-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
                   >
                     <div className="w-[10px] h-[10px] rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
