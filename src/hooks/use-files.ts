@@ -2000,13 +2000,15 @@ export function useFiles(keys: {
     async (mode: ViewMode) => {
       if (mode === "own" && state.activeWorkspace) {
         // "My Drive" while in a workspace → go to workspace root
+        await fetchFiles(state.activeWorkspace.rootFolderId, "own");
+        // Force breadcrumb after fetch completes — the fetch response
+        // handler preserves s.breadcrumb which may still have the old
+        // subfolder path from before this call.
         setState((s) => ({
           ...s,
           currentFolder: state.activeWorkspace!.rootFolderId,
-          viewMode: "own",
           breadcrumb: [{ id: state.activeWorkspace!.rootFolderId, name: state.activeWorkspace!.name }],
         }));
-        await fetchFiles(state.activeWorkspace.rootFolderId, "own");
       } else {
         await fetchFiles(null, mode);
       }
