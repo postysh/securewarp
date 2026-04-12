@@ -1029,6 +1029,257 @@ export function useFiles(keys: {
    * shared with me"). Distinct from unshare — no target user, and the
    * server rejects the call if the caller owns the file.
    */
+  /**
+   * Phase 5.1 — folder shallow rotation.
+   *
+   * Rotates the folder's own hierarchical keypair + session key, then
+   * re-wraps every direct child's `parent_keys_claim` under the new
+   * folder pub hier. Descendants below the first level are untouched:
+   * their claims were encrypted under THEIR parent's pub hier (which
+   * is unchanged for shallow rotation), so any reader who reaches the
+   * direct child via the new folder keys then walks further down via
+   * the unchanged chain.
+   *
+   * Known limitation: a revoked user who previously opened and cached
+   * a specific descendant's session key or priv hier retains access
+   * to that cached copy. Newly added files and uncached descendants
+   * are fully protected. See README §"Folder rotation" for the
+   * honest threat model.
+   *
+   * Retries once on 409 (concurrent share or new child since init)
+   * with a fresh context fetch.
+   */
+  const rotateAndRevokeFolder = useCallback(
+    async (
+      folder: DecryptedFile,
+      revokedUserId: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
+      if (!keys) return { ok: false, error: "Not signed in" };
+      if (!folder.isFolder) {
+        return { ok: false, error: "Use rotateAndRevoke for non-folder files" };
+      }
+      if (revokedUserId === folder.ownerId) {
+        return { ok: false, error: "Cannot revoke the owner" };
+      }
+
+      type ChildCtx = {
+        id: string;
+        parentId: string | null;
+        isFolder: boolean;
+        publicHierarchicalKey: string;
+        parentKeysClaim: string | null;
+        parentKeysClaimWrappedBy: string | null;
+        encryptedSessionKeyByFile: string;
+        sessionKeyNonce: string;
+      };
+      type CollabCtx = {
+        userId: string;
+        email: string;
+        publicEncryptionKey: string;
+        isOwner: boolean;
+        permissionLevel: "owner" | "editor" | "viewer";
+      };
+      type RotateContext = {
+        folder: {
+          id: string;
+          parentId: string | null;
+          publicHierarchicalKey: string;
+          encryptedSessionKeyByFile: string;
+          sessionKeyNonce: string;
+        };
+        directChildren: ChildCtx[];
+        collaborators: CollabCtx[];
+      };
+
+      const run = async (): Promise<{ ok: true } | { ok: false; error: string; status?: number }> => {
+        // 1. Single roundtrip for folder + children + collaborators.
+        const ctxRes = await fetch(
+          `/api/files/${folder.id}/folder-rotate-context`
+        );
+        const ctxData = await ctxRes.json();
+        if (!ctxRes.ok) {
+          return { ok: false, error: ctxData.error || "Context fetch failed" };
+        }
+        const ctx = ctxData as RotateContext;
+
+        // 2. The caller's current priv hier for the folder. Prefer the
+        //    cached value (populated when the user navigated into the
+        //    folder); otherwise re-derive from their file_keys row via
+        //    the existing DecryptedFile payload.
+        const cachedEntry = folderPrivHierCache.current.get(folder.id);
+        const oldFolderPrivHier =
+          cachedEntry?.privateHierarchicalKey ??
+          unwrapPrivateHierarchicalKey(
+            folder.encryptedPrivateHierarchicalKey,
+            folder.wrappedByPublicKey,
+            keys.encryptionPrivateKey
+          );
+
+        // 3. Unwrap each direct child via the OLD folder priv hier.
+        //    We only need {sessionKey, childPrivHier} from each claim.
+        //    Skip children that don't have a claim (shouldn't happen
+        //    for children of a parented file_keys row, but be safe).
+        type Unwrapped = {
+          id: string;
+          sessionKey: Uint8Array;
+          childPrivateHierarchicalKey: string;
+        };
+        const unwrapped: Unwrapped[] = [];
+        for (const child of ctx.directChildren) {
+          if (!child.parentKeysClaim || !child.parentKeysClaimWrappedBy) {
+            return {
+              ok: false,
+              error: `Child ${child.id} is missing parent_keys_claim (unexpected)`,
+            };
+          }
+          const u = unwrapParentKeysClaim(
+            child.parentKeysClaim,
+            child.parentKeysClaimWrappedBy,
+            oldFolderPrivHier
+          );
+          unwrapped.push({ id: child.id, ...u });
+        }
+
+        // 4. Generate new folder keys.
+        const newFolderSessionKey = generateSessionKey();
+        const newFolderHier = generateHierarchicalKeypair();
+
+        // 5. Re-encrypt the folder's own metadata under the new session key.
+        //    Fall back to the cleartext name/type/size already in `folder`
+        //    — we never persist them anywhere else.
+        const newEncryptedMetadata = encryptMetadata(
+          { name: folder.name, type: folder.type, size: folder.size },
+          newFolderSessionKey
+        );
+
+        // 6. Wrap the new session key to the new folder pub hier.
+        const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(
+          newFolderSessionKey,
+          newFolderHier.publicKey,
+          keys.encryptionPrivateKey
+        );
+
+        // 7. If F itself has a parent, re-wrap F's own parent_keys_claim
+        //    using the parent folder's pub hier (unchanged). Pull it
+        //    from the cache.
+        let folderParentKeysClaim: string | null = null;
+        let folderParentKeysClaimWrappedBy: string | null = null;
+        if (folder.parentId) {
+          const parentEntry = folderPrivHierCache.current.get(folder.parentId);
+          if (!parentEntry) {
+            // Clean up unwrapped sessionKeys before erroring.
+            for (const u of unwrapped) u.sessionKey.fill(0);
+            newFolderSessionKey.fill(0);
+            return {
+              ok: false,
+              error: "Parent folder not loaded — open it first, then retry rotation",
+            };
+          }
+          folderParentKeysClaim = wrapParentKeysClaim(
+            newFolderSessionKey,
+            newFolderHier.privateKey,
+            parentEntry.publicHierarchicalKey,
+            keys.encryptionPrivateKey
+          );
+          folderParentKeysClaimWrappedBy = keys.encryptionPublicKey;
+        }
+
+        // 8. Re-wrap every direct child's parent_keys_claim under the
+        //    NEW folder pub hier. The child's own session key and
+        //    priv hier are unchanged — we're just changing the
+        //    envelope the pair is stored inside.
+        const rewrappedChildren = unwrapped.map((u) => ({
+          id: u.id,
+          parentKeysClaim: wrapParentKeysClaim(
+            u.sessionKey,
+            u.childPrivateHierarchicalKey,
+            newFolderHier.publicKey,
+            keys.encryptionPrivateKey
+          ),
+          parentKeysClaimWrappedBy: keys.encryptionPublicKey,
+        }));
+
+        // 9. Zero every recovered child session key now that we've
+        //    re-wrapped them. Child priv hier strings can't be zeroed
+        //    (they're base64) — they'll GC with the outer closure.
+        for (const u of unwrapped) u.sessionKey.fill(0);
+
+        // 10. Build the new per-user wraps for remaining collaborators.
+        const remainingCollaborators = ctx.collaborators
+          .filter((c) => c.userId !== revokedUserId)
+          .map((c) => ({
+            userId: c.userId,
+            encryptedPrivateHierarchicalKey: wrapPrivateHierarchicalKeyForUser(
+              newFolderHier.privateKey,
+              c.publicEncryptionKey,
+              keys.encryptionPrivateKey
+            ),
+            wrappedByPublicKey: keys.encryptionPublicKey,
+            permissionLevel: c.permissionLevel,
+          }));
+
+        // 11. Commit.
+        const commitRes = await fetch(
+          `/api/files/${folder.id}/rotate-folder-commit`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              folder: {
+                encryptedMetadata: JSON.stringify(newEncryptedMetadata),
+                publicHierarchicalKey: newFolderHier.publicKey,
+                encryptedSessionKeyByFile,
+                sessionKeyNonce,
+                parentKeysClaim: folderParentKeysClaim,
+                parentKeysClaimWrappedBy: folderParentKeysClaimWrappedBy,
+              },
+              rewrappedChildren,
+              remainingCollaborators,
+              revokedUserId,
+            }),
+          }
+        );
+
+        newFolderSessionKey.fill(0);
+
+        const commitData = await commitRes.json();
+        if (!commitRes.ok) {
+          return {
+            ok: false,
+            error: commitData.error || "Folder rotation commit failed",
+            status: commitRes.status,
+          };
+        }
+
+        // 12. Refresh the cached folder keys so subsequent navigation
+        //     uses the new values without a page reload.
+        folderPrivHierCache.current.set(folder.id, {
+          publicHierarchicalKey: newFolderHier.publicKey,
+          privateHierarchicalKey: newFolderHier.privateKey,
+        });
+        return { ok: true };
+      };
+
+      try {
+        let result = await run();
+        // Retry once on 409 (concurrent share or new child added
+        // between context fetch and commit).
+        if (!result.ok && result.status === 409) {
+          result = await run();
+        }
+        if (result.ok) {
+          await fetchFiles(state.currentFolder, state.viewMode);
+          return { ok: true };
+        }
+        return { ok: false, error: result.error };
+      } catch (err) {
+        console.error("rotateAndRevokeFolder", err);
+        return { ok: false, error: "Folder rotation failed" };
+      }
+    },
+    [keys, fetchFiles, state.currentFolder, state.viewMode]
+  );
+
   const leaveShare = useCallback(
     async (fileId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
       try {
@@ -1263,6 +1514,7 @@ export function useFiles(keys: {
     unshareFile,
     leaveShare,
     rotateAndRevoke,
+    rotateAndRevokeFolder,
     setPermission,
     createLink,
     revokeLink,

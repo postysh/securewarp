@@ -130,18 +130,29 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
    */
   const rotateOutCollab = async (c: Collaborator) => {
     if (c.isOwner || !file) return;
-    if (file.isFolder) {
-      setInputError("Secure revoke for folders isn't supported yet");
-      return;
-    }
-    if (!confirm(
-      `Securely revoke ${c.email}?\n\nThis re-encrypts the file and re-wraps keys for everyone else. ` +
-      `Large files may take a while.`
-    )) return;
+
+    // Two flavours of forward-secret revoke: single-file rotation
+    // (re-encrypts the file) and folder shallow rotation (re-wraps
+    // direct child claims without touching their content). Both land
+    // through the same Revoke button but the confirm copy differs
+    // because the threat model is different.
+    const confirmCopy = file.isFolder
+      ? `Securely revoke ${c.email} from this folder?\n\n` +
+        `This rotates the folder's keys and re-wraps access to every direct child. ` +
+        `Existing file contents inside the folder are NOT re-encrypted — if ${c.email} ` +
+        `had already opened and cached a specific file before revocation, they may still ` +
+        `be able to read that exact cached copy. New files added after this point, and ` +
+        `any files they hadn't opened, will be fully protected.`
+      : `Securely revoke ${c.email}?\n\n` +
+        `This re-encrypts the file and re-wraps keys for everyone else. Large files ` +
+        `may take a while.`;
+    if (!confirm(confirmCopy)) return;
 
     setRotatingUserId(c.userId);
     setInputError("");
-    const result = await fileOps.rotateAndRevoke(file, c.userId);
+    const result = file.isFolder
+      ? await fileOps.rotateAndRevokeFolder(file, c.userId)
+      : await fileOps.rotateAndRevoke(file, c.userId);
     setRotatingUserId(null);
     if (!result.ok) {
       setInputError(result.error);
@@ -314,16 +325,18 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                         onChange={(v) => changePermission(c, v)}
                         onRemove={() => removeCollab(c)}
                       />
-                      {!file.isFolder && (
-                        <button
-                          onClick={() => rotateOutCollab(c)}
-                          disabled={rotatingUserId !== null}
-                          title="Revoke & rotate keys (forward-secret)"
-                          className="text-[10px] text-accent-red hover:underline px-1.5 h-[26px] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {rotatingUserId === c.userId ? "Rotating…" : "Revoke"}
-                        </button>
-                      )}
+                      <button
+                        onClick={() => rotateOutCollab(c)}
+                        disabled={rotatingUserId !== null}
+                        title={
+                          file.isFolder
+                            ? "Revoke & rotate folder keys (shallow — see confirm dialog)"
+                            : "Revoke & rotate file keys (forward-secret)"
+                        }
+                        className="text-[10px] text-accent-red hover:underline px-1.5 h-[26px] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {rotatingUserId === c.userId ? "Rotating…" : "Revoke"}
+                      </button>
                     </div>
                   )}
                 </div>

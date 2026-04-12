@@ -187,10 +187,43 @@ server.
     `remainingCollaborators ∪ {revokedUserId}` equals the current
     `file_keys` set to prevent the client from sneaking in an
     unauthorised grant. The owner MUST remain in the collaborator set.
-    Folders are rejected — folder rotation requires recursively
-    re-wrapping every descendant's `parent_keys_claim` and hasn't
-    been implemented yet. Don't loosen the is_folder check without
-    also implementing that walk.
+    For FOLDERS, the flow is different — see rule 15.
+
+15. **Folder shallow rotation (Phase 5.1)** lives in its own pair of
+    endpoints: `/api/files/[id]/folder-rotate-context` (GET) and
+    `/api/files/[id]/rotate-folder-commit` (POST). The client-side
+    entrypoint is `rotateAndRevokeFolder` in `use-files.ts`.
+
+    Invariants the commit endpoint enforces:
+    - Caller owns the folder AND `is_folder = true`.
+    - `revokedUserId != caller.userId`.
+    - `remainingCollaborators ∪ {revokedUserId}` exactly equals the
+      current `file_keys` set on the folder (409 on drift).
+    - `rewrappedChildren` exactly equals the current **direct-child**
+      set on the folder (409 on drift). Every id in the payload must
+      have `parent_id === folderId` — prevents a malicious client
+      from updating grandchildren or siblings via this endpoint.
+    - Owner must remain in `remainingCollaborators`.
+
+    **Shallow invariant**: only direct children's `parent_keys_claim`
+    and `parent_keys_claim_wrapped_by` columns are mutated.
+    Grandchildren and deeper are NEVER touched — their claims are
+    encrypted under their own parent's (unchanged) pub hier key, so
+    the chain self-heals. This is the point of "shallow".
+
+    **Write order is load-bearing** (see `rotate-folder-commit`
+    header comment): folder row first, then remaining collaborators'
+    file_keys, then direct children's claims, then delete revoked
+    user. Every step is idempotent so a mid-sequence crash recovers
+    via a simple client retry on the same payload. Don't reorder.
+
+    **Known limitation** (README also covers this): cached descendant
+    session keys and priv hier keys held by a revoked user remain
+    usable against that specific cached copy. Full recursive
+    re-encryption would require downloading and re-uploading every
+    chunk in the subtree, which is deferred indefinitely. Document
+    in any user-facing copy that folder revoke is "forward-secret
+    for new and unopened files."
 
 13. **Password-protected links (Phase 4.1).** When
     `file_links.password_salt IS NOT NULL`, the link URL has no

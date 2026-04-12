@@ -544,13 +544,56 @@ triggers a full client-side key rotation:
 - The owner must stay in the collaborator set — you cannot revoke
   yourself through this endpoint.
 
+**Folder shallow rotation (Phase 5.1)** — the "Revoke" button on a
+folder triggers a different flow than on a file: instead of re-encrypting
+content, it **rotates the folder's hierarchical keypair and re-wraps the
+`parent_keys_claim` of every direct child under the new folder pub hier
+key**. Grandchildren and deeper are untouched — their claims live under
+their own (unchanged) parent's pub hier, so the chain still works for
+remaining collaborators.
+
+Flow:
+1. Client fetches `/api/files/[id]/folder-rotate-context` — folder row,
+   direct children with their current claims, current collaborator set.
+2. Client unwraps the caller's current file_keys row on the folder to
+   get the old folder priv hier.
+3. Client walks every direct child, unwrapping its
+   `parent_keys_claim` to recover `{childSessionKey, childPrivHier}`
+   — these are NOT rotated, only the envelope around them is.
+4. Client generates a new folder hierarchical keypair and session key.
+5. Client re-wraps each direct child's `parent_keys_claim` under the
+   new folder pub hier, re-wraps the new folder priv hier for each
+   remaining collaborator, and optionally re-wraps the folder's own
+   parent_keys_claim if it has a parent.
+6. Client POSTs `/api/files/[id]/rotate-folder-commit` with everything.
+7. Server atomically updates: folder row → new file_keys rows →
+   direct children's claim columns → delete revoked row. Retries once
+   on 409 if the direct-child or collaborator set drifted during the
+   walk.
+
+**Honest threat model** — shallow rotation is strictly better than
+ACL-only unshare, but it is **not** full forward secrecy on
+pre-existing descendants:
+
+- **New files added after rotation**: fully protected. They get
+  wrapped under the new folder pub hier, and the revoked user never
+  had access to it.
+- **Files the revoked user never opened**: fully protected. They
+  need the new folder priv hier to walk the chain, and they don't
+  have it.
+- **Files the revoked user already opened and cached**: the revoked
+  user retains access to *that specific snapshot of that specific
+  file*, because their local cache already holds the descendant's
+  session key and priv hier (neither of which we rotate). If the
+  content is later modified, they lose access to the new version.
+- **Full recursive re-encryption** (download, re-encrypt, re-upload
+  every descendant's chunks) would give true forward secrecy on all
+  descendants but is untenable for folders with thousands of files.
+  Skiff's published code doesn't do it either — shallow rotation
+  is the industry-standard tradeoff.
+
 **What's still deferred**:
 
-- **Folder rotation.** Rotating a folder's hier keypair would require
-  re-wrapping the `parent_keys_claim` on every descendant since those
-  claims use the folder's public hier key as the nacl.box recipient.
-  It's doable but not trivial and hasn't been built yet — the rotate
-  endpoints reject `is_folder = true` with a clear error.
 - **Orphan R2 cleanup on partial failure.** If the DB sequence fails
   mid-way after uploading new chunks, the new R2 blobs become orphans.
   The daily cleanup cron doesn't currently target them — a manual

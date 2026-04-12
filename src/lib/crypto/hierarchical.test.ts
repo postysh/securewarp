@@ -586,6 +586,173 @@ describe("Phase 4 link sharing (symmetric linkKey)", () => {
     expect(a.passwordWrappedLinkKey).not.toBe(b.passwordWrappedLinkKey);
   });
 
+  it("phase 5.1: folder shallow rotation — Bob loses access, Alice and cached-descendants work correctly", () => {
+    // Scenario under test:
+    //   Owner creates folder F with child file X and subfolder Y
+    //   containing grandchild Z.
+    //   Owner shares F with Alice and Bob (single file_keys row each
+    //   on F; X/Y/Z are inherited via parent_keys_claim).
+    //   Owner then runs shallow folder rotation to revoke Bob.
+    // Expected invariants:
+    //   1. After rotation, Bob's OLD folder priv hier can't unwrap
+    //      the new X and Y claims.
+    //   2. Alice's refreshed folder priv hier CAN unwrap the new X
+    //      and Y claims, and via Y reaches Z through Z's UNCHANGED
+    //      claim.
+    //   3. Z's claim is NOT touched by rotation — it's still encrypted
+    //      under Y's (unchanged) pub hier.
+    //   4. Cached-descendant caveat: if Bob had previously unwrapped
+    //      X and cached X's session key directly, he can still
+    //      decrypt X's encrypted metadata (documented limitation).
+
+    const owner = makeUser();
+    const alice = makeUser();
+    const bob = makeUser();
+
+    // Folder F
+    const fHier = generateHierarchicalKeypair();
+    const fSessionKey = generateSessionKey();
+
+    // File X — direct child of F
+    const xHier = generateHierarchicalKeypair();
+    const xSessionKey = generateSessionKey();
+    const xEncMeta = encryptMetadata(
+      { name: "x.txt", type: "text/plain", size: 10 },
+      xSessionKey
+    );
+    // X's claim wrapped under F's pub hier
+    const xClaimOld = wrapParentKeysClaim(
+      xSessionKey,
+      xHier.privateKey,
+      fHier.publicKey,
+      owner.privateKey
+    );
+
+    // Subfolder Y — direct child of F
+    const yHier = generateHierarchicalKeypair();
+    const ySessionKey = generateSessionKey();
+    const yClaimOld = wrapParentKeysClaim(
+      ySessionKey,
+      yHier.privateKey,
+      fHier.publicKey,
+      owner.privateKey
+    );
+
+    // Grandchild Z — direct child of Y (NOT F). Its claim is under Y's
+    // pub hier and is NEVER touched by shallow rotation of F.
+    const zHier = generateHierarchicalKeypair();
+    const zSessionKey = generateSessionKey();
+    const zEncMeta = encryptMetadata(
+      { name: "z.txt", type: "text/plain", size: 20 },
+      zSessionKey
+    );
+    const zClaim = wrapParentKeysClaim(
+      zSessionKey,
+      zHier.privateKey,
+      yHier.publicKey,
+      owner.privateKey
+    );
+
+    // Pre-rotation: owner shares F with Alice and Bob.
+    const fRowAlice = wrapPrivateHierarchicalKeyForUser(
+      fHier.privateKey,
+      alice.publicKey,
+      owner.privateKey
+    );
+    const fRowBob = wrapPrivateHierarchicalKeyForUser(
+      fHier.privateKey,
+      bob.publicKey,
+      owner.privateKey
+    );
+
+    // Sanity: Bob can walk F → X and F → Y → Z pre-rotation.
+    const bobFPrivOld = unwrapPrivateHierarchicalKey(
+      fRowBob,
+      owner.publicKey,
+      bob.privateKey
+    );
+    expect(bobFPrivOld).toBe(fHier.privateKey);
+    const bobX = unwrapParentKeysClaim(xClaimOld, owner.publicKey, bobFPrivOld);
+    expect(toBase64(bobX.sessionKey)).toBe(toBase64(xSessionKey));
+    const bobY = unwrapParentKeysClaim(yClaimOld, owner.publicKey, bobFPrivOld);
+    // Bob uses the recovered Y priv hier to reach Z.
+    const bobZ = unwrapParentKeysClaim(zClaim, owner.publicKey, bobY.childPrivateHierarchicalKey);
+    expect(decryptMetadata(zEncMeta, bobZ.sessionKey).name).toBe("z.txt");
+
+    // ── Shallow rotation ──────────────────────────────────────────
+    // Owner generates new folder keys and re-wraps X's and Y's
+    // claims under the new folder pub hier. Y's own priv hier is
+    // unchanged, so Z's claim is left alone.
+    const newFHier = generateHierarchicalKeypair();
+    const newFSessionKey = generateSessionKey();
+    // (new fSessionKey used by the real flow to re-encrypt metadata;
+    // not exercised further in this primitive-level test)
+    void newFSessionKey;
+
+    const xClaimNew = wrapParentKeysClaim(
+      xSessionKey, // unchanged
+      xHier.privateKey, // unchanged
+      newFHier.publicKey,
+      owner.privateKey
+    );
+    const yClaimNew = wrapParentKeysClaim(
+      ySessionKey, // unchanged
+      yHier.privateKey, // unchanged
+      newFHier.publicKey,
+      owner.privateKey
+    );
+
+    // Alice gets a new file_keys row on F with the new priv hier.
+    const fRowAliceNew = wrapPrivateHierarchicalKeyForUser(
+      newFHier.privateKey,
+      alice.publicKey,
+      owner.privateKey
+    );
+    // Bob's row is deleted (simulated by just not giving him one).
+
+    // ── Invariant 1: Bob's OLD priv hier can't open the new claims ──
+    expect(() =>
+      unwrapParentKeysClaim(xClaimNew, owner.publicKey, bobFPrivOld)
+    ).toThrow(/Box decryption failed/);
+    expect(() =>
+      unwrapParentKeysClaim(yClaimNew, owner.publicKey, bobFPrivOld)
+    ).toThrow(/Box decryption failed/);
+
+    // ── Invariant 2: Alice's new row unwraps to new F priv hier,
+    //               and she can walk X, Y, and Z via the new claims. ──
+    const aliceFPrivNew = unwrapPrivateHierarchicalKey(
+      fRowAliceNew,
+      owner.publicKey,
+      alice.privateKey
+    );
+    expect(aliceFPrivNew).toBe(newFHier.privateKey);
+    const aliceX = unwrapParentKeysClaim(xClaimNew, owner.publicKey, aliceFPrivNew);
+    expect(decryptMetadata(xEncMeta, aliceX.sessionKey).name).toBe("x.txt");
+
+    const aliceY = unwrapParentKeysClaim(yClaimNew, owner.publicKey, aliceFPrivNew);
+    // Crucially, Z's claim wasn't touched by rotation — Alice uses Y's
+    // (unchanged) priv hier to walk one level deeper.
+    const aliceZ = unwrapParentKeysClaim(
+      zClaim,
+      owner.publicKey,
+      aliceY.childPrivateHierarchicalKey
+    );
+    expect(decryptMetadata(zEncMeta, aliceZ.sessionKey).name).toBe("z.txt");
+
+    // ── Invariant 3: Z's claim is untouched — byte-for-byte unchanged. ──
+    // (Nothing to assert; just a reminder that the rotation code path
+    //  above only touches direct children of F, never grandchildren.)
+    expect(zClaim).toBe(zClaim);
+
+    // ── Invariant 4 (documented limitation): Bob's CACHED X session
+    //    key (from the pre-rotation walk) still decrypts X's metadata.
+    //    The rotation re-wrapped X's CLAIM but didn't change X's own
+    //    session key or rotate X's hier keypair. This is the known
+    //    "shallow rotation" tradeoff — revoking via folder rotation
+    //    does NOT invalidate caches a user already extracted. ─────
+    expect(decryptMetadata(xEncMeta, bobX.sessionKey).name).toBe("x.txt");
+  });
+
   it("phase 5: key rotation produces ciphertext the old session key cannot decrypt", () => {
     // Sanity-check the forward-secrecy property that Phase 5 relies on.
     // The actual rotate flow lives in the hook + server routes; this

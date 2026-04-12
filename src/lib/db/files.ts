@@ -465,6 +465,43 @@ export async function getCollaboratorsBulk(
   return result;
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Phase 5.1 — folder rotation helpers
+// ──────────────────────────────────────────────────────────────────────
+
+export interface DirectChildNode {
+  id: string;
+  parent_id: string | null;
+  is_folder: boolean;
+  public_hierarchical_key: string;
+  parent_keys_claim: string | null;
+  parent_keys_claim_wrapped_by: string | null;
+  encrypted_session_key_by_file: string;
+  session_key_nonce: string;
+}
+
+/**
+ * Phase 5.1 folder shallow rotation — the commit endpoint needs to know
+ * the *exact* current set of direct children so it can validate that the
+ * client's rewrappedChildren payload matches (no omissions, no extras).
+ * Intentionally does NOT recurse: shallow rotation only re-wraps
+ * parent_keys_claim on the folder's immediate children; grandchildren
+ * and deeper inherit through their own parent's unchanged pub hier key.
+ */
+export async function getDirectChildrenWithClaims(
+  folderId: string
+): Promise<DirectChildNode[]> {
+  const { data, error } = await supabase
+    .from("files")
+    .select(
+      "id, parent_id, is_folder, public_hierarchical_key, parent_keys_claim, parent_keys_claim_wrapped_by, encrypted_session_key_by_file, session_key_nonce"
+    )
+    .eq("parent_id", folderId)
+    .eq("upload_complete", true);
+  if (error) throw new Error(`Failed to load direct children: ${error.message}`);
+  return (data as DirectChildNode[] | null) ?? [];
+}
+
 /**
  * Update a collaborator's permission level. Owner-only. Does not affect
  * the wrapped session key or cryptographic access — Phase 1 Viewer/Editor
