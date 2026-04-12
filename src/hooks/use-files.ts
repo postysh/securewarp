@@ -472,11 +472,23 @@ export function useFiles(keys: {
       let parentKeysClaim: string | undefined;
       let parentKeysClaimWrappedBy: string | undefined;
       if (parentId) {
-        const parentEntry = folderPrivHierCache.current.get(parentId);
+        let parentEntry = folderPrivHierCache.current.get(parentId);
         if (!parentEntry) {
-          throw new Error(
-            "Parent folder not loaded — navigate into the folder before uploading into it"
-          );
+          try {
+            const pRes = await fetch(`/api/files/chunk-download?fileId=${parentId}`);
+            if (pRes.ok) {
+              const pd = await pRes.json();
+              const pKey = pd.encryptedPrivateHierarchicalKey;
+              if (pKey) {
+                const pPrivHier = unwrapPrivateHierarchicalKey(pKey, pd.wrappedByPublicKey, keys.encryptionPrivateKey);
+                parentEntry = { publicHierarchicalKey: pd.publicHierarchicalKey, privateHierarchicalKey: pPrivHier };
+                folderPrivHierCache.current.set(parentId, parentEntry);
+              }
+            }
+          } catch { /* fall through */ }
+        }
+        if (!parentEntry) {
+          throw new Error("Cannot access parent folder");
         }
         parentKeysClaim = wrapParentKeysClaim(
           sessionKey,
@@ -841,11 +853,26 @@ export function useFiles(keys: {
       let parentKeysClaim: string | undefined;
       let parentKeysClaimWrappedBy: string | undefined;
       if (parentId) {
-        const parentEntry = folderPrivHierCache.current.get(parentId);
+        let parentEntry = folderPrivHierCache.current.get(parentId);
+        if (!parentEntry) {
+          // Cache miss — fetch the parent's key on-the-fly
+          try {
+            const pRes = await fetch(`/api/files/chunk-download?fileId=${parentId}`);
+            if (pRes.ok) {
+              const pd = await pRes.json();
+              const pKey = pd.encryptedPrivateHierarchicalKey;
+              if (pKey) {
+                const pPrivHier = unwrapPrivateHierarchicalKey(pKey, pd.wrappedByPublicKey, keys.encryptionPrivateKey);
+                parentEntry = { publicHierarchicalKey: pd.publicHierarchicalKey, privateHierarchicalKey: pPrivHier };
+                folderPrivHierCache.current.set(parentId, parentEntry);
+              }
+            }
+          } catch { /* fall through */ }
+        }
         if (!parentEntry) {
           setState((s) => ({
             ...s,
-            error: "Parent folder not loaded — navigate into it before creating a subfolder",
+            error: "Cannot access parent folder",
           }));
           sessionKey.fill(0);
           return;
