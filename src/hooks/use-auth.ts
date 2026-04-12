@@ -500,7 +500,6 @@ export function useAuth() {
         email: meta.email,
       };
       sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
-      window.dispatchEvent(new Event("securewarp-keys-updated"));
       setState({
         loading: false,
         error: null,
@@ -508,7 +507,11 @@ export function useAuth() {
         recoveryKey: null,
         userKeys: keys,
       });
-      router.push("/drive");
+      // Dispatch AFTER setState so the component is done updating.
+      // Don't router.push — unlock runs inline in drive-client,
+      // so pushing /drive would remount the component and lose
+      // the event listener.
+      window.dispatchEvent(new Event("securewarp-keys-updated"));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Unlock failed";
       // Don't distinguish "wrong password" from other errors in the
