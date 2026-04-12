@@ -27,7 +27,6 @@ export interface FileRow {
   // root items.
   parent_keys_claim: string | null;
   parent_keys_claim_wrapped_by: string | null;
-  is_starred: boolean;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -623,32 +622,50 @@ export async function getRecentForUser(userId: string): Promise<FileRowWithKey[]
 }
 
 /**
- * Toggle the starred flag on a file. Owner-only.
+ * Toggle star for ANY user on ANY file they can access. Per-user
+ * stars live in the `user_stars` junction table, so one user's
+ * star never affects another's.
  */
-export async function toggleStar(fileId: string, ownerId: string, starred: boolean): Promise<void> {
-  const { error } = await supabase
-    .from("files")
-    .update({ is_starred: starred })
-    .eq("id", fileId)
-    .eq("owner_id", ownerId);
-  if (error) throw new Error(`Failed to toggle star: ${error.message}`);
+export async function toggleStar(fileId: string, userId: string, starred: boolean): Promise<void> {
+  if (starred) {
+    const { error } = await supabase
+      .from("user_stars")
+      .upsert({ user_id: userId, file_id: fileId }, { onConflict: "user_id,file_id" });
+    if (error) throw new Error(`Failed to star: ${error.message}`);
+  } else {
+    const { error } = await supabase
+      .from("user_stars")
+      .delete()
+      .eq("user_id", userId)
+      .eq("file_id", fileId);
+    if (error) throw new Error(`Failed to unstar: ${error.message}`);
+  }
 }
 
 /**
- * List starred files for a user. Flat list across all folders,
- * ordered by most-recently starred (updated_at desc as proxy).
+ * List starred files for a user. Per-user — each user has their own
+ * starred set independent of the file owner.
  */
 export async function getStarredForUser(userId: string): Promise<FileRowWithKey[]> {
+  // Get the user's starred file IDs first
+  const { data: stars, error: starErr } = await supabase
+    .from("user_stars")
+    .select("file_id")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (starErr) throw new Error(`Failed to fetch stars: ${starErr.message}`);
+  if (!stars || stars.length === 0) return [];
+
+  const fileIds = stars.map((s) => s.file_id as string);
+
   const { data, error } = await supabase
     .from("files")
     .select(LIST_SELECT)
-    .eq("owner_id", userId)
+    .in("id", fileIds)
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
-    .is("deleted_at", null)
-    .eq("is_starred", true)
-    .order("updated_at", { ascending: false });
-  if (error) throw new Error(`Failed to fetch starred: ${error.message}`);
+    .is("deleted_at", null);
+  if (error) throw new Error(`Failed to fetch starred files: ${error.message}`);
   return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
 }
 

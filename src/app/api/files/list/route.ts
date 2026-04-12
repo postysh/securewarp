@@ -11,6 +11,7 @@ import {
   getRecentForUser,
   type FileRowWithKey,
 } from "@/lib/db/files";
+import { supabase } from "@/lib/db/supabase";
 import { logError } from "@/lib/log";
 
 export async function GET(request: Request) {
@@ -62,12 +63,21 @@ export async function GET(request: Request) {
           : await getInheritedChildren(parentId, session.userId);
     }
 
-    // Enrich each file with its collaborator list so the browser can show
-    // an avatar stack without a follow-up per-row query. This is a single
-    // extra DB round-trip regardless of file count.
-    const collaboratorMap = await getCollaboratorsBulk(files.map((f) => f.id));
+    // Enrich each file with its collaborator list and per-user star state.
+    const fileIds = files.map((f) => f.id);
+    const collaboratorMap = await getCollaboratorsBulk(fileIds);
+
+    // Per-user stars — one query for all files in this batch
+    const { data: starRows } = await supabase
+      .from("user_stars")
+      .select("file_id")
+      .eq("user_id", session.userId)
+      .in("file_id", fileIds);
+    const starredSet = new Set((starRows || []).map((r) => r.file_id as string));
+
     const enriched = files.map((f) => ({
       ...f,
+      is_starred: starredSet.has(f.id),
       collaborators: (collaboratorMap.get(f.id) ?? []).map((c) => ({
         userId: c.user_id,
         email: c.email,

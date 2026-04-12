@@ -256,7 +256,7 @@ export function useFiles(keys: {
             sessionKeyNonce,
             parentKeysClaim,
             parentKeysClaimWrappedBy,
-            isStarred: !!(f.is_starred) && mode !== "shared",
+            isStarred: !!(f.is_starred),
             isShared: mode === "shared",
             collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
             name: meta.name,
