@@ -4,12 +4,10 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
-import Setting07Icon from "@hugeicons/core-free-icons/Setting07Icon";
 import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import SecurityLockIcon from "@hugeicons/core-free-icons/SecurityLockIcon";
 import PaintBrush01Icon from "@hugeicons/core-free-icons/PaintBrush01Icon";
 import CloudServerIcon from "@hugeicons/core-free-icons/CloudServerIcon";
-import GoogleDriveIcon from "@hugeicons/core-free-icons/GoogleDriveIcon";
 import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
 import Sun01Icon from "@hugeicons/core-free-icons/Sun01Icon";
 import Moon02Icon from "@hugeicons/core-free-icons/Moon02Icon";
@@ -29,7 +27,7 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-type TabId = "account" | "security" | "appearance" | "notifications" | "storage" | "import";
+type TabId = "account" | "security" | "appearance" | "notifications" | "storage";
 
 const tabs: { id: TabId; label: string; icon: unknown; section?: string }[] = [
   { id: "account", label: "Account", icon: UserCircleIcon, section: "General" },
@@ -37,7 +35,6 @@ const tabs: { id: TabId; label: string; icon: unknown; section?: string }[] = [
   { id: "appearance", label: "Appearance", icon: PaintBrush01Icon, section: "General" },
   { id: "notifications", label: "Notifications", icon: Notification01Icon, section: "General" },
   { id: "storage", label: "Storage", icon: CloudServerIcon, section: "Plan" },
-  { id: "import", label: "Import & Export", icon: GoogleDriveIcon, section: "Data" },
 ];
 
 function SettingRow({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
@@ -63,6 +60,13 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>("account");
   const { theme, toggle: toggleTheme } = useTheme();
@@ -72,12 +76,59 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [pwStatus, setPwStatus] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [showKeys, setShowKeys] = useState(false);
+  const [storageUsage, setStorageUsage] = useState<{ usedBytes: number; maxBytes: number } | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>({
+    file_shared: true,
+    file_unshared: true,
+    permission_changed: true,
+  });
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const userKeys = useUserKeys();
   const auth = useAuth();
 
+  const email = userKeys?.email || "";
+  const initials = displayName
+    ? displayName.charAt(0).toUpperCase()
+    : email
+      ? email.charAt(0).toUpperCase()
+      : "?";
+
   useEffect(() => {
-    if (open) setActiveTab("account");
-  }, [open]);
+    if (open) {
+      setActiveTab("account");
+      setChangingPassword(false);
+      setNewPw("");
+      setConfirmPw("");
+      setPwStatus(null);
+      setShowKeys(false);
+      setEditingName(false);
+      if (!profileLoaded) {
+        fetch("/api/auth/profile")
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.displayName !== undefined) setDisplayName(d.displayName);
+            if (d.notificationPrefs) setNotifPrefs(d.notificationPrefs);
+            setProfileLoaded(true);
+          })
+          .catch(() => {});
+      }
+    }
+  }, [open, profileLoaded]);
+
+  useEffect(() => {
+    if (open && activeTab === "storage" && !storageUsage) {
+      fetch("/api/files/usage")
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.usedBytes !== undefined) setStorageUsage(d);
+        })
+        .catch(() => {});
+    }
+  }, [open, activeTab, storageUsage]);
 
   useEffect(() => {
     if (!open) return;
@@ -98,12 +149,51 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         return (
           <div>
             <SettingRow label="Email" description="Your account email address">
-              <span className="text-[12px] text-text-secondary">you@example.com</span>
+              <span className="text-[12px] text-text-secondary font-mono">{email}</span>
             </SettingRow>
             <SettingRow label="Display name" description="Visible to collaborators">
-              <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">
-                Edit
-              </button>
+              {editingName ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="Your name"
+                    autoFocus
+                    className="w-[160px] px-2 py-1.5 rounded-[6px] bg-bg-field text-[12px] text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40"
+                  />
+                  <button
+                    onClick={async () => {
+                      await fetch("/api/auth/profile", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ displayName: nameInput }),
+                      });
+                      setDisplayName(nameInput.trim());
+                      setEditingName(false);
+                    }}
+                    className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setEditingName(false)}
+                    className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] text-text-secondary">{displayName || "Not set"}</span>
+                  <button
+                    onClick={() => { setNameInput(displayName); setEditingName(true); }}
+                    className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer"
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
             </SettingRow>
             <div className="py-4 border-b border-border-tertiary">
               <div className="flex items-center justify-between mb-1">
@@ -120,6 +210,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               {changingPassword && (
                 <div className="mt-3 space-y-2 animate-fade-in">
                   {pwStatus && <p className="text-[11px] text-accent-green">{pwStatus}</p>}
+                  {auth.error && <p className="text-[11px] text-accent-red">{auth.error}</p>}
                   <input type="password" placeholder="New password (min 8 characters)" value={newPw} onChange={(e) => setNewPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
                   <input type="password" placeholder="Confirm new password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
                   {newPw && confirmPw && newPw !== confirmPw && <p className="text-[11px] text-accent-red">Passwords don&apos;t match</p>}
@@ -129,7 +220,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                       disabled={!newPw || newPw.length < 8 || newPw !== confirmPw || auth.loading}
                       onClick={async () => {
                         setPwStatus("Changing password...");
-                        await auth.changePassword("", newPw, userKeys?.email || "");
+                        await auth.changePassword("", newPw, email);
                         if (!auth.error) {
                           setPwStatus("Password changed. New recovery key generated.");
                           setNewPw("");
@@ -183,29 +274,47 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       case "security":
         return (
           <div>
-            <SettingRow label="Recovery key" description="Download your account recovery key">
+            <SettingRow label="Recovery key" description="Your 24-word recovery phrase was shown at signup and after password changes">
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1 text-[11px] text-accent-green"><HugeiconsIcon icon={Shield01Icon} size={12} /> Enabled</span>
-                <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">
-                  View
-                </button>
+                <span className="flex items-center gap-1 text-[11px] text-accent-green"><HugeiconsIcon icon={Shield01Icon} size={12} /> Generated</span>
+                <span className="text-[10px] text-text-disabled">Shown once at creation</span>
               </div>
             </SettingRow>
-            <SettingRow label="Two-factor authentication" description="Add an extra layer of security with TOTP">
-              <Toggle checked={false} onChange={() => {}} />
-            </SettingRow>
-            <SettingRow label="Active sessions" description="Manage devices logged into your account">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-text-disabled">2 devices</span>
-                <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">
-                  Manage
-                </button>
-              </div>
-            </SettingRow>
-            <SettingRow label="Encryption keys" description="View your public encryption and signing keys">
-              <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">
-                View keys
+            <SettingRow label="Encryption keys" description="Your public keys for verification by collaborators">
+              <button
+                onClick={() => setShowKeys(!showKeys)}
+                className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer"
+              >
+                {showKeys ? "Hide" : "View keys"}
               </button>
+            </SettingRow>
+            {showKeys && userKeys && (
+              <div className="py-3 space-y-3 animate-fade-in">
+                <div>
+                  <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-1">Encryption public key</p>
+                  <div className="px-3 py-2 rounded-[8px] bg-bg-field">
+                    <p className="text-[11px] font-mono text-text-secondary break-all select-all">{userKeys.encryptionPublicKey}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-1">Signing public key</p>
+                  <div className="px-3 py-2 rounded-[8px] bg-bg-field">
+                    <p className="text-[11px] font-mono text-text-secondary break-all select-all">{userKeys.signingPublicKey}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] text-text-disabled">
+                  <HugeiconsIcon icon={LockIcon} size={10} />
+                  Private keys never leave your browser
+                </div>
+              </div>
+            )}
+            <SettingRow label="Zero-knowledge architecture" description="Your data is encrypted client-side before it reaches our servers">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1 text-[11px] text-accent-green"><HugeiconsIcon icon={Shield01Icon} size={12} /> Active</span>
+              </div>
+            </SettingRow>
+            <SettingRow label="Algorithms" description="Cryptographic primitives used">
+              <span className="text-[10px] text-text-disabled font-mono">xsalsa20-poly1305 · Curve25519 · Argon2id · HKDF-SHA256 · SRP-6a</span>
             </SettingRow>
           </div>
         );
@@ -233,105 +342,63 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 ))}
               </div>
             </SettingRow>
-            <SettingRow label="Compact mode" description="Reduce spacing for denser file views">
-              <Toggle checked={false} onChange={() => {}} />
-            </SettingRow>
-            <SettingRow label="Show file extensions" description="Display extensions in file names">
-              <Toggle checked={true} onChange={() => {}} />
-            </SettingRow>
           </div>
         );
-      case "notifications":
+      case "notifications": {
+        const togglePref = async (key: string) => {
+          const newVal = !notifPrefs[key];
+          setNotifPrefs((p) => ({ ...p, [key]: newVal }));
+          await fetch("/api/auth/profile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ notificationPrefs: { [key]: newVal } }),
+          });
+        };
         return (
           <div>
-            <SettingRow label="Shared with me" description="When someone shares a file or folder">
-              <Toggle checked={true} onChange={() => {}} />
+            <SettingRow label="File shared" description="When someone shares a file or folder with you">
+              <Toggle checked={notifPrefs.file_shared !== false} onChange={() => togglePref("file_shared")} />
             </SettingRow>
-            <SettingRow label="Upload complete" description="When a file upload finishes">
-              <Toggle checked={true} onChange={() => {}} />
+            <SettingRow label="Access removed" description="When your access to a file is revoked">
+              <Toggle checked={notifPrefs.file_unshared !== false} onChange={() => togglePref("file_unshared")} />
             </SettingRow>
-            <SettingRow label="Link accessed" description="When someone views a shared link">
-              <Toggle checked={false} onChange={() => {}} />
-            </SettingRow>
-            <SettingRow label="Team activity" description="When members join or leave workspace">
-              <Toggle checked={true} onChange={() => {}} />
+            <SettingRow label="Permission changed" description="When your permission level is updated">
+              <Toggle checked={notifPrefs.permission_changed !== false} onChange={() => togglePref("permission_changed")} />
             </SettingRow>
           </div>
         );
+      }
       case "storage": {
-        const categories = [
-          { label: "Files", size: "1.8 GB", percent: 78, color: "var(--accent-blue-primary)" },
-          { label: "Shared", size: "420 MB", percent: 18, color: "var(--accent-green-primary)" },
-          { label: "Trash", size: "80 MB", percent: 4, color: "var(--accent-red-primary)" },
-        ];
+        const used = storageUsage?.usedBytes ?? 0;
+        const max = storageUsage?.maxBytes ?? 20 * 1024 * 1024 * 1024;
+        const pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
         return (
           <div>
-            {/* Plan card */}
             <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-[14px] text-text-primary font-semibold">Free plan</p>
-                  <p className="text-[11px] text-text-disabled mt-0.5">10 GB storage included</p>
+                  <p className="text-[11px] text-text-disabled mt-0.5">{formatBytes(max)} storage included</p>
                 </div>
-                <button className="h-[30px] px-4 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer active:scale-[0.98]">
-                  Upgrade
-                </button>
               </div>
-
-              {/* Stacked bar */}
-              <div className="h-[8px] bg-bg-field rounded-full overflow-hidden flex">
-                {categories.map((cat) => (
-                  <div
-                    key={cat.label}
-                    className="h-full first:rounded-l-full last:rounded-r-full"
-                    style={{ width: `${cat.percent}%`, backgroundColor: cat.color }}
-                  />
-                ))}
+              <div className="h-[8px] bg-bg-field rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${pct}%`, backgroundColor: pct > 90 ? "var(--accent-red-primary)" : "var(--accent-green-primary)" }}
+                />
               </div>
-
               <div className="flex items-center justify-between mt-2">
-                <span className="text-[12px] text-text-primary font-medium">2.3 GB used</span>
-                <span className="text-[11px] text-text-disabled">of 10 GB</span>
+                <span className="text-[12px] text-text-primary font-medium">{formatBytes(used)} used</span>
+                <span className="text-[11px] text-text-disabled">of {formatBytes(max)}</span>
               </div>
             </div>
-
-            {/* Breakdown */}
-            <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-2">Breakdown</p>
-            <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
-              {categories.map((cat) => (
-                <div key={cat.label} className="flex items-center gap-3 px-3 py-3 border-b border-border-tertiary last:border-b-0">
-                  <div className="w-[10px] h-[10px] rounded-[3px]" style={{ backgroundColor: cat.color }} />
-                  <div className="flex-1">
-                    <p className="text-[12px] text-text-primary">{cat.label}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[12px] text-text-secondary font-mono">{cat.size}</span>
-                    <div className="w-[60px] h-[4px] bg-bg-field rounded-full overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${cat.percent}%`, backgroundColor: cat.color }} />
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="flex items-center gap-1.5 text-[10px] text-text-disabled">
+              <HugeiconsIcon icon={LockIcon} size={10} />
+              Storage usage is calculated from encrypted file sizes
             </div>
           </div>
         );
       }
-      case "import":
-        return (
-          <div>
-            <SettingRow label="Import from Google Drive" description="Migrate files with client-side encryption">
-              <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer flex items-center gap-1.5">
-                <HugeiconsIcon icon={GoogleDriveIcon} size={12} />
-                Connect
-              </button>
-            </SettingRow>
-            <SettingRow label="Export all data" description="Download all your decrypted files as a zip archive">
-              <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">
-                Export
-              </button>
-            </SettingRow>
-          </div>
-        );
     }
   };
 
@@ -345,21 +412,19 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       >
         {/* Sidebar */}
         <div className="w-[200px] shrink-0 bg-bg-side border-r border-border-tertiary flex flex-col overflow-y-auto">
-          {/* Account avatar */}
           <div
             onClick={() => setActiveTab("account")}
             className={`flex items-center gap-3 px-3 py-3 mx-2 mt-2 rounded-[6px] cursor-pointer transition-colors ${activeTab === "account" ? "bg-bg-overlay-tertiary" : "hover:bg-bg-overlay-tertiary"}`}
           >
             <div className="w-8 h-8 rounded-[6px] bg-accent-green flex items-center justify-center text-[11px] font-bold text-white shrink-0">
-              Y
+              {initials}
             </div>
             <div className="min-w-0">
-              <p className="text-[12px] text-text-primary font-medium truncate">You</p>
-              <p className="text-[10px] text-text-disabled truncate">you@example.com</p>
+              <p className="text-[12px] text-text-primary font-medium truncate">{displayName || email.split("@")[0]}</p>
+              <p className="text-[10px] text-text-disabled truncate">{email}</p>
             </div>
           </div>
 
-          {/* Tab sections */}
           <div className="flex-1 px-2 py-2">
             {sections.map((section) => (
               <div key={section} className="mb-2">
@@ -387,15 +452,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {/* Content */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-border-tertiary shrink-0">
-            <h3 className="text-[16px] font-semibold text-text-primary capitalize">{activeTab === "import" ? "Import & Export" : activeTab}</h3>
+            <h3 className="text-[16px] font-semibold text-text-primary capitalize">{activeTab}</h3>
             <button onClick={onClose} className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer">
               <HugeiconsIcon icon={Cancel01Icon} size={16} />
             </button>
           </div>
-
-          {/* Body */}
           <div className="flex-1 overflow-y-auto px-6 py-2">
             {renderContent()}
           </div>

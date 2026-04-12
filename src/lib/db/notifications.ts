@@ -29,6 +29,15 @@ export async function createNotification(params: {
   fileId?: string | null;
   actorUserId?: string | null;
 }): Promise<void> {
+  // Check user's notification preferences before creating
+  const { data: user } = await supabase
+    .from("users")
+    .select("notification_prefs")
+    .eq("id", params.userId)
+    .single();
+  const prefs = (user?.notification_prefs as Record<string, boolean>) ?? {};
+  if (prefs[params.type] === false) return;
+
   const { error } = await supabase.from("notifications").insert({
     user_id: params.userId,
     type: params.type,
