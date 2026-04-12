@@ -149,7 +149,8 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
       <div className="border-t border-border-tertiary py-1.5">
         {activeId && (
           <button
-            onClick={() => { setOpen(false); setShowSettings(true); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => { setShowSettings(true); setOpen(false); }}
             className="w-full flex items-center gap-2.5 px-3 h-[36px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
           >
             <HugeiconsIcon icon={Setting07Icon} size={14} color="var(--icon-tertiary)" />
@@ -157,7 +158,8 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
           </button>
         )}
         <button
-          onClick={() => { setOpen(false); setShowCreateModal(true); }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => { setShowCreateModal(true); setOpen(false); }}
           className="w-full flex items-center gap-2.5 px-3 h-[36px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
         >
           <HugeiconsIcon icon={Add01Icon} size={14} color="var(--icon-tertiary)" />
