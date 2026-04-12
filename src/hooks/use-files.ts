@@ -177,7 +177,16 @@ export function useFiles(keys: {
           return;
         }
 
-        const decrypted: DecryptedFile[] = data.files.map((f: Record<string, unknown>) => {
+        // Sort folders before files so parent hier keys are cached
+        // before any inherited child tries to walk the parent chain.
+        // The normal getFilesForUser query does this via ORDER BY
+        // is_folder DESC, but starred/recent/trash views order by
+        // different columns.
+        const sorted = [...data.files].sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+          (b.is_folder ? 1 : 0) - (a.is_folder ? 1 : 0)
+        );
+
+        const decrypted: DecryptedFile[] = sorted.map((f: Record<string, unknown>) => {
           const encryptedPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
           const wrappedByPublicKey = (f.wrapped_by_public_key as string) || "";
           const ownerPublicKey = (f.owner_public_key as string) || "";
