@@ -307,14 +307,47 @@ export function useFiles(keys: {
             results.push(makeErrorEntry(f));
           }
         }
-        // Second pass for deferred items
-        for (const f of deferred) {
-          try {
-            const result = tryDecrypt(f);
-            results.push(result ?? makeErrorEntry(f));
-          } catch (err) {
-            console.error("Failed to decrypt file:", f.id, err);
-            results.push(makeErrorEntry(f));
+        // Second pass: for deferred items whose parent isn't in the
+        // result set, fetch the parent on-the-fly to populate the
+        // cache. This covers starred/recent views where a child
+        // appears without its parent folder.
+        if (deferred.length > 0) {
+          const missingParentIds = new Set(
+            deferred
+              .map((f) => (f.parent_id as string | null))
+              .filter((pid): pid is string => !!pid && !folderPrivHierCache.current.has(pid))
+          );
+          for (const pid of missingParentIds) {
+            try {
+              const parentRes = await fetch(`/api/files/chunk-download?fileId=${pid}`);
+              if (parentRes.ok) {
+                const pd = await parentRes.json();
+                if (pd.encryptedPrivateHierarchicalKey) {
+                  const pPrivHier = unwrapPrivateHierarchicalKey(
+                    pd.encryptedPrivateHierarchicalKey,
+                    pd.wrappedByPublicKey,
+                    keys.encryptionPrivateKey
+                  );
+                  if (pd.publicHierarchicalKey) {
+                    folderPrivHierCache.current.set(pid, {
+                      publicHierarchicalKey: pd.publicHierarchicalKey,
+                      privateHierarchicalKey: pPrivHier,
+                    });
+                  }
+                }
+              }
+            } catch {
+              // Parent fetch failed — child will fall through to error entry
+            }
+          }
+          for (const f of deferred) {
+            try {
+              const result = tryDecrypt(f);
+              results.push(result ?? makeErrorEntry(f));
+            } catch (err) {
+              console.error("Failed to decrypt file:", f.id, err);
+              results.push(makeErrorEntry(f));
+            }
           }
         }
 
