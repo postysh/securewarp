@@ -34,7 +34,7 @@ function FadeIn({ children, keyVal }: { children: React.ReactNode; keyVal: strin
   );
 }
 
-export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
+export function AuthScreen({ mode: initialMode = "login", onUnlocked }: { mode?: Mode; onUnlocked?: () => void }) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
@@ -86,6 +86,7 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
       if (unlockPassword.length === 0) return;
       await auth.unlock(unlockPassword);
       setUnlockPassword("");
+      if (onUnlocked) onUnlocked();
       return;
     }
 
