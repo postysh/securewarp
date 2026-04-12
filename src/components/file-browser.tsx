@@ -479,7 +479,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
       {/* Table */}
-      <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
+      <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4 flex flex-col" style={{ overscrollBehaviorX: "none" }} onClick={() => setContextMenu(null)}>
         {/* Table header — hide when empty, hide entirely on mobile */}
         {displayFiles.length > 0 && (
         <div className="hidden md:flex items-center h-[40px] px-4 box-border select-none">
@@ -664,42 +664,48 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           </div>
         )}
 
+        {/* Tap-to-close overlay when a row is swiped open */}
+        {swipeFileId && (
+          <div
+            className="fixed inset-0 z-10 md:hidden"
+            onClick={() => { setSwipeFileId(null); setSwipeOffset(0); }}
+          />
+        )}
+
         {displayFiles.map((file) => {
           const isSelected = selected.has(file.id);
           const isSwiped = swipeFileId === file.id;
           const rowOffset = isSwiped ? swipeOffset : 0;
           return (
-            <div key={file.id} className="relative overflow-hidden rounded-xl mb-1.5">
+            <div key={file.id} className="relative overflow-hidden rounded-xl mb-1.5" style={{ zIndex: isSwiped ? 20 : undefined }}>
               {/* Swipe reveal actions (behind the row) */}
-              {isSwiped && rowOffset < 0 && (
-                <div className="absolute right-0 top-0 bottom-0 flex items-center gap-1 pr-2 md:hidden">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSwipeFileId(null);
-                      setSwipeOffset(0);
-                      const full = fileOps.files.find((f) => f.id === file.id);
-                      if (full) setShareTarget(full);
-                    }}
-                    className="w-[52px] h-[40px] rounded-lg bg-accent-blue flex items-center justify-center text-white text-[10px] font-medium"
-                    style={{ backgroundColor: "var(--accent-blue-primary)" }}
-                  >
-                    Share
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSwipeFileId(null);
-                      setSwipeOffset(0);
-                      fileOps.deleteItem(file.id);
-                    }}
-                    className="w-[52px] h-[40px] rounded-lg flex items-center justify-center text-white text-[10px] font-medium"
-                    style={{ backgroundColor: "var(--accent-red-primary)" }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
+              <div className="absolute right-0 top-0 bottom-0 flex items-stretch md:hidden">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSwipeFileId(null);
+                    setSwipeOffset(0);
+                    const full = fileOps.files.find((f) => f.id === file.id);
+                    if (full) setShareTarget(full);
+                  }}
+                  className="w-[56px] flex items-center justify-center text-white text-[11px] font-semibold"
+                  style={{ backgroundColor: "var(--accent-blue-primary)" }}
+                >
+                  Share
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSwipeFileId(null);
+                    setSwipeOffset(0);
+                    fileOps.deleteItem(file.id);
+                  }}
+                  className="w-[56px] flex items-center justify-center text-white text-[11px] font-semibold"
+                  style={{ backgroundColor: "var(--accent-red-primary)" }}
+                >
+                  Delete
+                </button>
+              </div>
             <div
               draggable={fileOps.viewMode === "own" && !file.uploading && fileOps.callerPermission !== "viewer"}
               onDragStart={(e) => {
@@ -778,7 +784,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
-              style={{ transform: `translateX(${rowOffset}px)`, transition: touchStartRef.current ? "none" : "transform 0.2s ease-out", touchAction: "pan-y" }}
+              style={{ transform: `translateX(${rowOffset}px)`, transition: touchStartRef.current ? "none" : "transform 0.2s ease-out", touchAction: "pan-y", overscrollBehaviorX: "none" }}
               className={`group flex items-center h-[56px] px-4 rounded-xl border cursor-pointer transition-colors bg-bg-main ${
                 dropTargetId === file.id
                   ? "border-accent-green bg-accent-green/5"
