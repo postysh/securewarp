@@ -601,6 +601,95 @@ export function useFiles(keys: {
     }
   }, [keys]);
 
+  /**
+   * Decrypt a file and return a blob URL for inline preview. Same
+   * decrypt path as downloadFile but returns the blob instead of
+   * triggering a save-to-disk. The caller MUST revoke the blob URL
+   * when the preview closes to free memory.
+   */
+  const previewFile = useCallback(
+    async (
+      fileId: string
+    ): Promise<
+      { ok: true; blobUrl: string; name: string; type: string } | { ok: false; error: string }
+    > => {
+      if (!keys) return { ok: false, error: "Not signed in" };
+
+      let sessionKey: Uint8Array | null = null;
+      try {
+        const res = await fetch(`/api/files/chunk-download?fileId=${fileId}`);
+        const data = await res.json();
+        if (!res.ok) return { ok: false, error: data.error || "Download failed" };
+
+        const privHier = unwrapPrivateHierarchicalKey(
+          data.encryptedPrivateHierarchicalKey,
+          data.wrappedByPublicKey,
+          keys.encryptionPrivateKey
+        );
+        sessionKey = unwrapSessionKeyFromFile(
+          data.encryptedSessionKeyByFile,
+          data.sessionKeyNonce,
+          data.ownerPublicKey,
+          privHier
+        );
+
+        const encMeta =
+          typeof data.encryptedMetadata === "string"
+            ? JSON.parse(data.encryptedMetadata)
+            : data.encryptedMetadata;
+        const meta = decryptMetadata(encMeta, sessionKey);
+
+        let decryptedContent: Uint8Array;
+        if (data.chunked) {
+          const chunks = data.chunks as {
+            sequence: number;
+            downloadUrl: string;
+            encryptionNonce: string;
+            isFinal: boolean;
+          }[];
+          const decryptedChunks: Uint8Array[] = [];
+          for (const chunk of chunks) {
+            const r2Res = await fetch(chunk.downloadUrl);
+            const encrypted = new Uint8Array(await r2Res.arrayBuffer());
+            decryptedChunks.push(
+              decryptChunk(
+                encrypted,
+                chunk.encryptionNonce,
+                chunk.sequence,
+                chunk.isFinal,
+                sessionKey
+              )
+            );
+          }
+          const totalSize = decryptedChunks.reduce((s, c) => s + c.length, 0);
+          decryptedContent = new Uint8Array(totalSize);
+          let offset = 0;
+          for (const c of decryptedChunks) {
+            decryptedContent.set(c, offset);
+            offset += c.length;
+          }
+        } else {
+          const r2Res = await fetch(data.downloadUrl);
+          const encrypted = new Uint8Array(await r2Res.arrayBuffer());
+          decryptedContent = decryptFileContent(
+            encrypted,
+            data.encryptionNonce,
+            sessionKey
+          );
+        }
+
+        const blob = new Blob([new Uint8Array(decryptedContent)], { type: meta.type });
+        return { ok: true, blobUrl: URL.createObjectURL(blob), name: meta.name, type: meta.type };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Preview failed";
+        return { ok: false, error: message };
+      } finally {
+        if (sessionKey) sessionKey.fill(0);
+      }
+    },
+    [keys]
+  );
+
   const createFolder = useCallback(async (name: string, parentId: string | null = null) => {
     if (!keys) return;
 
@@ -1750,6 +1839,7 @@ export function useFiles(keys: {
     fetchFiles,
     uploadFile,
     downloadFile,
+    previewFile,
     createFolder,
     renameFile,
     moveFile,

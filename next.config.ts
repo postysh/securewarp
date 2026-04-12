@@ -39,12 +39,16 @@ const connectSources = [
   // Supabase REST + realtime, in case any client-side direct fetches
   // are added later (today the service-role client is server-only).
   "https://*.supabase.co",
+  // Cloudflare Web Analytics beacon data endpoint.
+  "https://cloudflareinsights.com",
 ];
 
 const scriptSources = [
   "'self'",
   // Turnstile's embed script lives on this origin.
   "https://challenges.cloudflare.com",
+  // Cloudflare Web Analytics beacon, auto-injected by the proxy.
+  "https://static.cloudflareinsights.com",
   // Required for Next.js hydration inline bootstrap.
   "'unsafe-inline'",
   // Required for Next.js dev HMR. Kept in prod because removing it
@@ -57,6 +61,8 @@ const frameSources = [
   "'self'",
   // Turnstile renders in an iframe.
   "https://challenges.cloudflare.com",
+  // PDF preview renders decrypted content in blob: iframes.
+  "blob:",
 ];
 
 const csp = [

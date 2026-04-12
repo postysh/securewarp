@@ -32,6 +32,7 @@ import { NewFolderModal } from "./new-folder-modal";
 import { ShareModal } from "./share-modal";
 import { RenameModal } from "./rename-modal";
 import { MoveModal } from "./move-modal";
+import { FilePreview } from "./file-preview";
 import { ConfirmDialog } from "./confirm-dialog";
 import { MembersModal } from "./members-modal";
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
@@ -162,6 +163,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [emptyTrashBusy, setEmptyTrashBusy] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState<DecryptedFile | null>(null);
   const [purgeBusy, setPurgeBusy] = useState(false);
+  const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const [moveTarget, setMoveTarget] = useState<DecryptedFile | null>(null);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -603,6 +605,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               onClick={() => {
                 if (file.isFolder && fileOps.viewMode !== "trash") {
                   fileOps.navigateToFolder(file.id, file.name);
+                } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
+                  setPreviewFileId(file.id);
                 }
               }}
               onContextMenu={(e) => {
@@ -722,7 +726,19 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         >
           {fileOps.viewMode !== "trash" && (
             <>
-              <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+              <button
+                onClick={() => {
+                  if (!contextMenu) return;
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                  if (full?.isFolder) {
+                    fileOps.navigateToFolder(full.id, full.name);
+                  } else if (full) {
+                    setPreviewFileId(full.id);
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
                 <HugeiconsIcon icon={FolderAddIcon} size={14} color="var(--icon-tertiary)" /> Open
               </button>
               <button
@@ -899,6 +915,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           setPurgeTarget(null);
         }}
         onCancel={() => !purgeBusy && setPurgeTarget(null)}
+      />
+      <FilePreview
+        fileId={previewFileId}
+        fileIds={displayFiles.filter((f) => !f.isFolder && !f.uploading).map((f) => f.id)}
+        onClose={() => setPreviewFileId(null)}
+        onNavigate={setPreviewFileId}
       />
       <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
