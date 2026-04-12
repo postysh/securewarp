@@ -31,6 +31,7 @@ import { CommandPalette } from "./command-palette";
 import { NewFolderModal } from "./new-folder-modal";
 import { ShareModal } from "./share-modal";
 import { RenameModal } from "./rename-modal";
+import { MoveModal } from "./move-modal";
 import { ConfirmDialog } from "./confirm-dialog";
 import { MembersModal } from "./members-modal";
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
@@ -159,6 +160,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [emptyTrashBusy, setEmptyTrashBusy] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState<DecryptedFile | null>(null);
   const [purgeBusy, setPurgeBusy] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<DecryptedFile | null>(null);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -739,7 +741,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           )}
           {fileOps.viewMode !== "trash" && (
             <>
-              <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+              <button
+                onClick={() => {
+                  if (!contextMenu) return;
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                  if (full) setMoveTarget(full);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
                 <HugeiconsIcon icon={Move01Icon} size={14} color="var(--icon-tertiary)" /> Move to
               </button>
               <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
@@ -852,6 +862,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         }}
         onCancel={() => !purgeBusy && setPurgeTarget(null)}
       />
+      <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
       <MembersModal open={membersOpen} onClose={() => setMembersOpen(false)} />
       <CommandPalette

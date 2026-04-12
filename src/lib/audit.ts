@@ -22,6 +22,7 @@ export type AuditEventType =
   | "files.permission_change"
   | "files.delete"
   | "files.rename"
+  | "files.move"
   | "files.restore"
   | "files.purge"
   | "files.rotate"

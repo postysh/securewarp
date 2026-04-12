@@ -1,0 +1,126 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { getSession } from "@/lib/auth/session";
+import {
+  getOwnedFile,
+  moveFile,
+  isDescendantOf,
+} from "@/lib/db/files";
+import { auditEvent } from "@/lib/audit";
+import { logError } from "@/lib/log";
+
+// Owner-only move. The caller re-wraps `parent_keys_claim` on the
+// client (under the new parent's public hier key) and ships the
+// ciphertext here — the server never sees the plaintext session
+// key or private hier key.
+//
+// Validation the server owns:
+//   1. Caller owns the file being moved.
+//   2. If newParentId is non-null, caller owns it AND it's a folder.
+//   3. The move doesn't introduce a cycle (can't move a folder into
+//      itself or any of its descendants).
+//   4. When moving to root (newParentId null), both claim fields
+//      MUST also be null — there's no parent key to wrap under.
+//      When moving under a folder, both MUST be present.
+
+const MoveSchema = z.object({
+  newParentId: z.string().uuid().nullable(),
+  parentKeysClaim: z.string().nullable(),
+  parentKeysClaimWrappedBy: z.string().nullable(),
+});
+
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { id: fileId } = await params;
+    const body = await request.json();
+    const parsed = MoveSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid data" }, { status: 400 });
+    }
+    const { newParentId, parentKeysClaim, parentKeysClaimWrappedBy } = parsed.data;
+
+    // Enforce the claim-null coupling before hitting the DB.
+    if (newParentId === null) {
+      if (parentKeysClaim !== null || parentKeysClaimWrappedBy !== null) {
+        return NextResponse.json(
+          { error: "parent_keys_claim must be null when moving to root" },
+          { status: 400 }
+        );
+      }
+    } else {
+      if (!parentKeysClaim || !parentKeysClaimWrappedBy) {
+        return NextResponse.json(
+          { error: "parent_keys_claim required when moving under a folder" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 1. Caller owns the file being moved.
+    const file = await getOwnedFile(fileId, session.userId);
+    if (!file) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (file.deleted_at) {
+      return NextResponse.json({ error: "File is in trash" }, { status: 400 });
+    }
+
+    // No-op move (same parent).
+    if (file.parent_id === newParentId) {
+      return NextResponse.json({ success: true });
+    }
+
+    // 2. Destination must be an owned folder (or null).
+    if (newParentId !== null) {
+      const dest = await getOwnedFile(newParentId, session.userId);
+      if (!dest) {
+        return NextResponse.json({ error: "Destination not found" }, { status: 404 });
+      }
+      if (!dest.is_folder) {
+        return NextResponse.json({ error: "Destination is not a folder" }, { status: 400 });
+      }
+      if (dest.deleted_at) {
+        return NextResponse.json({ error: "Destination is in trash" }, { status: 400 });
+      }
+
+      // 3. Cycle check — can't move a folder into itself or any descendant.
+      if (file.is_folder) {
+        const wouldCycle = await isDescendantOf(fileId, newParentId);
+        if (wouldCycle) {
+          return NextResponse.json(
+            { error: "Cannot move a folder into itself or one of its children" },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    await moveFile(
+      fileId,
+      session.userId,
+      newParentId,
+      parentKeysClaim,
+      parentKeysClaimWrappedBy
+    );
+
+    auditEvent({
+      event: "files.move",
+      actorUserId: session.userId,
+      targetFileId: fileId,
+      detail: newParentId ?? "root",
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    logError("files.move", err);
+    return NextResponse.json({ error: "Move failed" }, { status: 500 });
+  }
+}

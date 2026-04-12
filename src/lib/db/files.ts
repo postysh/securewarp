@@ -27,6 +27,9 @@ export interface FileRow {
   // root items.
   parent_keys_claim: string | null;
   parent_keys_claim_wrapped_by: string | null;
+  // Phase 6 — soft delete. Null on live rows, set to the deletion
+  // timestamp when the user trashes the file (recursive).
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -598,6 +601,36 @@ export async function getTrashedForUser(userId: string): Promise<FileRowWithKey[
   });
 
   return tops.map((row) => shapeRow(row as unknown as FileJoinRow));
+}
+
+/**
+ * Move: change a file's `parent_id` and re-wrap its
+ * `parent_keys_claim`. Owner-only; the route handler validates the
+ * caller owns both the file being moved and the destination folder
+ * (or the destination is null = root), plus the cycle check.
+ *
+ * When moving to root (`newParentId = null`), `parentKeysClaim` and
+ * `parentKeysClaimWrappedBy` MUST both be null — there's no parent
+ * whose pub hier key to wrap under. The route enforces this
+ * coupling; we trust it here.
+ */
+export async function moveFile(
+  fileId: string,
+  ownerId: string,
+  newParentId: string | null,
+  parentKeysClaim: string | null,
+  parentKeysClaimWrappedBy: string | null
+): Promise<void> {
+  const { error } = await supabase
+    .from("files")
+    .update({
+      parent_id: newParentId,
+      parent_keys_claim: parentKeysClaim,
+      parent_keys_claim_wrapped_by: parentKeysClaimWrappedBy,
+    })
+    .eq("id", fileId)
+    .eq("owner_id", ownerId);
+  if (error) throw new Error(`Failed to move file: ${error.message}`);
 }
 
 /**

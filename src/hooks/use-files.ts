@@ -760,6 +760,94 @@ export function useFiles(keys: {
     [keys]
   );
 
+  /**
+   * Move a file or folder to a new parent (or to root when
+   * `newParentId` is null). Owner-only. Re-wraps
+   * `parent_keys_claim` under the new parent's pub hier key on the
+   * client — the server never sees the plaintext session key.
+   *
+   * `destPublicHierarchicalKey` is the destination folder's pub hier
+   * key. The move-picker loads it from the list endpoint before
+   * calling this function. Pass null when moving to root.
+   */
+  const moveFile = useCallback(
+    async (
+      file: DecryptedFile,
+      newParentId: string | null,
+      destPublicHierarchicalKey: string | null
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
+      if (!keys) return { ok: false, error: "Not signed in" };
+      if (file.parentId === newParentId) return { ok: true };
+
+      let sessionKey: Uint8Array | null = null;
+      try {
+        let privHier: string;
+
+        if (file.encryptedPrivateHierarchicalKey) {
+          privHier = unwrapPrivateHierarchicalKey(
+            file.encryptedPrivateHierarchicalKey,
+            file.wrappedByPublicKey,
+            keys.encryptionPrivateKey
+          );
+          sessionKey = unwrapSessionKeyFromFile(
+            file.encryptedSessionKeyByFile,
+            file.sessionKeyNonce,
+            file.ownerPublicKey,
+            privHier
+          );
+        } else if (file.parentKeysClaim && file.parentKeysClaimWrappedBy && file.parentId) {
+          const parentEntry = folderPrivHierCache.current.get(file.parentId);
+          if (!parentEntry) {
+            return { ok: false, error: "Parent folder not loaded — reopen it first" };
+          }
+          const unwrapped = unwrapParentKeysClaim(
+            file.parentKeysClaim,
+            file.parentKeysClaimWrappedBy,
+            parentEntry.privateHierarchicalKey
+          );
+          sessionKey = unwrapped.sessionKey;
+          privHier = unwrapped.childPrivateHierarchicalKey;
+        } else {
+          return { ok: false, error: "No decrypt path for this file" };
+        }
+
+        let parentKeysClaim: string | null = null;
+        let parentKeysClaimWrappedBy: string | null = null;
+        if (newParentId !== null) {
+          if (!destPublicHierarchicalKey) {
+            return { ok: false, error: "Destination pub hier key missing" };
+          }
+          parentKeysClaim = wrapParentKeysClaim(
+            sessionKey,
+            privHier,
+            destPublicHierarchicalKey,
+            keys.encryptionPrivateKey
+          );
+          parentKeysClaimWrappedBy = keys.encryptionPublicKey;
+        }
+
+        const res = await fetch(`/api/files/${file.id}/move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newParentId, parentKeysClaim, parentKeysClaimWrappedBy }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          return { ok: false, error: data.error || "Move failed" };
+        }
+
+        await fetchFiles(state.currentFolder, state.viewMode);
+        return { ok: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Move failed";
+        return { ok: false, error: message };
+      } finally {
+        if (sessionKey) sessionKey.fill(0);
+      }
+    },
+    [keys, fetchFiles, state.currentFolder, state.viewMode]
+  );
+
   const deleteItem = useCallback(async (fileId: string) => {
     try {
       const res = await fetch("/api/files/delete", {
@@ -1664,6 +1752,7 @@ export function useFiles(keys: {
     downloadFile,
     createFolder,
     renameFile,
+    moveFile,
     deleteItem,
     restoreItem,
     purgeItem,
