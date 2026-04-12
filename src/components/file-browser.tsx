@@ -865,12 +865,16 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <div className="w-[110px] justify-end hidden md:flex">
                   <CollaboratorStack collaborators={file.collaborators} />
                 </div>
-                <div className="w-[100px] justify-end hidden lg:flex group-hover:opacity-0 transition-opacity">
+                <div className={`w-[100px] justify-end hidden lg:flex transition-opacity ${
+                  contextMenu?.fileId === file.id ? "opacity-0" : "group-hover:opacity-0"
+                }`}>
                   <span className="text-[12px] text-text-disabled">{file.modified}</span>
                 </div>
 
                 {/* Hover actions */}
-                <div className="absolute right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                <div className={`absolute right-0 flex items-center gap-0.5 transition-opacity ${
+                  contextMenu?.fileId === file.id ? "opacity-100 pointer-events-auto" : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
+                }`}>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
