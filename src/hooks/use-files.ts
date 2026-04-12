@@ -2086,6 +2086,127 @@ export function useFiles(keys: {
     [keys]
   );
 
+  /**
+   * Export all owned files as a zip archive. Fetches every file,
+   * decrypts each one client-side, builds the zip with folder
+   * structure, and triggers a browser download. Server never sees
+   * plaintext.
+   */
+  const exportAllAsZip = useCallback(
+    async (onProgress?: (pct: number, step: string) => void): Promise<{ ok: true } | { ok: false; error: string }> => {
+      if (!keys) return { ok: false, error: "Not signed in" };
+
+      try {
+        // 1. Fetch all owned files
+        onProgress?.(5, "Fetching file list...");
+        const res = await fetch("/api/files/list?all=true");
+        const data = await res.json();
+        if (!res.ok) return { ok: false, error: data.error || "Failed to fetch files" };
+
+        const files = data.files as Record<string, unknown>[];
+        if (files.length === 0) return { ok: false, error: "No files to export" };
+
+        // 2. Build folder path map (id → path segments)
+        const nameMap = new Map<string, { name: string; parentId: string | null; isFolder: boolean }>();
+        for (const f of files) {
+          const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
+          if (!encPrivHier) continue;
+          try {
+            const privHier = unwrapPrivateHierarchicalKey(encPrivHier, (f.wrapped_by_public_key as string) || "", keys.encryptionPrivateKey);
+            const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file as string, f.session_key_nonce as string, (f.owner_public_key as string) || "", privHier);
+            const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata as string) : f.encrypted_metadata;
+            const meta = decryptMetadata(encMeta as { nonce: string; ciphertext: string }, sk);
+            sk.fill(0);
+            nameMap.set(f.id as string, { name: meta.name, parentId: (f.parent_id as string | null) ?? null, isFolder: f.is_folder as boolean });
+          } catch {
+            // skip undecryptable
+          }
+        }
+
+        const getPath = (id: string): string => {
+          const parts: string[] = [];
+          let current = id;
+          const maxDepth = 64;
+          for (let d = 0; d < maxDepth; d++) {
+            const entry = nameMap.get(current);
+            if (!entry) break;
+            parts.unshift(entry.name);
+            if (!entry.parentId) break;
+            current = entry.parentId;
+          }
+          return parts.join("/");
+        };
+
+        // 3. Decrypt + collect file contents
+        const { zipSync } = await import("fflate");
+        const zipData: Record<string, Uint8Array> = {};
+        const nonFolders = files.filter((f) => !(f.is_folder as boolean) && nameMap.has(f.id as string));
+        let done = 0;
+
+        for (const f of nonFolders) {
+          const fileId = f.id as string;
+          const path = getPath(fileId);
+          onProgress?.(5 + Math.round((done / nonFolders.length) * 85), `Decrypting ${path}...`);
+
+          try {
+            const dlRes = await fetch(`/api/files/chunk-download?fileId=${fileId}`);
+            const dlData = await dlRes.json();
+            if (!dlRes.ok || dlData.noContent) { done++; continue; }
+
+            const sessionKey = unwrapSessionKeyFromDownload(dlData);
+
+            let content: Uint8Array;
+            if (dlData.chunked) {
+              const chunks = dlData.chunks as { sequence: number; downloadUrl: string; encryptionNonce: string; isFinal: boolean }[];
+              const decryptedChunks: Uint8Array[] = [];
+              for (const chunk of chunks) {
+                const r2 = await fetch(chunk.downloadUrl);
+                const encrypted = new Uint8Array(await r2.arrayBuffer());
+                decryptedChunks.push(decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey));
+              }
+              const total = decryptedChunks.reduce((s, c) => s + c.length, 0);
+              content = new Uint8Array(total);
+              let offset = 0;
+              for (const c of decryptedChunks) { content.set(c, offset); offset += c.length; }
+            } else {
+              const r2 = await fetch(dlData.downloadUrl);
+              const encrypted = new Uint8Array(await r2.arrayBuffer());
+              content = decryptFileContent(encrypted, dlData.encryptionNonce, sessionKey);
+            }
+            sessionKey.fill(0);
+            zipData[path] = content;
+          } catch {
+            // skip failed files
+          }
+          done++;
+        }
+
+        if (Object.keys(zipData).length === 0) {
+          return { ok: false, error: "No files could be decrypted" };
+        }
+
+        // 4. Build zip and download
+        onProgress?.(92, "Building zip...");
+        const zipped = zipSync(zipData);
+        const blob = new Blob([new Uint8Array(zipped)], { type: "application/zip" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `securewarp-export-${new Date().toISOString().slice(0, 10)}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        onProgress?.(100, "Done");
+        return { ok: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Export failed";
+        return { ok: false, error: message };
+      }
+    },
+    [keys, unwrapSessionKeyFromDownload]
+  );
+
   return {
     ...state,
     initialized,
@@ -2116,6 +2237,7 @@ export function useFiles(keys: {
     navigateToBreadcrumb,
     clearError,
     searchFiles,
+    exportAllAsZip,
   };
 }
 

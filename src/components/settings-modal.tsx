@@ -18,6 +18,8 @@ import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import { useTheme } from "./theme-provider";
 import { useUserKeys } from "@/hooks/use-user-keys";
 import { useAuth } from "@/hooks/use-auth";
+import { useFilesContext } from "@/hooks/use-files";
+import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { RecoveryKeyModal } from "./recovery-key-modal";
 import { ConfirmDialog } from "./confirm-dialog";
 import { clearLockCache } from "@/lib/auth/lock-cache";
@@ -92,8 +94,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     permission_changed: true,
   });
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportStep, setExportStep] = useState<string | null>(null);
   const userKeys = useUserKeys();
   const auth = useAuth();
+  const fileOps = useFilesContext();
 
   const email = userKeys?.email || "";
   const initials = displayName
@@ -428,6 +433,34 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             <div className="flex items-center gap-1.5 mt-4 text-[10px] text-text-disabled">
               <HugeiconsIcon icon={LockIcon} size={10} />
               Storage usage is calculated from encrypted file sizes
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-border-tertiary">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[13px] text-text-primary">Export all data</p>
+                  <p className="text-[11px] text-text-disabled mt-0.5">Download all your files as a decrypted zip archive</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    setExporting(true);
+                    setExportStep("Starting...");
+                    const result = await fileOps.exportAllAsZip((_, step) => setExportStep(step));
+                    setExporting(false);
+                    setExportStep(result.ok ? null : result.error);
+                  }}
+                  disabled={exporting}
+                  className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  <HugeiconsIcon icon={Download04Icon} size={12} />
+                  {exporting ? "Exporting..." : "Export"}
+                </button>
+              </div>
+              {exportStep && (
+                <p className={`text-[11px] mt-2 ${exporting ? "text-accent-green" : "text-accent-red"}`}>
+                  {exportStep}
+                </p>
+              )}
             </div>
           </div>
         );
