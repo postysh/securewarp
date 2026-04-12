@@ -72,16 +72,18 @@ export async function GET(request: Request) {
       .in("file_id", fileIds);
     const starredSet = new Set((starRows || []).map((r) => r.file_id as string));
 
-    // File labels — which labels are assigned to each file
+    // File labels — only this user's labels (labels are per-user)
     const { data: fileLabelRows } = await supabase
       .from("file_labels")
-      .select("file_id, label_id, label:labels!file_labels_label_id_fkey(id, name, color)")
+      .select("file_id, label_id, label:labels!file_labels_label_id_fkey(id, name, color, user_id)")
       .in("file_id", fileIds);
     const labelsByFile = new Map<string, { id: string; name: string; color: string }[]>();
     for (const row of (fileLabelRows || [])) {
       const fid = row.file_id as string;
-      const label = (row.label as unknown) as { id: string; name: string; color: string } | null;
+      const label = (row.label as unknown) as { id: string; name: string; color: string; user_id?: string } | null;
       if (!label) continue;
+      // Only include this user's labels — skip other users' labels on shared files
+      if (label.user_id && label.user_id !== session.userId) continue;
       if (!labelsByFile.has(fid)) labelsByFile.set(fid, []);
       labelsByFile.get(fid)!.push(label);
     }

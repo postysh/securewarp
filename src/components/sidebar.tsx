@@ -416,17 +416,34 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
             ) : (
               <div className="flex flex-col gap-[2px]">
                 {labels.map((tag) => (
-                  <button
+                  <div
                     key={tag.id}
-                    onClick={() => {
-                      // Dispatch event to filter by label
-                      window.dispatchEvent(new CustomEvent("securewarp-filter-label", { detail: { id: tag.id, name: tag.name, color: tag.color } }));
-                    }}
-                    className="w-full flex items-center gap-3 px-2.5 h-[30px] rounded-[6px] text-[12px] text-text-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+                    className="group w-full flex items-center gap-3 px-2.5 h-[30px] rounded-[6px] text-[12px] text-text-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
                   >
-                    <div className="w-[10px] h-[10px] rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
-                    <span className="whitespace-nowrap truncate">{tag.name}</span>
-                  </button>
+                    <button
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent("securewarp-filter-label", { detail: { id: tag.id, name: tag.name, color: tag.color } }));
+                      }}
+                      className="flex items-center gap-3 flex-1 min-w-0"
+                    >
+                      <div className="w-[10px] h-[10px] rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                      <span className="whitespace-nowrap truncate">{tag.name}</span>
+                    </button>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await fetch("/api/labels", {
+                          method: "DELETE",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ labelId: tag.id }),
+                        });
+                        setLabels((prev) => prev.filter((l) => l.id !== tag.id));
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-icon-tertiary hover:text-accent-red transition-all cursor-pointer shrink-0"
+                    >
+                      <HugeiconsIcon icon={Cancel01Icon} size={10} />
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
