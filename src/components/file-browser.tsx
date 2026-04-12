@@ -1141,10 +1141,14 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="w-[48px] h-[48px] rounded-full bg-cta-primary flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
+            className="w-[48px] h-[48px] rounded-full bg-accent-green flex items-center justify-center cursor-pointer active:scale-95 transition-transform text-white"
             style={{ boxShadow: "var(--shadow-l2)" }}
           >
-            <HugeiconsIcon icon={Upload04Icon} size={20} color="#ffffff" />
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
           </button>
         </div>
       )}
