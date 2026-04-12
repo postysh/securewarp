@@ -23,7 +23,7 @@
     "bip39": "^3.1.0",
     "jose": "^6.2.2",
     "next": "16.2.2",
-    "react": "19.2.4",
+    "react": "19.2.5",
     "react-dom": "19.2.4",
     "secure-remote-password": "^0.3.1",
     "server-only": "^0.0.1",
