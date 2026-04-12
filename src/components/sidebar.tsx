@@ -241,7 +241,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
     fetch("/api/labels").then((r) => r.json()).then((d) => {
       if (d.labels) setLabels(d.labels);
     }).catch(() => {});
-  }, [fileOps.files]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const storage = useStorageUsage();
   const usedPct = storage.maxBytes > 0 ? Math.min((storage.usedBytes / storage.maxBytes) * 100, 100) : 0;

@@ -99,7 +99,9 @@ export function NotificationBell() {
     // (below) delivers sub-second updates when connected, but
     // polling covers env-var-missing, connection failures, and
     // Vercel cold starts where the websocket hasn't connected yet.
-    const interval = setInterval(fetchNotifications, 10_000);
+    // 30s poll — realtime websocket handles instant delivery when
+    // connected, polling is just the fallback.
+    const interval = setInterval(fetchNotifications, 30_000);
 
     // Realtime layer — additive, not a replacement
     let channel: ReturnType<NonNullable<typeof supabaseClient>["channel"]> | null = null;

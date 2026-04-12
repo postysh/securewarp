@@ -182,7 +182,8 @@ export async function getFilesForUser(
 
   const { data, error } = await query
     .order("is_folder", { ascending: false })
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(100);
 
   if (error) throw new Error(`Failed to fetch files: ${error.message}`);
   return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
