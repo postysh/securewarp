@@ -374,7 +374,7 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
           <div className="text-center max-w-[320px]">
             <p className="text-[14px] text-white/70 mb-2">No preview available</p>
             <p className="text-[12px] text-white/40 mb-4">
-              {preview.type || "Unknown type"} — {preview.name}
+              {preview.type || "Unknown type"} · {preview.name}
             </p>
             <button
               onClick={triggerDownload}

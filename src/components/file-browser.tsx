@@ -594,7 +594,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <>
                   <h3 className="text-[18px] font-semibold text-text-primary mb-2">Nothing shared with you yet</h3>
                   <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
-                    When someone shares a file with your email, it shows up here — decrypted in your
+                    When someone shares a file with your email, it shows up here, decrypted in your
                     browser using your private key. Ask a collaborator to send you something.
                   </p>
                   <div className="flex items-center justify-center">

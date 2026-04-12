@@ -169,7 +169,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             </div>
             <div className="px-5 py-5 space-y-3">
               <p className="text-[13px] text-text-primary">Your 24-word recovery phrase was shown when you created your account.</p>
-              <p className="text-[12px] text-text-tertiary leading-relaxed">For security, the recovery phrase cannot be displayed again. If you saved it (copied or downloaded the file), keep it somewhere safe — it&apos;s the only way to recover your account if you forget your password.</p>
+              <p className="text-[12px] text-text-tertiary leading-relaxed">For security, the recovery phrase cannot be displayed again. If you saved it (copied or downloaded the file), keep it somewhere safe. It&apos;s the only way to recover your account if you forget your password.</p>
               <p className="text-[12px] text-text-tertiary leading-relaxed">If you&apos;ve lost your recovery phrase, you can generate a new one by changing your password in Settings.</p>
               <div className="flex justify-end pt-2">
                 <button onClick={() => setRecoveryOpen(false)} className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer">Got it</button>

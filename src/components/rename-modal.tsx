@@ -116,7 +116,7 @@ export function RenameModal({
 
           <div className="flex items-center gap-1.5 mt-4 text-[11px] text-text-disabled">
             <HugeiconsIcon icon={LockIcon} size={12} />
-            Re-encrypted locally — the server never sees the new name
+            Re-encrypted locally. The server never sees the new name.
           </div>
 
           <div className="flex items-center justify-end gap-2 mt-5">

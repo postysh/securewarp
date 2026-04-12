@@ -329,7 +329,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                         disabled={rotatingUserId !== null}
                         title={
                           file.isFolder
-                            ? "Revoke & rotate folder keys (shallow — see confirm dialog)"
+                            ? "Revoke & rotate folder keys (shallow, see confirm dialog)"
                             : "Revoke & rotate file keys (forward-secret)"
                         }
                         className="text-[10px] text-accent-red hover:underline px-1.5 h-[26px] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -377,7 +377,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                   className="w-full px-3 py-2 rounded-[10px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40"
                 />
                 <p className="mt-1 text-[10px] text-text-disabled">
-                  Visitors must enter this password. Store it separately — we
+                  Visitors must enter this password. Store it separately. We
                   can&apos;t recover it if lost.
                 </p>
               </div>
@@ -470,7 +470,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                 {"\n\n"}
                 This rotates the folder&apos;s keys and re-wraps access to every direct
                 child. Existing file contents inside the folder are <b>not</b>{" "}
-                re-encrypted — if {revokeTarget.email} had already opened and cached a
+                re-encrypted. If {revokeTarget.email} had already opened and cached a
                 specific file before revocation, they may still be able to read that
                 exact cached copy. New files added after this point, and any files
                 they hadn&apos;t opened, will be fully protected.
