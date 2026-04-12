@@ -28,6 +28,7 @@ export interface FileRow {
   parent_keys_claim: string | null;
   parent_keys_claim_wrapped_by: string | null;
   deleted_at: string | null;
+  is_workspace_root: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -162,7 +163,8 @@ export async function getFilesForUser(
   if (parentId) {
     query = query.eq("parent_id", parentId);
   } else {
-    query = query.is("parent_id", null);
+    // Root listing — hide workspace root folders from personal view
+    query = query.is("parent_id", null).eq("is_workspace_root", false);
   }
 
   const { data, error } = await query

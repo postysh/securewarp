@@ -42,6 +42,9 @@ export async function POST(request: Request) {
     if (!owned) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
+    if (owned.is_workspace_root) {
+      return NextResponse.json({ error: "Cannot delete a workspace folder. Delete the workspace instead." }, { status: 400 });
+    }
 
     await trashSubtree(fileId, session.userId);
 

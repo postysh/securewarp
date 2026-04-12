@@ -61,6 +61,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Root folder not found" }, { status: 404 });
     }
 
+    // Mark the folder as a workspace root (hidden from personal, protected from delete)
+    await supabase.from("files").update({ is_workspace_root: true }).eq("id", parsed.data.rootFolderId);
+
     // Create workspace
     const { data: ws, error: wsErr } = await supabase
       .from("workspaces")
