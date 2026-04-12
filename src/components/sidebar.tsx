@@ -327,6 +327,8 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
                     onClick={() => {
                       if (pin.isFolder) {
                         fileOps.navigateToFolder(pin.file_id, pin.name ?? "Folder");
+                      } else {
+                        window.dispatchEvent(new CustomEvent("securewarp-preview-file", { detail: pin.file_id }));
                       }
                     }}
                     className="w-full flex items-center gap-3 px-2.5 h-[30px] rounded-[6px] text-[12px] text-text-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"

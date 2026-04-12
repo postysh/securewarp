@@ -166,6 +166,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [purgeBusy, setPurgeBusy] = useState(false);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const [moveTarget, setMoveTarget] = useState<DecryptedFile | null>(null);
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
+  const [userLabels, setUserLabels] = useState<{ id: string; name: string; color: string }[]>([]);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -182,6 +184,16 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   useEffect(() => {
     setContextMenu(null);
   }, [fileOps.files, fileOps.viewMode, fileOps.currentFolder]);
+
+  // Fetch pinned IDs and user labels
+  useEffect(() => {
+    fetch("/api/pins").then((r) => r.json()).then((d) => {
+      if (d.pins) setPinnedIds(new Set(d.pins.map((p: { file_id: string }) => p.file_id)));
+    }).catch(() => {});
+    fetch("/api/labels").then((r) => r.json()).then((d) => {
+      if (d.labels) setUserLabels(d.labels);
+    }).catch(() => {});
+  }, []);
 
   // Map decrypted files to display format
   const displayFiles = fileOps.files.map((f) => ({
@@ -205,8 +217,16 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   // Mobile bottom nav search trigger
   useEffect(() => {
     const openSearch = () => setCommandPaletteOpen(true);
+    const previewFromPin = (e: Event) => {
+      const fileId = (e as CustomEvent).detail;
+      if (fileId) setPreviewFileId(fileId);
+    };
     window.addEventListener("securewarp-open-search", openSearch);
-    return () => window.removeEventListener("securewarp-open-search", openSearch);
+    window.addEventListener("securewarp-preview-file", previewFromPin);
+    return () => {
+      window.removeEventListener("securewarp-open-search", openSearch);
+      window.removeEventListener("securewarp-preview-file", previewFromPin);
+    };
   }, []);
 
   useEffect(() => {
@@ -935,17 +955,48 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <button
                 onClick={async () => {
                   if (!contextMenu) return;
+                  const isPinned = pinnedIds.has(contextMenu.fileId);
                   await fetch("/api/pins", {
-                    method: "POST",
+                    method: isPinned ? "DELETE" : "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ fileId: contextMenu.fileId }),
+                  });
+                  setPinnedIds((prev) => {
+                    const next = new Set(prev);
+                    if (isPinned) next.delete(contextMenu.fileId);
+                    else next.add(contextMenu.fileId);
+                    return next;
                   });
                   setContextMenu(null);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
               >
-                <HugeiconsIcon icon={PinIcon} size={14} color="var(--icon-tertiary)" /> Pin to sidebar
+                <HugeiconsIcon icon={PinIcon} size={14} color="var(--icon-tertiary)" />
+                {pinnedIds.has(contextMenu?.fileId ?? "") ? "Unpin from sidebar" : "Pin to sidebar"}
               </button>
+              {userLabels.length > 0 && (
+                <div className="border-t border-border-tertiary mt-1 pt-1">
+                  <p className="px-3 py-1 text-[10px] font-mono uppercase text-text-disabled">Labels</p>
+                  {userLabels.map((label) => (
+                    <button
+                      key={label.id}
+                      onClick={async () => {
+                        if (!contextMenu) return;
+                        await fetch("/api/labels/assign", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ fileId: contextMenu.fileId, labelId: label.id, action: "add" }),
+                        });
+                        setContextMenu(null);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                    >
+                      <div className="w-[10px] h-[10px] rounded-full shrink-0" style={{ backgroundColor: label.color }} />
+                      {label.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           )}
           {fileOps.viewMode === "trash" && (
