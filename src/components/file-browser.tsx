@@ -165,6 +165,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [purgeBusy, setPurgeBusy] = useState(false);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const [moveTarget, setMoveTarget] = useState<DecryptedFile | null>(null);
+  const [swipeFileId, setSwipeFileId] = useState<string | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const touchStartRef = useRef<{ x: number; y: number; id: string } | null>(null);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -195,6 +198,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const selectNone = () => setSelected(new Set());
   const allSelected = displayFiles.length > 0 && selected.size === displayFiles.length;
   const someSelected = selected.size > 0 && !allSelected;
+
+  // Mobile bottom nav search trigger
+  useEffect(() => {
+    const openSearch = () => setCommandPaletteOpen(true);
+    window.addEventListener("securewarp-open-search", openSearch);
+    return () => window.removeEventListener("securewarp-open-search", openSearch);
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -317,7 +327,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       <div className="relative flex items-center justify-between px-3 md:px-5 h-[52px] shrink-0">
         {/* Left: sidebar toggle + breadcrumb */}
         <div className="flex items-center gap-1.5 text-[13px] shrink-0 z-10 min-w-0 overflow-hidden">
-          <button onClick={onToggleSidebar} className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer mr-1">
+          <button onClick={onToggleSidebar} className="hidden md:block p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer mr-1">
             <HugeiconsIcon icon={SidebarLeft01Icon} size={16} />
           </button>
           {(() => {
@@ -660,9 +670,41 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
         {displayFiles.map((file) => {
           const isSelected = selected.has(file.id);
+          const isSwiped = swipeFileId === file.id;
+          const rowOffset = isSwiped ? swipeOffset : 0;
           return (
+            <div key={file.id} className="relative overflow-hidden rounded-xl mb-1.5">
+              {/* Swipe reveal actions (behind the row) */}
+              {isSwiped && rowOffset < 0 && (
+                <div className="absolute right-0 top-0 bottom-0 flex items-center gap-1 pr-2 md:hidden">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSwipeFileId(null);
+                      setSwipeOffset(0);
+                      const full = fileOps.files.find((f) => f.id === file.id);
+                      if (full) setShareTarget(full);
+                    }}
+                    className="w-[52px] h-[40px] rounded-lg bg-accent-blue flex items-center justify-center text-white text-[10px] font-medium"
+                    style={{ backgroundColor: "var(--accent-blue-primary)" }}
+                  >
+                    Share
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSwipeFileId(null);
+                      setSwipeOffset(0);
+                      fileOps.deleteItem(file.id);
+                    }}
+                    className="w-[52px] h-[40px] rounded-lg flex items-center justify-center text-white text-[10px] font-medium"
+                    style={{ backgroundColor: "var(--accent-red-primary)" }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
             <div
-              key={file.id}
               draggable={fileOps.viewMode === "own" && !file.uploading && fileOps.callerPermission !== "viewer"}
               onDragStart={(e) => {
                 setDragFileId(file.id);
@@ -693,7 +735,41 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 setDragFileId(null);
                 await fileOps.moveFile(source, dest.id, dest.publicHierarchicalKey);
               }}
+              onTouchStart={(e) => {
+                const touch = e.touches[0];
+                touchStartRef.current = { x: touch.clientX, y: touch.clientY, id: file.id };
+              }}
+              onTouchMove={(e) => {
+                if (!touchStartRef.current || touchStartRef.current.id !== file.id) return;
+                const touch = e.touches[0];
+                const deltaX = touch.clientX - touchStartRef.current.x;
+                const deltaY = touch.clientY - touchStartRef.current.y;
+                // Only horizontal swipes (ignore vertical scroll)
+                if (Math.abs(deltaY) > Math.abs(deltaX)) return;
+                if (deltaX < -10) {
+                  setSwipeFileId(file.id);
+                  setSwipeOffset(Math.max(deltaX, -120));
+                }
+              }}
+              onTouchEnd={() => {
+                if (swipeFileId === file.id) {
+                  // Snap: if swiped more than 60px, stay open at -112px; otherwise close
+                  if (swipeOffset < -60) {
+                    setSwipeOffset(-112);
+                  } else {
+                    setSwipeFileId(null);
+                    setSwipeOffset(0);
+                  }
+                }
+                touchStartRef.current = null;
+              }}
               onClick={() => {
+                // Close any open swipe first
+                if (swipeFileId) {
+                  setSwipeFileId(null);
+                  setSwipeOffset(0);
+                  return;
+                }
                 if (file.isFolder && fileOps.viewMode !== "trash") {
                   fileOps.navigateToFolder(file.id, file.name);
                 } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
@@ -704,7 +780,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
-              className={`group flex items-center h-[56px] px-4 rounded-xl border cursor-pointer transition-all mb-1.5 ${
+              style={{ transform: `translateX(${rowOffset}px)`, transition: touchStartRef.current ? "none" : "transform 0.2s ease-out" }}
+              className={`group flex items-center h-[56px] px-4 rounded-xl border cursor-pointer transition-colors bg-bg-main ${
                 dropTargetId === file.id
                   ? "border-accent-green bg-accent-green/5"
                   : dragFileId === file.id
@@ -827,6 +904,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               >
                 <HugeiconsIcon icon={MoreHorizontalIcon} size={15} />
               </button>
+            </div>
             </div>
           );
         })}

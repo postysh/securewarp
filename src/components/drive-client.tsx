@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Sidebar } from "@/components/sidebar";
 import { FileBrowser } from "@/components/file-browser";
 import { AuthScreen } from "@/components/auth-screen";
+import { MobileNav } from "@/components/mobile-nav";
 import { UserKeysContext, type UserKeys } from "@/hooks/use-user-keys";
 import { FilesContext, useFiles } from "@/hooks/use-files";
 
@@ -73,20 +74,13 @@ export default function DriveClient() {
             <div className="relative z-20 h-full hidden md:block">
               <Sidebar collapsed={!sidebarOpen} />
             </div>
-            {/* Mobile sidebar — overlay */}
-            {sidebarOpen && (
-              <div className="fixed inset-0 z-30 md:hidden">
-                <div className="absolute inset-0 bg-black/40" onClick={toggleSidebar} />
-                <div className="relative z-10 h-full w-[220px] bg-bg-side">
-                  <Sidebar collapsed={false} />
-                </div>
-              </div>
-            )}
-            <div className={`flex-1 p-2 ${sidebarOpen ? "md:pl-0" : ""} relative z-10`}>
+            {/* Mobile sidebar is replaced by MobileNav bottom bar */}
+            <div className={`flex-1 p-2 ${sidebarOpen ? "md:pl-0" : ""} relative z-10 pb-[72px] md:pb-2`}>
               <div className="h-full rounded-xl border border-border-secondary bg-bg-main overflow-hidden">
                 <FileBrowser sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
               </div>
             </div>
+            <MobileNav onSearch={() => window.dispatchEvent(new Event("securewarp-open-search"))} />
           </div>
         </FilesContext.Provider>
       </UserKeysContext.Provider>

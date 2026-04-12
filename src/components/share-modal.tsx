@@ -241,7 +241,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
       <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={onClose} />
 
       <div
-        className="relative w-full max-w-[480px] mx-4 rounded-2xl bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
+        className="relative w-full h-full md:h-auto max-w-none md:max-w-[480px] md:max-h-[85vh] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in"
         style={{ boxShadow: "var(--shadow-l2)" }}
       >
         {/* Header */}

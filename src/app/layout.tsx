@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SecureWarp — E2E Encrypted Drive",
+  title: "SecureWarp - E2E Encrypted Drive",
   description: "Zero-knowledge encrypted cloud storage",
+  viewport: "width=device-width, initial-scale=1, viewport-fit=cover",
 };
 
 export default function RootLayout({

@@ -152,6 +152,11 @@ body {
   border-radius: 8px;
 }
 
+/* Safe area inset for bottom nav on notched iPhones */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 /* Landing page animations */
 @keyframes float-up {
   from { opacity: 0; transform: translateY(40px); }
