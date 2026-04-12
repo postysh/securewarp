@@ -146,22 +146,51 @@ export function useFiles(keys: {
     Map<string, { publicHierarchicalKey: string; privateHierarchicalKey: string }>
   >(new Map());
 
+  // File list cache — stale-while-revalidate. Keyed by
+  // `${mode}:${parentId}`. Shows cached data instantly on navigation,
+  // refreshes in background. Cleared on key change (login swap).
+  const fileListCache = useRef<Map<string, DecryptedFile[]>>(new Map());
+
   useEffect(() => {
     // Wipe on key change (which covers logout → login swap) and on
     // unmount. Plaintext private hierarchical keys live here and must
     // not outlive the session they were decrypted in.
     folderPrivHierCache.current = new Map();
+    fileListCache.current = new Map();
     return () => {
       folderPrivHierCache.current = new Map();
+      fileListCache.current = new Map();
     };
   }, [keys]);
+
+  /** Clear file list cache — call before any mutation refetch */
+  const invalidateCache = useCallback(() => {
+    fileListCache.current.clear();
+  }, []);
 
   const fetchFiles = useCallback(
     async (parentId: string | null = null, mode: ViewMode = "own", breadcrumbOverride?: { id: string | null; name: string }[], viewModeOverride?: ViewMode) => {
       if (!keys) return;
-      const isFirstLoad = !initialized;
-      setState((s) => ({ ...s, loading: isFirstLoad, error: null }));
-      setInitialized(true);
+      const cacheKey = `${mode}:${parentId ?? "root"}`;
+      const cached = fileListCache.current.get(cacheKey);
+
+      // Show cached data immediately if available (stale-while-revalidate)
+      if (cached) {
+        setState((s) => ({
+          ...s,
+          files: cached,
+          loading: false,
+          error: null,
+          currentFolder: mode !== "own" ? null : parentId,
+          viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
+          ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
+        }));
+        setInitialized(true);
+      } else {
+        const isFirstLoad = !initialized;
+        setState((s) => ({ ...s, loading: isFirstLoad, error: null }));
+        setInitialized(true);
+      }
 
       try {
         const url =
@@ -360,6 +389,9 @@ export function useFiles(keys: {
           }
         }
 
+        // Cache the results for instant navigation next time
+        fileListCache.current.set(cacheKey, results);
+
         setState((s) => ({
           ...s,
           files: results,
@@ -367,9 +399,6 @@ export function useFiles(keys: {
           callerPermission: data.callerPermission ?? null,
           currentFolder: mode !== "own" ? null : parentId,
           viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
-          // Breadcrumb: applied atomically with the data so there's
-          // no race between two setState calls. If the caller passed
-          // a breadcrumbOverride, use it. Otherwise preserve existing.
           ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
         }));
       } catch (err) {
