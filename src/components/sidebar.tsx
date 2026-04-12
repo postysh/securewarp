@@ -20,10 +20,10 @@ import File01Icon from "@hugeicons/core-free-icons/File01Icon";
 import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import Logout01Icon from "@hugeicons/core-free-icons/Logout01Icon";
 import Key01Icon from "@hugeicons/core-free-icons/Key01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import { useTheme } from "./theme-provider";
 import { Tooltip } from "./tooltip";
 import { WorkspaceSwitcher } from "./workspace-switcher";
-import { RecoveryKeyModal } from "./recovery-key-modal";
 import { SettingsModal } from "./settings-modal";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
@@ -135,7 +135,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         </button>
         <button onClick={() => { setRecoveryOpen(true); setOpen(false); }} className="w-full flex items-center gap-2.5 px-3 h-[32px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
           <HugeiconsIcon icon={Key01Icon} size={15} />
-          Recovery key
+          Recovery key info
         </button>
       </div>
       <div className="py-1 border-t border-border-tertiary">
@@ -152,7 +152,33 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
     <div className={`${collapsed ? "flex justify-center" : ""}`}>
       {collapsed ? <Tooltip label="Account">{button}</Tooltip> : button}
       {dropdown}
-      <RecoveryKeyModal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} />
+      {recoveryOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={() => setRecoveryOpen(false)} />
+          <div className="relative w-full max-w-[400px] mx-4 rounded-2xl bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in" style={{ boxShadow: "var(--shadow-l2)" }}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border-tertiary">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-[8px] bg-bg-overlay-tertiary flex items-center justify-center">
+                  <HugeiconsIcon icon={Key01Icon} size={18} color="var(--accent-yellow-primary)" />
+                </div>
+                <span className="text-[14px] font-semibold text-text-primary">Recovery Key</span>
+              </div>
+              <button onClick={() => setRecoveryOpen(false)} className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer">
+                <HugeiconsIcon icon={Cancel01Icon} size={16} />
+              </button>
+            </div>
+            <div className="px-5 py-5 space-y-3">
+              <p className="text-[13px] text-text-primary">Your 24-word recovery phrase was shown when you created your account.</p>
+              <p className="text-[12px] text-text-tertiary leading-relaxed">For security, the recovery phrase cannot be displayed again. If you saved it (copied or downloaded the file), keep it somewhere safe — it&apos;s the only way to recover your account if you forget your password.</p>
+              <p className="text-[12px] text-text-tertiary leading-relaxed">If you&apos;ve lost your recovery phrase, you can generate a new one by changing your password in Settings.</p>
+              <div className="flex justify-end pt-2">
+                <button onClick={() => setRecoveryOpen(false)} className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer">Got it</button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
