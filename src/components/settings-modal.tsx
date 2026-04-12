@@ -21,6 +21,8 @@ import { useTheme } from "./theme-provider";
 import { useUserKeys } from "@/hooks/use-user-keys";
 import { useAuth } from "@/hooks/use-auth";
 import { RecoveryKeyModal } from "./recovery-key-modal";
+import { ConfirmDialog } from "./confirm-dialog";
+import { clearLockCache } from "@/lib/auth/lock-cache";
 
 interface SettingsModalProps {
   open: boolean;
@@ -68,6 +70,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [pwStatus, setPwStatus] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const userKeys = useUserKeys();
   const auth = useAuth();
 
@@ -142,10 +146,38 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               )}
             </div>
             <SettingRow label="Delete account" description="Permanently delete your account and all data">
-              <button className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-accent-red hover:bg-accent-red/10 border border-accent-red/20 transition-colors cursor-pointer">
+              <button
+                onClick={() => setDeleteOpen(true)}
+                className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-accent-red hover:bg-accent-red/10 border border-accent-red/20 transition-colors cursor-pointer"
+              >
                 Delete
               </button>
             </SettingRow>
+            <ConfirmDialog
+              open={deleteOpen}
+              title="Delete your account?"
+              description="This will permanently delete your account, all files, shared access, and encryption keys. This cannot be undone."
+              confirmLabel="Delete account"
+              destructive
+              busy={deleteBusy}
+              busyLabel="Deleting…"
+              onConfirm={async () => {
+                setDeleteBusy(true);
+                try {
+                  const res = await fetch("/api/auth/delete-account", { method: "POST" });
+                  if (res.ok) {
+                    clearLockCache();
+                    sessionStorage.clear();
+                    window.location.href = "/signup";
+                  } else {
+                    setDeleteBusy(false);
+                  }
+                } catch {
+                  setDeleteBusy(false);
+                }
+              }}
+              onCancel={() => !deleteBusy && setDeleteOpen(false)}
+            />
           </div>
         );
       case "security":

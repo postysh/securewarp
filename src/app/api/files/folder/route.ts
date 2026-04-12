@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { createFolder, createFileKey } from "@/lib/db/files";
+import { createFolder, createFileKey, getFileById } from "@/lib/db/files";
 import { logError } from "@/lib/log";
 
 const FolderSchema = z.object({
@@ -34,6 +34,20 @@ export async function POST(request: Request) {
     }
 
     const data = parsed.data;
+
+    // If creating inside a parent folder, verify the caller has
+    // access to it (owns it or holds a file_keys row). This gate
+    // prevents a user from injecting an arbitrary parent_id for a
+    // folder they can't see.
+    if (data.parentId) {
+      const parent = await getFileById(data.parentId, session.userId);
+      if (!parent) {
+        return NextResponse.json({ error: "Parent folder not found" }, { status: 404 });
+      }
+      if (!parent.is_folder) {
+        return NextResponse.json({ error: "Parent is not a folder" }, { status: 400 });
+      }
+    }
 
     const folder = await createFolder({
       ownerId: session.userId,

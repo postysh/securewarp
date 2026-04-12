@@ -5,6 +5,7 @@ import { getFileById, grantFileAccess } from "@/lib/db/files";
 import { getPublicUserByEmail } from "@/lib/db/users";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
+import { createNotification } from "@/lib/db/notifications";
 import { logError } from "@/lib/log";
 
 const ShareSchema = z.object({
@@ -87,6 +88,15 @@ export async function POST(request: Request) {
       targetUserId: recipient.id,
       targetFileId: fileId,
       detail: permissionLevel ?? "editor",
+    });
+
+    createNotification({
+      userId: recipient.id,
+      type: "file_shared",
+      title: "File shared with you",
+      description: `${session.email} shared a file with you`,
+      fileId,
+      actorUserId: session.userId,
     });
 
     return NextResponse.json({

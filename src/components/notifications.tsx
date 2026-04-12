@@ -5,85 +5,112 @@ import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
 import FolderShared01Icon from "@hugeicons/core-free-icons/FolderShared01Icon";
-import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
-import Link01Icon from "@hugeicons/core-free-icons/Link01Icon";
 import CheckmarkCircle01Icon from "@hugeicons/core-free-icons/CheckmarkCircle01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 
 interface Notification {
   id: string;
-  type: "shared" | "upload" | "team" | "link" | "access";
+  type: string;
   title: string;
   description: string;
-  time: string;
+  actor_email?: string;
   read: boolean;
-  avatar: { initials: string; bg: string };
+  created_at: string;
 }
 
-const mockNotifications: Notification[] = [
-  {
-    id: "1",
-    type: "shared",
-    title: "Alice Martin shared a folder",
-    description: "Projects folder was shared with you",
-    time: "2 min ago",
-    read: false,
-    avatar: { initials: "AM", bg: "var(--accent-green-primary)" },
-  },
-  {
-    id: "2",
-    type: "upload",
-    title: "Upload complete",
-    description: "Architecture Diagram.pdf uploaded successfully",
-    time: "15 min ago",
-    read: false,
-    avatar: { initials: "SW", bg: "var(--accent-blue-primary)" },
-  },
-  {
-    id: "3",
-    type: "team",
-    title: "Sam Kim joined the workspace",
-    description: "Added to Personal workspace",
-    time: "1 hour ago",
-    read: false,
-    avatar: { initials: "SK", bg: "var(--accent-orange-primary)" },
-  },
-  {
-    id: "4",
-    type: "link",
-    title: "Link accessed",
-    description: "Someone viewed Q1 Budget.xlsx via shared link",
-    time: "3 hours ago",
-    read: true,
-    avatar: { initials: "??", bg: "var(--icon-tertiary)" },
-  },
-  {
-    id: "5",
-    type: "access",
-    title: "Access expired",
-    description: "John Doe's access to Financial Reports expired",
-    time: "Yesterday",
-    read: true,
-    avatar: { initials: "JD", bg: "var(--accent-blue-primary)" },
-  },
-];
+function timeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diff = Math.max(0, now - then);
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
 
-const typeIcons = {
-  shared: FolderShared01Icon,
-  upload: Upload04Icon,
-  team: UserGroupIcon,
-  link: Link01Icon,
-  access: CheckmarkCircle01Icon,
-};
+function typeIcon(type: string) {
+  switch (type) {
+    case "file_shared":
+    case "collaborator_joined":
+      return FolderShared01Icon;
+    case "file_unshared":
+    case "collaborator_left":
+      return Cancel01Icon;
+    case "permission_changed":
+      return UserGroupIcon;
+    default:
+      return CheckmarkCircle01Icon;
+  }
+}
+
+function typeColor(type: string): string {
+  switch (type) {
+    case "file_shared":
+    case "collaborator_joined":
+      return "var(--accent-blue-primary)";
+    case "file_unshared":
+    case "collaborator_left":
+      return "var(--accent-red-primary)";
+    case "permission_changed":
+      return "var(--accent-yellow-primary)";
+    default:
+      return "var(--accent-green-primary)";
+  }
+}
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, right: 0 });
 
   const unreadCount = notifications.filter((n) => !n.read).length;
+
+  const fetchNotifications = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/notifications");
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data.notifications ?? []);
+      }
+    } catch {
+      // silent
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Fetch on mount + every 30 seconds while open
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  useEffect(() => {
+    if (!open) return;
+    fetchNotifications();
+    const handler = (e: MouseEvent) => {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        btnRef.current &&
+        !btnRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, fetchNotifications]);
 
   const updatePos = useCallback(() => {
     if (!btnRef.current) return;
@@ -91,119 +118,145 @@ export function NotificationBell() {
     setPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
   }, []);
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        btnRef.current && !btnRef.current.contains(e.target as Node) &&
-        panelRef.current && !panelRef.current.contains(e.target as Node)
-      ) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
   const handleToggle = () => {
     if (!open) updatePos();
     setOpen(!open);
   };
 
-  const markAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  const markAllRead = async () => {
+    try {
+      await fetch("/api/notifications/read-all", { method: "POST" });
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch {
+      // silent
+    }
   };
 
-  const dropdown = open && createPortal(
-    <div
-      ref={panelRef}
-      className="fixed z-[9999] w-[360px] max-h-[480px] rounded-[10px] bg-bg-l3 border border-border-primary overflow-hidden flex flex-col"
-      style={{ top: pos.top, right: pos.right, boxShadow: "var(--shadow-l2)" }}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border-tertiary shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[14px] font-semibold text-text-primary">Notifications</span>
-          {unreadCount > 0 && (
-            <span className="flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-full bg-accent-red text-[10px] font-bold text-white">
-              {unreadCount}
-            </span>
-          )}
-        </div>
-        {unreadCount > 0 && (
-          <button
-            onClick={markAllRead}
-            className="text-[11px] text-accent-green font-medium hover:underline cursor-pointer"
-          >
-            Mark all read
-          </button>
-        )}
-      </div>
-
-      {/* Notification list */}
-      <div className="flex-1 overflow-y-auto">
-        {notifications.map((n) => {
-          const TypeIcon = typeIcons[n.type];
-          return (
-            <div
-              key={n.id}
-              className={`flex gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-bg-cell-hover border-b border-border-tertiary ${
-                !n.read ? "bg-bg-overlay-tertiary" : ""
-              }`}
-            >
-              {/* Avatar */}
-              <div className="relative shrink-0">
-                <div
-                  className="w-8 h-8 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white"
-                  style={{ backgroundColor: n.avatar.bg }}
-                >
-                  {n.avatar.initials}
-                </div>
-                <div
-                  className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-bg-l3 flex items-center justify-center border border-border-tertiary"
-                >
-                  <HugeiconsIcon icon={TypeIcon} size={10} color="var(--icon-secondary)" />
-                </div>
-              </div>
-
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p className={`text-[12px] leading-tight ${!n.read ? "text-text-primary font-medium" : "text-text-secondary"}`}>
-                    {n.title}
-                  </p>
-                  {!n.read && (
-                    <div className="w-2 h-2 rounded-full bg-accent-blue shrink-0 mt-1" />
-                  )}
-                </div>
-                <p className="text-[11px] text-text-tertiary mt-0.5 truncate">{n.description}</p>
-                <p className="text-[10px] text-text-disabled mt-1">{n.time}</p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Footer */}
-      <div className="px-4 py-2.5 border-t border-border-tertiary shrink-0">
-        <button className="w-full text-center text-[12px] text-accent-green font-medium hover:underline cursor-pointer">
-          View all notifications
-        </button>
-      </div>
-    </div>,
-    document.body
-  );
+  const markRead = async (id: string) => {
+    try {
+      await fetch("/api/notifications/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notificationId: id }),
+      });
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+      );
+    } catch {
+      // silent
+    }
+  };
 
   return (
     <>
       <button
         ref={btnRef}
         onClick={handleToggle}
-        className="relative flex items-center justify-center h-[30px] w-[30px] rounded-[8px] text-icon-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
+        className="relative p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer"
       >
         <HugeiconsIcon icon={Notification01Icon} size={16} />
         {unreadCount > 0 && (
-          <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-red border-2 border-bg-main" />
+          <span className="absolute -top-0.5 -right-0.5 w-[16px] h-[16px] rounded-full bg-accent-red text-white text-[9px] font-bold flex items-center justify-center">
+            {unreadCount > 9 ? "9+" : unreadCount}
+          </span>
         )}
       </button>
-      {dropdown}
+
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-[9999] w-[360px] rounded-xl bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
+            style={{
+              top: pos.top,
+              right: pos.right,
+              boxShadow: "var(--shadow-l2)",
+              maxHeight: "min(480px, 80vh)",
+            }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border-tertiary">
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] font-semibold text-text-primary">
+                  Notifications
+                </span>
+                {unreadCount > 0 && (
+                  <span className="text-[10px] font-medium text-accent-green bg-accent-green/10 px-1.5 py-0.5 rounded-full">
+                    {unreadCount} new
+                  </span>
+                )}
+              </div>
+              {unreadCount > 0 && (
+                <button
+                  onClick={markAllRead}
+                  className="text-[11px] text-text-link hover:underline cursor-pointer"
+                >
+                  Mark all read
+                </button>
+              )}
+            </div>
+
+            {/* List */}
+            <div className="overflow-y-auto" style={{ maxHeight: "min(400px, 70vh)" }}>
+              {loading && notifications.length === 0 ? (
+                <div className="flex items-center justify-center h-[80px]">
+                  <span className="text-[12px] text-text-disabled">Loading…</span>
+                </div>
+              ) : notifications.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 px-4">
+                  <HugeiconsIcon
+                    icon={Notification01Icon}
+                    size={24}
+                    color="var(--icon-tertiary)"
+                  />
+                  <span className="text-[12px] text-text-disabled mt-2">
+                    No notifications yet
+                  </span>
+                </div>
+              ) : (
+                notifications.map((n) => (
+                  <button
+                    key={n.id}
+                    onClick={() => {
+                      if (!n.read) markRead(n.id);
+                    }}
+                    className={`w-full flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-bg-cell-hover cursor-pointer ${
+                      !n.read ? "bg-accent-green/[0.03]" : ""
+                    }`}
+                  >
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: `color-mix(in srgb, ${typeColor(n.type)} 15%, transparent)` }}
+                    >
+                      <HugeiconsIcon
+                        icon={typeIcon(n.type)}
+                        size={16}
+                        color={typeColor(n.type)}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] font-medium text-text-primary truncate">
+                          {n.title}
+                        </span>
+                        {!n.read && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-accent-green shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[11px] text-text-tertiary mt-0.5 truncate">
+                        {n.description}
+                      </p>
+                      <span className="text-[10px] text-text-disabled mt-1 block">
+                        {timeAgo(n.created_at)}
+                      </span>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </>
   );
 }
