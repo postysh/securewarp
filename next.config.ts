@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 // ──────────────────────────────────────────────────────────────────────
@@ -41,6 +42,8 @@ const connectSources = [
   "https://*.supabase.co",
   // Cloudflare Web Analytics beacon data endpoint.
   "https://cloudflareinsights.com",
+  // Sentry error reporting.
+  "https://*.ingest.us.sentry.io",
 ];
 
 const scriptSources = [
@@ -137,4 +140,7 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  silent: true,
+  disableLogger: true,
+});
