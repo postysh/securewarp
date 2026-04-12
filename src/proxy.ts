@@ -7,7 +7,7 @@ const SESSION_COOKIE = "securewarp_session";
 const protectedRoutes = ["/drive"];
 const authRoutes = ["/login", "/signup"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get(SESSION_COOKIE)?.value;
 
