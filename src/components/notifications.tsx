@@ -131,6 +131,15 @@ export function NotificationBell() {
               }
             )
             .subscribe();
+
+          // Safari throws SecurityError when WebSocket reconnects on
+          // visibilitychange. Suppress it globally so it doesn't flood
+          // Sentry — polling handles the reconnect gap anyway.
+          window.addEventListener("error", (e) => {
+            if (e.message?.includes("The operation is insecure")) {
+              e.preventDefault();
+            }
+          });
         } catch {
           // Realtime failed — polling covers it
         }
