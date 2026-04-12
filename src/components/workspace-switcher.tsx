@@ -37,8 +37,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const [open, setOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null); // null = personal
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -87,40 +86,10 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
     setOpen(false);
   };
 
-  const createWorkspace = async () => {
-    if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      // Create the root folder first via the existing folder API
-      const folderRes = await fetch("/api/files/folder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(await buildWorkspaceFolder(newName.trim())),
-      });
-      const folderData = await folderRes.json();
-      if (!folderRes.ok) throw new Error(folderData.error);
-
-      // Create the workspace pointing to this folder
-      const wsRes = await fetch("/api/workspaces", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName.trim(), rootFolderId: folderData.folderId }),
-      });
-      const wsData = await wsRes.json();
-      if (!wsRes.ok) throw new Error(wsData.error);
-
-      // Refresh workspace list
-      const listRes = await fetch("/api/workspaces");
-      const listData = await listRes.json();
-      if (listData.workspaces) setWorkspaces(listData.workspaces);
-
-      setNewName("");
-      setOpen(false);
-    } catch {
-      // silent
-    } finally {
-      setCreating(false);
-    }
+  const refreshWorkspaces = async () => {
+    const res = await fetch("/api/workspaces");
+    const d = await res.json();
+    if (d.workspaces) setWorkspaces(d.workspaces);
   };
 
   const activeName = activeId
@@ -137,29 +106,8 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
       className="fixed z-[9999] w-[240px] rounded-[10px] bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
       style={{ top: pos.top, left: pos.left, boxShadow: "var(--shadow-l2)" }}
     >
-      {/* Create new — always at top */}
-      <div className="px-3 pt-3 pb-2">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="New workspace..."
-            className="flex-1 px-2 py-1.5 rounded-[6px] bg-bg-field text-[11px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-green/30"
-            onKeyDown={(e) => { if (e.key === "Enter") createWorkspace(); }}
-          />
-          <button
-            onClick={createWorkspace}
-            disabled={creating || !newName.trim()}
-            className="h-[28px] px-2.5 rounded-[6px] text-[11px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-40 shrink-0"
-          >
-            {creating ? "..." : <HugeiconsIcon icon={Add01Icon} size={14} />}
-          </button>
-        </div>
-      </div>
-
       {/* Workspace list — scrollable */}
-      <div className="max-h-[240px] overflow-y-auto border-t border-border-tertiary">
+      <div className="max-h-[280px] overflow-y-auto">
         <div className="py-1.5">
           {/* Personal */}
           <button
@@ -187,14 +135,36 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
               </div>
               <div className="flex-1 min-w-0 text-left">
                 <p className="text-[12px] text-text-primary truncate">{ws.name}</p>
-                <p className="text-[10px] text-text-disabled">{ws.role}</p>
+                <p className="text-[10px] text-text-disabled">{ws.role === "owner" ? "Created by you" : "Shared with you"}</p>
               </div>
               {ws.id === activeId && <HugeiconsIcon icon={Tick01Icon} size={14} color="var(--accent-green-primary)" />}
             </button>
           ))}
         </div>
       </div>
+      {/* Create workspace button */}
+      <div className="border-t border-border-tertiary py-1.5">
+        <button
+          onClick={() => { setOpen(false); setShowCreateModal(true); }}
+          className="w-full flex items-center gap-2.5 px-3 h-[36px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+        >
+          <HugeiconsIcon icon={Add01Icon} size={14} color="var(--icon-tertiary)" />
+          Create workspace
+        </button>
+      </div>
     </div>,
+    document.body
+  );
+
+  const createModal = showCreateModal && createPortal(
+    <CreateWorkspaceModal
+      onClose={() => setShowCreateModal(false)}
+      onCreate={async (ws) => {
+        await refreshWorkspaces();
+        switchToWorkspace(ws);
+        setShowCreateModal(false);
+      }}
+    />,
     document.body
   );
 
@@ -212,6 +182,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
           </button>
         </Tooltip>
         {dropdown}
+        {createModal}
       </>
     );
   }
@@ -232,7 +203,116 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
         <HugeiconsIcon icon={UnfoldMoreIcon} size={14} color="var(--icon-tertiary)" />
       </button>
       {dropdown}
+      {createModal}
     </>
+  );
+}
+
+function CreateWorkspaceModal({ onClose, onCreate }: {
+  onClose: () => void;
+  onCreate: (ws: Workspace) => void;
+}) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 50);
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !busy) onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose, busy]);
+
+  const handleCreate = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const folderPayload = await buildWorkspaceFolder(name.trim());
+      const folderRes = await fetch("/api/files/folder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(folderPayload),
+      });
+      const folderData = await folderRes.json();
+      if (!folderRes.ok) throw new Error(folderData.error || "Failed to create folder");
+
+      const wsRes = await fetch("/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), rootFolderId: folderData.folderId }),
+      });
+      const wsData = await wsRes.json();
+      if (!wsRes.ok) throw new Error(wsData.error || "Failed to create workspace");
+
+      onCreate({
+        id: wsData.workspaceId,
+        name: name.trim(),
+        rootFolderId: folderData.folderId,
+        ownerId: "",
+        role: "owner",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+      <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={() => !busy && onClose()} />
+      <div
+        className="relative w-full h-full md:h-auto max-w-none md:max-w-[420px] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in"
+        style={{ boxShadow: "var(--shadow-l2)" }}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border-tertiary">
+          <span className="text-[14px] font-semibold text-text-primary">Create workspace</span>
+          {!busy && (
+            <button onClick={onClose} className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+            </button>
+          )}
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); handleCreate(); }} className="px-5 py-5">
+          <label className="block text-[11px] font-medium text-text-disabled uppercase tracking-wider mb-1.5 font-mono">
+            Workspace name
+          </label>
+          <input
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Acme Corp"
+            disabled={busy}
+            className="w-full px-3.5 py-2.5 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40 disabled:opacity-50"
+          />
+          {error && (
+            <p className="mt-2 text-[11px] text-accent-red">{error}</p>
+          )}
+          <p className="mt-3 text-[11px] text-text-disabled leading-relaxed">
+            A workspace is a shared space. All files inside are accessible to every member you invite.
+          </p>
+          <div className="flex items-center justify-end gap-2 mt-5 flex-wrap">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !name.trim()}
+              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] shrink-0 whitespace-nowrap"
+            >
+              {busy ? "Creating..." : "Create"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
