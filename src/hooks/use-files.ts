@@ -1083,8 +1083,9 @@ export function useFiles(keys: {
           return { ok: false, error: data.error || "Rename failed" };
         }
 
-        // Optimistic local update — no refetch needed, the ciphertext
-        // round-trip added nothing the client didn't already compute.
+        // Optimistic local update + invalidate cache so other views
+        // pick up the new name on next navigation.
+        invalidateCache();
         setState((s) => ({
           ...s,
           files: s.files.map((f) => (f.id === file.id ? { ...f, name: trimmed } : f)),
@@ -1197,6 +1198,7 @@ export function useFiles(keys: {
           body: JSON.stringify({ starred }),
         });
         if (!res.ok) return { ok: false };
+        invalidateCache();
         setState((s) => ({
           ...s,
           files: s.files.map((f) =>
@@ -1833,7 +1835,7 @@ export function useFiles(keys: {
         });
         const data = await res.json();
         if (!res.ok) return { ok: false, error: data.error || "Failed to remove" };
-        // Remove the file from local state immediately
+        invalidateCache();
         setState((s) => ({
           ...s,
           files: s.files.filter((f) => f.id !== fileId),
@@ -2365,6 +2367,7 @@ export function useFiles(keys: {
     leaveWorkspace,
     navigateToBreadcrumb,
     clearError,
+    invalidateCache,
     searchFiles,
     exportAllAsZip,
     prefetchFolder,

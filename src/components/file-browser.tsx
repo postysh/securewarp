@@ -1065,6 +1065,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({ fileId: contextMenu.fileId, labelId: label.id, action: isAssigned ? "remove" : "add" }),
                             });
+                            fileOps.invalidateCache();
                             await fileOps.fetchFiles(fileOps.currentFolder, fileOps.viewMode);
                             setContextMenu(null);
                           }}
