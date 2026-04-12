@@ -1030,7 +1030,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 return (
                   <div className="border-t border-border-tertiary mt-1 pt-1">
                     <p className="px-3 py-1 text-[10px] font-mono uppercase text-text-disabled">Labels</p>
-                    <div className="max-h-[180px] overflow-y-auto">
+                    <div className="max-h-[120px] overflow-y-auto">
                     {userLabels.map((label) => {
                       const isAssigned = assignedIds.has(label.id);
                       return (
