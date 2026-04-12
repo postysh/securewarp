@@ -1,5 +1,5 @@
-import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 // ──────────────────────────────────────────────────────────────────────
 // HTTP security headers
@@ -141,6 +141,8 @@ const nextConfig: NextConfig = {
 };
 
 export default withSentryConfig(nextConfig, {
-  silent: true,
-  disableLogger: true,
+  org: "securewarp",
+  project: "securewarp",
+  silent: !process.env.CI,
+  tunnelRoute: "/sentry-tunnel",
 });
