@@ -15,12 +15,18 @@ export async function GET() {
 
     const { data, error } = await supabase
       .from("user_pins")
-      .select("file_id, sort_order")
+      .select("file_id, sort_order, file:files!user_pins_file_id_fkey(is_folder)")
       .eq("user_id", session.userId)
       .order("sort_order");
     if (error) throw error;
 
-    return NextResponse.json({ pins: data || [] });
+    const pins = (data || []).map((p) => ({
+      file_id: p.file_id,
+      sort_order: p.sort_order,
+      is_folder: (p.file as { is_folder: boolean } | null)?.is_folder ?? false,
+    }));
+
+    return NextResponse.json({ pins });
   } catch (err) {
     logError("pins.list", err);
     return NextResponse.json({ error: "Failed" }, { status: 500 });

@@ -185,15 +185,22 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     setContextMenu(null);
   }, [fileOps.files, fileOps.viewMode, fileOps.currentFolder]);
 
-  // Fetch pinned IDs and user labels
+  // Fetch pinned IDs on mount
   useEffect(() => {
     fetch("/api/pins").then((r) => r.json()).then((d) => {
       if (d.pins) setPinnedIds(new Set(d.pins.map((p: { file_id: string }) => p.file_id)));
     }).catch(() => {});
-    fetch("/api/labels").then((r) => r.json()).then((d) => {
-      if (d.labels) setUserLabels(d.labels);
-    }).catch(() => {});
   }, []);
+
+  // Refetch labels every time context menu opens so newly created
+  // labels from the sidebar appear immediately
+  useEffect(() => {
+    if (contextMenu) {
+      fetch("/api/labels").then((r) => r.json()).then((d) => {
+        if (d.labels) setUserLabels(d.labels);
+      }).catch(() => {});
+    }
+  }, [contextMenu]);
 
   // Map decrypted files to display format
   const displayFiles = fileOps.files.map((f) => ({

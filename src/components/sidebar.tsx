@@ -220,10 +220,10 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   useEffect(() => {
     fetch("/api/pins").then((r) => r.json()).then((d) => {
       if (d.pins) {
-        // Resolve pin names from the file list
-        const resolved = d.pins.map((p: { file_id: string }) => {
+        const resolved = d.pins.map((p: { file_id: string; is_folder: boolean }) => {
+          // Try to get the decrypted name from the current file list
           const f = fileOps.files.find((x) => x.id === p.file_id);
-          return { file_id: p.file_id, name: f?.name ?? "File", isFolder: f?.isFolder ?? false };
+          return { file_id: p.file_id, name: f?.name ?? "Pinned item", isFolder: p.is_folder };
         });
         setPins(resolved);
       }
