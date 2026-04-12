@@ -101,6 +101,9 @@ interface UseFilesState {
   breadcrumb: { id: string | null; name: string }[];
   viewMode: ViewMode;
   callerPermission: string | null;
+  // Active workspace context. When set, "My Drive" means the
+  // workspace root, not the personal root.
+  activeWorkspace: { id: string; rootFolderId: string; name: string } | null;
 }
 
 /**
@@ -120,6 +123,7 @@ export function useFiles(keys: {
     error: null,
     currentFolder: null,
     callerPermission: null,
+    activeWorkspace: null,
     breadcrumb: [{ id: null, name: "My Drive" }],
     viewMode: "own",
   });
@@ -1903,6 +1907,11 @@ export function useFiles(keys: {
     // the caller owns it or accesses it via an inherited file_keys row.
     // Going back to null switches to the owned-root view.
     if (folderId === null) {
+      if (state.activeWorkspace) {
+        setState((s) => ({ ...s, currentFolder: state.activeWorkspace!.rootFolderId, callerPermission: null, viewMode: "own", breadcrumb: [{ id: state.activeWorkspace!.rootFolderId, name: state.activeWorkspace!.name }] }));
+        await fetchFiles(state.activeWorkspace.rootFolderId, "own");
+        return;
+      }
       setState((s) => ({ ...s, currentFolder: null, callerPermission: null, viewMode: "own", breadcrumb: [{ id: null, name: "My Drive" }] }));
     } else {
       setState((s) => {
@@ -1940,14 +1949,27 @@ export function useFiles(keys: {
    * breadcrumb root so the view is clean (not nested under My Drive).
    * Clicking the breadcrumb root re-fetches the workspace root.
    */
-  const navigateToWorkspace = useCallback(async (rootFolderId: string, workspaceName: string) => {
+  const navigateToWorkspace = useCallback(async (workspaceId: string, rootFolderId: string, workspaceName: string) => {
     setState((s) => ({
       ...s,
       currentFolder: rootFolderId,
       viewMode: "own",
+      activeWorkspace: { id: workspaceId, rootFolderId, name: workspaceName },
       breadcrumb: [{ id: rootFolderId, name: workspaceName }],
     }));
     await fetchFiles(rootFolderId, "own");
+  }, [fetchFiles]);
+
+  const leaveWorkspace = useCallback(() => {
+    setState((s) => ({
+      ...s,
+      currentFolder: null,
+      callerPermission: null,
+      activeWorkspace: null,
+      viewMode: "own",
+      breadcrumb: [{ id: null, name: "My Drive" }],
+    }));
+    fetchFiles(null, "own");
   }, [fetchFiles]);
 
   const navigateToBreadcrumb = useCallback(async (index: number) => {
@@ -1976,9 +1998,20 @@ export function useFiles(keys: {
    */
   const setViewMode = useCallback(
     async (mode: ViewMode) => {
-      await fetchFiles(null, mode);
+      if (mode === "own" && state.activeWorkspace) {
+        // "My Drive" while in a workspace → go to workspace root
+        setState((s) => ({
+          ...s,
+          currentFolder: state.activeWorkspace!.rootFolderId,
+          viewMode: "own",
+          breadcrumb: [{ id: state.activeWorkspace!.rootFolderId, name: state.activeWorkspace!.name }],
+        }));
+        await fetchFiles(state.activeWorkspace.rootFolderId, "own");
+      } else {
+        await fetchFiles(null, mode);
+      }
     },
-    [fetchFiles]
+    [fetchFiles, state.activeWorkspace]
   );
 
   /**
@@ -2254,6 +2287,7 @@ export function useFiles(keys: {
     setViewMode,
     navigateToFolder,
     navigateToWorkspace,
+    leaveWorkspace,
     navigateToBreadcrumb,
     clearError,
     searchFiles,

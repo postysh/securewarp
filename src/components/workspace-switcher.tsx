@@ -77,13 +77,13 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
 
   const switchToPersonal = () => {
     setActiveId(null);
-    fileOps.setViewMode("own");
+    fileOps.leaveWorkspace();
     setOpen(false);
   };
 
   const switchToWorkspace = (ws: Workspace) => {
     setActiveId(ws.id);
-    fileOps.navigateToWorkspace(ws.rootFolderId, ws.name);
+    fileOps.navigateToWorkspace(ws.id, ws.rootFolderId, ws.name);
     setOpen(false);
   };
 
