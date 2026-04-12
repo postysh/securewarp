@@ -341,13 +341,17 @@ BEGIN
   UPDATE files SET deleted_at = NULL WHERE id IN (SELECT id FROM subtree);
 END $$;
 
+-- Output columns are `out_*` prefixed to avoid a PL/pgSQL ambiguity
+-- between the RETURNS TABLE variables and the identically-named
+-- source columns on `files` / `file_chunks`. If you rename the
+-- outputs you MUST also update the /purge route's destructuring.
 CREATE OR REPLACE FUNCTION subtree_storage_keys(p_root uuid, p_owner uuid)
-RETURNS TABLE(file_id uuid, storage_key text)
+RETURNS TABLE(out_file_id uuid, out_storage_key text)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
   RETURN QUERY
   WITH RECURSIVE subtree AS (
-    SELECT id, storage_key FROM files WHERE id = p_root AND owner_id = p_owner
+    SELECT f.id, f.storage_key FROM files f WHERE f.id = p_root AND f.owner_id = p_owner
     UNION ALL
     SELECT f.id, f.storage_key FROM files f INNER JOIN subtree s ON f.parent_id = s.id
     WHERE f.owner_id = p_owner

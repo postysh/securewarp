@@ -62,10 +62,14 @@ export async function POST(request: Request) {
       throw new Error(`Subtree lookup failed: ${subErr.message}`);
     }
 
-    // rpc returns [{file_id, storage_key}, ...] including both the
-    // files.storage_key (legacy single-blob) and file_chunks rows.
-    const rows = (subtree || []) as { storage_key: string | null }[];
-    const storageKeys = rows.map((r) => r.storage_key).filter((k): k is string => !!k);
+    // rpc returns [{out_file_id, out_storage_key}, ...] including both
+    // the files.storage_key (legacy single-blob) and file_chunks rows.
+    // Columns are prefixed to avoid a PL/pgSQL ambiguity between the
+    // RETURNS TABLE output and the source columns.
+    const rows = (subtree || []) as { out_storage_key: string | null }[];
+    const storageKeys = rows
+      .map((r) => r.out_storage_key)
+      .filter((k): k is string => !!k);
 
     // R2 cleanup (best-effort). A failed delete here leaks storage
     // but must not block the DB purge.
