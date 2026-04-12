@@ -60,23 +60,19 @@ export async function GET(request: Request) {
       files = await getInheritedChildren(parentId, session.userId);
     }
 
-    // Enrich each file with its collaborator list and per-user star state.
+    // Enrich each file with collaborators, stars, and labels.
+    // Run all three queries in parallel to minimize latency.
     const fileIds = files.map((f) => f.id);
-    const collaboratorMap = await getCollaboratorsBulk(fileIds);
 
-    // Per-user stars — one query for all files in this batch
-    const { data: starRows } = await supabase
-      .from("user_stars")
-      .select("file_id")
-      .eq("user_id", session.userId)
-      .in("file_id", fileIds);
+    const [collaboratorMap, starResult, labelResult] = await Promise.all([
+      getCollaboratorsBulk(fileIds),
+      supabase.from("user_stars").select("file_id").eq("user_id", session.userId).in("file_id", fileIds),
+      supabase.from("file_labels").select("file_id, label_id, label:labels!file_labels_label_id_fkey(id, name, color, user_id)").in("file_id", fileIds),
+    ]);
+
+    const { data: starRows } = starResult;
+    const { data: fileLabelRows } = labelResult;
     const starredSet = new Set((starRows || []).map((r) => r.file_id as string));
-
-    // File labels — only this user's labels (labels are per-user)
-    const { data: fileLabelRows } = await supabase
-      .from("file_labels")
-      .select("file_id, label_id, label:labels!file_labels_label_id_fkey(id, name, color, user_id)")
-      .in("file_id", fileIds);
     const labelsByFile = new Map<string, { id: string; name: string; color: string }[]>();
     for (const row of (fileLabelRows || [])) {
       const fid = row.file_id as string;

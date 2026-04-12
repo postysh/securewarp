@@ -44,6 +44,9 @@ const connectSources = [
   "https://cloudflareinsights.com",
   // Sentry error reporting.
   "https://*.ingest.us.sentry.io",
+  // Vercel Speed Insights.
+  "https://va.vercel-scripts.com",
+  "https://vitals.vercel-insights.com",
 ];
 
 const scriptSources = [
@@ -52,6 +55,8 @@ const scriptSources = [
   "https://challenges.cloudflare.com",
   // Cloudflare Web Analytics beacon, auto-injected by the proxy.
   "https://static.cloudflareinsights.com",
+  // Vercel Speed Insights.
+  "https://va.vercel-scripts.com",
   // Required for Next.js hydration inline bootstrap.
   "'unsafe-inline'",
   // Required for Next.js dev HMR. Kept in prod because removing it
