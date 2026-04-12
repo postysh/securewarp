@@ -6,6 +6,7 @@ import {
   getCollaboratorsBulk,
   getFileById,
   getInheritedChildren,
+  getTrashedForUser,
   type FileRowWithKey,
 } from "@/lib/db/files";
 import { logError } from "@/lib/log";
@@ -19,10 +20,16 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const shared = searchParams.get("shared") === "true";
+    const trash = searchParams.get("trash") === "true";
     const parentId = searchParams.get("parentId") || null;
 
     let files: FileRowWithKey[];
-    if (shared) {
+    if (trash) {
+      // Flat top-of-trash view. Only surfaces roots — if the user
+      // trashed a folder, its recursively-marked children stay
+      // hidden behind it.
+      files = await getTrashedForUser(session.userId);
+    } else if (shared) {
       // Flat "Shared with me" view — ignores parentId.
       files = await getSharedWithUser(session.userId);
     } else if (parentId === null) {

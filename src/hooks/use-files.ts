@@ -69,7 +69,7 @@ export interface DecryptedFile {
   collaborators: FileCollaboratorPreview[];
 }
 
-export type ViewMode = "own" | "shared";
+export type ViewMode = "own" | "shared" | "trash";
 
 export type PermissionLevel = "editor" | "viewer";
 
@@ -157,11 +157,13 @@ export function useFiles(keys: {
 
       try {
         const url =
-          mode === "shared"
-            ? "/api/files/list?shared=true"
-            : parentId
-              ? `/api/files/list?parentId=${parentId}`
-              : "/api/files/list";
+          mode === "trash"
+            ? "/api/files/list?trash=true"
+            : mode === "shared"
+              ? "/api/files/list?shared=true"
+              : parentId
+                ? `/api/files/list?parentId=${parentId}`
+                : "/api/files/list";
         const res = await fetch(url);
         const data = await res.json();
 
@@ -277,14 +279,16 @@ export function useFiles(keys: {
           ...s,
           files: decrypted,
           loading: false,
-          currentFolder: mode === "shared" ? null : parentId,
+          currentFolder: mode === "shared" || mode === "trash" ? null : parentId,
           viewMode: mode,
           breadcrumb:
-            mode === "shared"
-              ? [{ id: null, name: "Shared with me" }]
-              : s.viewMode === "shared" && mode === "own"
-                ? [{ id: null, name: "My Drive" }]
-                : s.breadcrumb,
+            mode === "trash"
+              ? [{ id: null, name: "Trash" }]
+              : mode === "shared"
+                ? [{ id: null, name: "Shared with me" }]
+                : (s.viewMode === "shared" || s.viewMode === "trash") && mode === "own"
+                  ? [{ id: null, name: "My Drive" }]
+                  : s.breadcrumb,
         }));
       } catch (err) {
         console.error("Fetch files error:", err);
@@ -671,6 +675,90 @@ export function useFiles(keys: {
       setState((s) => ({ ...s, error: "Failed to create folder" }));
     }
   }, [keys, fetchFiles]);
+
+  /**
+   * Rename a file or folder. The server never sees the new name —
+   * the client re-encrypts `{name, type, size}` under the file's
+   * existing session key (no rotation) and ships only the ciphertext.
+   * Unwraps the session key via either the direct `file_keys` row or
+   * the Phase 3 `parent_keys_claim` chain, matching how the list
+   * path decrypts metadata on fetch.
+   */
+  const renameFile = useCallback(
+    async (
+      file: DecryptedFile,
+      newName: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
+      if (!keys) return { ok: false, error: "Not signed in" };
+      const trimmed = newName.trim();
+      if (trimmed.length === 0) return { ok: false, error: "Name cannot be empty" };
+      if (trimmed === file.name) return { ok: true };
+
+      let sessionKey: Uint8Array | null = null;
+      try {
+        if (file.encryptedPrivateHierarchicalKey) {
+          // Direct-row path — owner or direct collaborator.
+          const privHier = unwrapPrivateHierarchicalKey(
+            file.encryptedPrivateHierarchicalKey,
+            file.wrappedByPublicKey,
+            keys.encryptionPrivateKey
+          );
+          sessionKey = unwrapSessionKeyFromFile(
+            file.encryptedSessionKeyByFile,
+            file.sessionKeyNonce,
+            file.ownerPublicKey,
+            privHier
+          );
+        } else if (file.parentKeysClaim && file.parentKeysClaimWrappedBy && file.parentId) {
+          // Inherited (Phase 3) — walk through the parent's cached
+          // private hier key. The cache is populated on the fetch that
+          // rendered this row, so as long as the user has an open view
+          // on the parent folder this works without extra requests.
+          const parentEntry = folderPrivHierCache.current.get(file.parentId);
+          if (!parentEntry) {
+            return { ok: false, error: "Parent folder not loaded — reopen it first" };
+          }
+          const unwrapped = unwrapParentKeysClaim(
+            file.parentKeysClaim,
+            file.parentKeysClaimWrappedBy,
+            parentEntry.privateHierarchicalKey
+          );
+          sessionKey = unwrapped.sessionKey;
+        } else {
+          return { ok: false, error: "No decrypt path for this file" };
+        }
+
+        const encryptedMetadata = encryptMetadata(
+          { name: trimmed, type: file.type, size: file.size },
+          sessionKey
+        );
+
+        const res = await fetch(`/api/files/${file.id}/rename`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ encryptedMetadata: JSON.stringify(encryptedMetadata) }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          return { ok: false, error: data.error || "Rename failed" };
+        }
+
+        // Optimistic local update — no refetch needed, the ciphertext
+        // round-trip added nothing the client didn't already compute.
+        setState((s) => ({
+          ...s,
+          files: s.files.map((f) => (f.id === file.id ? { ...f, name: trimmed } : f)),
+        }));
+        return { ok: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Rename failed";
+        return { ok: false, error: message };
+      } finally {
+        if (sessionKey) sessionKey.fill(0);
+      }
+    },
+    [keys]
+  );
 
   const deleteItem = useCallback(async (fileId: string) => {
     try {
@@ -1500,6 +1588,70 @@ export function useFiles(keys: {
     [fetchFiles]
   );
 
+  /**
+   * Restore a trashed file or folder. Recursive on the server —
+   * restores every descendant marked with the same deleted_at.
+   */
+  const restoreItem = useCallback(
+    async (fileId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      try {
+        const res = await fetch("/api/files/restore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId }),
+        });
+        const data = await res.json();
+        if (!res.ok) return { ok: false, error: data.error || "Restore failed" };
+        await fetchFiles(null, state.viewMode);
+        return { ok: true };
+      } catch {
+        return { ok: false, error: "Restore failed" };
+      }
+    },
+    [fetchFiles, state.viewMode]
+  );
+
+  /**
+   * Permanently delete a single trashed item (and every descendant).
+   * Cleans up R2 blobs.
+   */
+  const purgeItem = useCallback(
+    async (fileId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      try {
+        const res = await fetch("/api/files/purge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId }),
+        });
+        const data = await res.json();
+        if (!res.ok) return { ok: false, error: data.error || "Purge failed" };
+        await fetchFiles(null, state.viewMode);
+        return { ok: true };
+      } catch {
+        return { ok: false, error: "Purge failed" };
+      }
+    },
+    [fetchFiles, state.viewMode]
+  );
+
+  /**
+   * Empty the trash — hard-delete every trashed item for this user.
+   */
+  const emptyTrash = useCallback(
+    async (): Promise<{ ok: true; purged: number } | { ok: false; error: string }> => {
+      try {
+        const res = await fetch("/api/files/trash/empty", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) return { ok: false, error: data.error || "Empty trash failed" };
+        await fetchFiles(null, "trash");
+        return { ok: true, purged: data.purged ?? 0 };
+      } catch {
+        return { ok: false, error: "Empty trash failed" };
+      }
+    },
+    [fetchFiles]
+  );
+
   const clearError = useCallback(() => {
     setState((s) => ({ ...s, error: null }));
   }, []);
@@ -1511,7 +1663,11 @@ export function useFiles(keys: {
     uploadFile,
     downloadFile,
     createFolder,
+    renameFile,
     deleteItem,
+    restoreItem,
+    purgeItem,
+    emptyTrash,
     shareFile,
     unshareFile,
     leaveShare,

@@ -155,7 +155,8 @@ export async function getFilesForUser(
     .select(LIST_SELECT)
     .eq("owner_id", userId)
     .eq("file_keys.user_id", userId)
-    .eq("upload_complete", true);
+    .eq("upload_complete", true)
+    .is("deleted_at", null);
 
   if (parentId) {
     query = query.eq("parent_id", parentId);
@@ -183,6 +184,7 @@ export async function getSharedWithUser(userId: string): Promise<FileRowWithKey[
     .eq("file_keys.user_id", userId)
     .neq("owner_id", userId)
     .eq("upload_complete", true)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (error) throw new Error(`Failed to fetch shared files: ${error.message}`);
@@ -218,6 +220,7 @@ export async function getInheritedChildren(
     .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
     .eq("parent_id", parentId)
     .eq("upload_complete", true)
+    .is("deleted_at", null)
     .order("is_folder", { ascending: false })
     .order("created_at", { ascending: false });
   if (error) throw new Error(`Failed to fetch children: ${error.message}`);
@@ -264,6 +267,7 @@ export async function getFileById(
     .eq("id", fileId)
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
+    .is("deleted_at", null)
     .single();
 
   if (error && error.code !== "PGRST116") {
@@ -518,6 +522,100 @@ export async function setCollaboratorPermission(
     .eq("file_id", fileId)
     .eq("user_id", userId);
   if (error) throw new Error(`Failed to update permission: ${error.message}`);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 6 — trash (soft delete)
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Owner-only soft delete. Calls the `soft_delete_subtree` recursive
+ * CTE so trashing a folder marks every descendant in one statement.
+ * Returns the number of rows touched (0 means the file wasn't found
+ * or wasn't owned by the caller — the route handler treats this as
+ * 404 to match the "don't reveal existence" convention).
+ */
+export async function trashSubtree(fileId: string, ownerId: string): Promise<void> {
+  const { error } = await supabase.rpc("soft_delete_subtree", {
+    p_root: fileId,
+    p_owner: ownerId,
+  });
+  if (error) throw new Error(`Failed to trash: ${error.message}`);
+}
+
+/**
+ * Owner-only restore. Uses the matching `restore_subtree` CTE which
+ * only reverses rows whose `deleted_at` matches the root's — so a
+ * file the user individually trashed earlier stays trashed when
+ * their parent folder is restored later.
+ */
+export async function restoreSubtree(fileId: string, ownerId: string): Promise<void> {
+  const { error } = await supabase.rpc("restore_subtree", {
+    p_root: fileId,
+    p_owner: ownerId,
+  });
+  if (error) throw new Error(`Failed to restore: ${error.message}`);
+}
+
+/**
+ * List trashed items at the "top level" of trash — i.e. rows whose
+ * parent is either not deleted or has a different `deleted_at` than
+ * this row. That way a trashed folder surfaces once, and its
+ * recursively-trashed children stay hidden behind it.
+ *
+ * Returned shape matches `getFilesForUser` so the same client-side
+ * decrypt loop can render it without branching.
+ */
+export async function getTrashedForUser(userId: string): Promise<FileRowWithKey[]> {
+  // Pull every trashed row the user owns. Grouping by the roots is
+  // cheap at this point because trash sizes are small in practice;
+  // if that ever changes we can move this into a SQL function.
+  const { data: allTrashed, error } = await supabase
+    .from("files")
+    .select(LIST_SELECT)
+    .eq("owner_id", userId)
+    .eq("file_keys.user_id", userId)
+    .eq("upload_complete", true)
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false });
+  if (error) throw new Error(`Failed to fetch trashed: ${error.message}`);
+
+  const rows = (allTrashed || []) as unknown as (FileJoinRow & {
+    id: string;
+    parent_id: string | null;
+    deleted_at: string;
+  })[];
+  const byId = new Map(rows.map((r) => [r.id, r]));
+
+  // A row is a "top-level trash entry" when its parent isn't trashed
+  // (or has a different deleted_at — meaning the parent was trashed
+  // separately at a different time and they should surface as peers).
+  const tops = rows.filter((r) => {
+    if (!r.parent_id) return true;
+    const parent = byId.get(r.parent_id);
+    if (!parent) return true; // parent isn't in this user's trash
+    return parent.deleted_at !== r.deleted_at;
+  });
+
+  return tops.map((row) => shapeRow(row as unknown as FileJoinRow));
+}
+
+/**
+ * Rename: overwrite the `encrypted_metadata` blob. Server never sees
+ * plaintext — the caller has already re-encrypted under the file's
+ * session key. The access gate is the caller's `file_keys` row (any
+ * collaborator may rename, matching Skiff/Proton semantics); the
+ * route handler checks this via `getFileById` before calling us.
+ */
+export async function updateFileMetadata(
+  fileId: string,
+  encryptedMetadata: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("files")
+    .update({ encrypted_metadata: encryptedMetadata })
+    .eq("id", fileId);
+  if (error) throw new Error(`Failed to update metadata: ${error.message}`);
 }
 
 export async function deleteFile(fileId: string, ownerId: string): Promise<string | null> {

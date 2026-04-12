@@ -301,6 +301,61 @@ CREATE TABLE security_audit (
 CREATE INDEX security_audit_event_time_idx ON security_audit (event_type, occurred_at DESC);
 CREATE INDEX security_audit_actor_idx ON security_audit (actor_user_id, occurred_at DESC);
 CREATE INDEX security_audit_target_file_idx ON security_audit (target_file_id, occurred_at DESC);
+
+-- Phase 6: trash (soft delete). `delete` endpoint now sets
+-- `deleted_at = now()` via the recursive `soft_delete_subtree` helper;
+-- `restore` reverses it; `purge` / `trash/empty` hard-delete trashed
+-- rows and their R2 blobs.
+ALTER TABLE files ADD COLUMN deleted_at timestamptz;
+CREATE INDEX files_live_by_parent_idx
+  ON files (owner_id, parent_id)
+  WHERE deleted_at IS NULL;
+CREATE INDEX files_trashed_by_owner_idx
+  ON files (owner_id, deleted_at)
+  WHERE deleted_at IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION soft_delete_subtree(p_root uuid, p_owner uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  WITH RECURSIVE subtree AS (
+    SELECT id FROM files WHERE id = p_root AND owner_id = p_owner AND deleted_at IS NULL
+    UNION ALL
+    SELECT f.id FROM files f INNER JOIN subtree s ON f.parent_id = s.id
+    WHERE f.owner_id = p_owner AND f.deleted_at IS NULL
+  )
+  UPDATE files SET deleted_at = now() WHERE id IN (SELECT id FROM subtree);
+END $$;
+
+CREATE OR REPLACE FUNCTION restore_subtree(p_root uuid, p_owner uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_root_deleted_at timestamptz;
+BEGIN
+  SELECT deleted_at INTO v_root_deleted_at FROM files WHERE id = p_root AND owner_id = p_owner;
+  IF v_root_deleted_at IS NULL THEN RETURN; END IF;
+  WITH RECURSIVE subtree AS (
+    SELECT id FROM files WHERE id = p_root AND owner_id = p_owner
+    UNION ALL
+    SELECT f.id FROM files f INNER JOIN subtree s ON f.parent_id = s.id
+    WHERE f.owner_id = p_owner AND f.deleted_at = v_root_deleted_at
+  )
+  UPDATE files SET deleted_at = NULL WHERE id IN (SELECT id FROM subtree);
+END $$;
+
+CREATE OR REPLACE FUNCTION subtree_storage_keys(p_root uuid, p_owner uuid)
+RETURNS TABLE(file_id uuid, storage_key text)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  RETURN QUERY
+  WITH RECURSIVE subtree AS (
+    SELECT id, storage_key FROM files WHERE id = p_root AND owner_id = p_owner
+    UNION ALL
+    SELECT f.id, f.storage_key FROM files f INNER JOIN subtree s ON f.parent_id = s.id
+    WHERE f.owner_id = p_owner
+  )
+  SELECT s.id, s.storage_key FROM subtree s WHERE s.storage_key IS NOT NULL
+  UNION ALL
+  SELECT fc.file_id, fc.storage_key FROM file_chunks fc INNER JOIN subtree s ON fc.file_id = s.id;
+END $$;
 ```
 
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from

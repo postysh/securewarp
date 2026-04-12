@@ -166,7 +166,11 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   // still semantically inside "Shared with me" — the breadcrumb root
   // reflects that truth.
   const active =
-    fileOps.breadcrumb[0]?.name === "Shared with me" ? "shared" : "drive";
+    fileOps.viewMode === "trash"
+      ? "trash"
+      : fileOps.breadcrumb[0]?.name === "Shared with me"
+        ? "shared"
+        : "drive";
   const storage = useStorageUsage();
   const usedPct = storage.maxBytes > 0 ? Math.min((storage.usedBytes / storage.maxBytes) * 100, 100) : 0;
   const usedLabel = formatStorageBytes(storage.usedBytes);
@@ -205,8 +209,8 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
             const handleClick = () => {
               if (item.id === "drive") fileOps.setViewMode("own");
               else if (item.id === "shared") fileOps.setViewMode("shared");
-              // Other items (recent/starred/trash) are placeholders — keep
-              // the current view instead of triggering a dead nav.
+              else if (item.id === "trash") fileOps.setViewMode("trash");
+              // Other items (recent/starred) are placeholders.
             };
             const btn = (
               <button

@@ -17,6 +17,7 @@ import SidebarLeft01Icon from "@hugeicons/core-free-icons/SidebarLeft01Icon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import StarIcon from "@hugeicons/core-free-icons/StarIcon";
 import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
+import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
 import Move01Icon from "@hugeicons/core-free-icons/Move01Icon";
 import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
@@ -29,6 +30,8 @@ import { Facepile } from "./facepile";
 import { CommandPalette } from "./command-palette";
 import { NewFolderModal } from "./new-folder-modal";
 import { ShareModal } from "./share-modal";
+import { RenameModal } from "./rename-modal";
+import { ConfirmDialog } from "./confirm-dialog";
 import { MembersModal } from "./members-modal";
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
@@ -152,6 +155,14 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [isDragging, setIsDragging] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; fileId: string; isFolder: boolean } | null>(null);
+  const [emptyTrashOpen, setEmptyTrashOpen] = useState(false);
+  const [emptyTrashBusy, setEmptyTrashBusy] = useState(false);
+  const [purgeTarget, setPurgeTarget] = useState<DecryptedFile | null>(null);
+  const [purgeBusy, setPurgeBusy] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   // Load files on mount and when keys become available
   useEffect(() => {
@@ -214,7 +225,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     setIsDragging(false);
     // Drag-drop uploads only make sense in the owned drive. In "Shared with
     // me" the user has no write target — silently drop the files.
-    if (fileOps.viewMode === "shared") return;
+    if (fileOps.viewMode === "shared" || fileOps.viewMode === "trash") return;
     const files = e.dataTransfer.files;
     if (!files.length) return;
     for (const file of Array.from(files)) {
@@ -349,6 +360,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 Upload
               </button>
             </>
+          )}
+          {fileOps.viewMode === "trash" && fileOps.files.length > 0 && (
+            <button
+              onClick={() => setEmptyTrashOpen(true)}
+              className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-accent-red border border-accent-red/30 hover:bg-accent-red/10 transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={14} />
+              Empty trash
+            </button>
           )}
           <NotificationBell />
         </div>
@@ -524,7 +544,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <div
               key={file.id}
               onClick={() => {
-                if (file.isFolder) {
+                // No folder drill-down from the trash view — the
+                // trashed subtree is flat-rooted there.
+                if (file.isFolder && fileOps.viewMode !== "trash") {
                   fileOps.navigateToFolder(file.id, file.name);
                 }
               }}
@@ -637,15 +659,44 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             boxShadow: "var(--shadow-l2)",
           }}
         >
-          <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
-            <HugeiconsIcon icon={FolderAddIcon} size={14} color="var(--icon-tertiary)" /> Open
-          </button>
-          <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
-            <HugeiconsIcon icon={Edit02Icon} size={14} color="var(--icon-tertiary)" /> Rename
-          </button>
-          <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
-            <HugeiconsIcon icon={StarIcon} size={14} color="var(--icon-tertiary)" /> Star
-          </button>
+          {fileOps.viewMode !== "trash" && (
+            <>
+              <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+                <HugeiconsIcon icon={FolderAddIcon} size={14} color="var(--icon-tertiary)" /> Open
+              </button>
+              <button
+                onClick={() => {
+                  if (!contextMenu) return;
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                  if (full) {
+                    setRenameTarget(full);
+                    setRenameValue(full.name);
+                    setRenameError(null);
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={Edit02Icon} size={14} color="var(--icon-tertiary)" /> Rename
+              </button>
+              <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+                <HugeiconsIcon icon={StarIcon} size={14} color="var(--icon-tertiary)" /> Star
+              </button>
+            </>
+          )}
+          {fileOps.viewMode === "trash" && (
+            <button
+              onClick={async () => {
+                if (!contextMenu) return;
+                const fileId = contextMenu.fileId;
+                setContextMenu(null);
+                await fileOps.restoreItem(fileId);
+              }}
+              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={ArrowLeft01Icon} size={14} color="var(--icon-tertiary)" /> Restore
+            </button>
+          )}
           {fileOps.viewMode === "own" && (
             <button
               onClick={() => {
@@ -660,19 +711,35 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <HugeiconsIcon icon={Share01Icon} size={14} color="var(--icon-tertiary)" /> Share
             </button>
           )}
-          {!contextMenu?.isFolder && (
+          {fileOps.viewMode !== "trash" && !contextMenu?.isFolder && (
             <button onClick={() => { if (contextMenu) { fileOps.downloadFile(contextMenu.fileId); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
               <HugeiconsIcon icon={Download04Icon} size={14} color="var(--icon-tertiary)" /> Download
             </button>
           )}
-          <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
-            <HugeiconsIcon icon={Move01Icon} size={14} color="var(--icon-tertiary)" /> Move to
-          </button>
-          <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
-            <HugeiconsIcon icon={InformationCircleIcon} size={14} color="var(--icon-tertiary)" /> Details
-          </button>
+          {fileOps.viewMode !== "trash" && (
+            <>
+              <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+                <HugeiconsIcon icon={Move01Icon} size={14} color="var(--icon-tertiary)" /> Move to
+              </button>
+              <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+                <HugeiconsIcon icon={InformationCircleIcon} size={14} color="var(--icon-tertiary)" /> Details
+              </button>
+            </>
+          )}
           <div className="h-px bg-border-tertiary my-1" />
-          {fileOps.viewMode === "shared" ? (
+          {fileOps.viewMode === "trash" ? (
+            <button
+              onClick={() => {
+                if (!contextMenu) return;
+                const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                if (full) setPurgeTarget(full);
+                setContextMenu(null);
+              }}
+              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={14} /> Delete forever
+            </button>
+          ) : fileOps.viewMode === "shared" ? (
             <button
               onClick={async () => {
                 if (!contextMenu) return;
@@ -703,6 +770,67 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
       <NewFolderModal open={newFolderOpen} onClose={() => setNewFolderOpen(false)} onCreate={(name) => fileOps.createFolder(name, fileOps.currentFolder)} />
+      <RenameModal
+        file={renameTarget}
+        value={renameValue}
+        onChange={setRenameValue}
+        busy={renameBusy}
+        error={renameError}
+        onClose={() => {
+          setRenameTarget(null);
+          setRenameError(null);
+          setRenameBusy(false);
+        }}
+        onSubmit={async () => {
+          if (!renameTarget) return;
+          setRenameBusy(true);
+          setRenameError(null);
+          const res = await fileOps.renameFile(renameTarget, renameValue);
+          setRenameBusy(false);
+          if (res.ok) {
+            setRenameTarget(null);
+          } else {
+            setRenameError(res.error);
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={emptyTrashOpen}
+        title="Empty trash?"
+        description="Every file and folder currently in your trash will be permanently deleted. This can't be undone."
+        confirmLabel="Empty trash"
+        destructive
+        busy={emptyTrashBusy}
+        busyLabel="Emptying…"
+        onConfirm={async () => {
+          setEmptyTrashBusy(true);
+          await fileOps.emptyTrash();
+          setEmptyTrashBusy(false);
+          setEmptyTrashOpen(false);
+        }}
+        onCancel={() => !emptyTrashBusy && setEmptyTrashOpen(false)}
+      />
+      <ConfirmDialog
+        open={!!purgeTarget}
+        title={`Delete "${purgeTarget?.name ?? ""}" forever?`}
+        description={
+          purgeTarget?.isFolder
+            ? "This folder and every file inside it will be permanently deleted. This can't be undone."
+            : "This file will be permanently deleted. This can't be undone."
+        }
+        confirmLabel="Delete forever"
+        destructive
+        busy={purgeBusy}
+        busyLabel="Deleting…"
+        onConfirm={async () => {
+          if (!purgeTarget) return;
+          setPurgeBusy(true);
+          await fileOps.purgeItem(purgeTarget.id);
+          setPurgeBusy(false);
+          setPurgeTarget(null);
+        }}
+        onCancel={() => !purgeBusy && setPurgeTarget(null)}
+      />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
       <MembersModal open={membersOpen} onClose={() => setMembersOpen(false)} />
       <CommandPalette
