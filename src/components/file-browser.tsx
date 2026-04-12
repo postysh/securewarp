@@ -670,6 +670,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           const isSelected = selected.has(file.id);
           return (
             <div
+              key={file.id}
               draggable={fileOps.viewMode === "own" && !file.uploading && fileOps.callerPermission !== "viewer"}
               onDragStart={(e) => {
                 setDragFileId(file.id);
