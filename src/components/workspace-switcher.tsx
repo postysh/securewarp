@@ -6,8 +6,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import UnfoldMoreIcon from "@hugeicons/core-free-icons/UnfoldMoreIcon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import Setting07Icon from "@hugeicons/core-free-icons/Setting07Icon";
 import { Tooltip } from "./tooltip";
 import { useFilesContext } from "@/hooks/use-files";
+import { WorkspaceSettings } from "./workspace-settings";
 
 interface Workspace {
   id: string;
@@ -38,6 +40,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null); // null = personal
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -142,8 +145,17 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
           ))}
         </div>
       </div>
-      {/* Create workspace button */}
+      {/* Actions */}
       <div className="border-t border-border-tertiary py-1.5">
+        {activeId && (
+          <button
+            onClick={() => { setOpen(false); setShowSettings(true); }}
+            className="w-full flex items-center gap-2.5 px-3 h-[36px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+          >
+            <HugeiconsIcon icon={Setting07Icon} size={14} color="var(--icon-tertiary)" />
+            Workspace settings
+          </button>
+        )}
         <button
           onClick={() => { setOpen(false); setShowCreateModal(true); }}
           className="w-full flex items-center gap-2.5 px-3 h-[36px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
@@ -183,6 +195,12 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
         </Tooltip>
         {dropdown}
         {createModal}
+        <WorkspaceSettings
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          workspace={activeId ? workspaces.find((w) => w.id === activeId) ?? null : null}
+          onDeleted={() => { setActiveId(null); fileOps.leaveWorkspace(); refreshWorkspaces(); }}
+        />
       </>
     );
   }
