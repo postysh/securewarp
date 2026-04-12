@@ -175,15 +175,18 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [renameError, setRenameError] = useState<string | null>(null);
 
   // Load files on mount and when keys become available.
-  // Skip if a workspace is saved — the workspace switcher will
-  // call navigateToWorkspace after it fetches the workspace list.
   useEffect(() => {
-    if (keys) {
-      const savedWs = sessionStorage.getItem("securewarp_active_workspace");
-      if (!savedWs) {
-        fileOps.fetchFiles(fileOps.currentFolder);
+    if (!keys) return;
+    try {
+      const savedStr = sessionStorage.getItem("securewarp_active_workspace");
+      if (savedStr) {
+        const saved = JSON.parse(savedStr) as { id: string; rootFolderId: string; name: string };
+        // Navigate directly into the workspace root
+        fileOps.navigateToWorkspace(saved.id, saved.rootFolderId, saved.name);
+        return;
       }
-    }
+    } catch { /* */ }
+    fileOps.fetchFiles(fileOps.currentFolder);
   }, [keys]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close context menu and clear label filter when navigating
