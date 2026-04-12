@@ -373,10 +373,6 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
         {/* Right: actions */}
         <div className="flex items-center gap-1 md:gap-2 shrink-0 z-10">
-          {/* Mobile search icon */}
-          <button onClick={() => setCommandPaletteOpen(true)} className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer md:hidden">
-            <HugeiconsIcon icon={Search01Icon} size={16} />
-          </button>
           {/* Facepile */}
           <div className="hidden md:block">
             <Facepile onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
@@ -746,6 +742,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 const deltaY = touch.clientY - touchStartRef.current.y;
                 // Only horizontal swipes (ignore vertical scroll)
                 if (Math.abs(deltaY) > Math.abs(deltaX)) return;
+                // Prevent page scroll during horizontal swipe
+                e.preventDefault();
                 if (deltaX < -10) {
                   setSwipeFileId(file.id);
                   setSwipeOffset(Math.max(deltaX, -120));
@@ -780,7 +778,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
-              style={{ transform: `translateX(${rowOffset}px)`, transition: touchStartRef.current ? "none" : "transform 0.2s ease-out" }}
+              style={{ transform: `translateX(${rowOffset}px)`, transition: touchStartRef.current ? "none" : "transform 0.2s ease-out", touchAction: "pan-y" }}
               className={`group flex items-center h-[56px] px-4 rounded-xl border cursor-pointer transition-colors bg-bg-main ${
                 dropTargetId === file.id
                   ? "border-accent-green bg-accent-green/5"
