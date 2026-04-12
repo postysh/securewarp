@@ -69,7 +69,9 @@ export async function GET(request: Request) {
     // by the client's parent-chain fetch to populate the hier key
     // cache for inherited children).
     if (!file.storage_key) {
-      return NextResponse.json({ chunked: false, noContent: true, ...base });
+      const resp = NextResponse.json({ chunked: false, noContent: true, ...base });
+      resp.headers.set("Cache-Control", "private, s-maxage=60, stale-while-revalidate=120");
+      return resp;
     }
 
     const downloadUrl = await getDownloadUrl(file.storage_key);

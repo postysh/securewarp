@@ -203,7 +203,8 @@ export async function getSharedWithUser(userId: string): Promise<FileRowWithKey[
     .eq("upload_complete", true)
     .is("deleted_at", null)
     .is("workspace_id", null)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(100);
 
   if (error) throw new Error(`Failed to fetch shared files: ${error.message}`);
   return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
