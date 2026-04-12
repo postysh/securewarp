@@ -313,9 +313,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 <span className="flex items-center gap-1 text-[11px] text-accent-green"><HugeiconsIcon icon={Shield01Icon} size={12} /> Active</span>
               </div>
             </SettingRow>
-            <SettingRow label="Algorithms" description="Cryptographic primitives used">
-              <span className="text-[10px] text-text-disabled font-mono">xsalsa20-poly1305 · Curve25519 · Argon2id · HKDF-SHA256 · SRP-6a</span>
-            </SettingRow>
           </div>
         );
       case "appearance":
