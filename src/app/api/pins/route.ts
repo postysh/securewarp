@@ -23,7 +23,7 @@ export async function GET() {
     const pins = (data || []).map((p) => ({
       file_id: p.file_id,
       sort_order: p.sort_order,
-      is_folder: (p.file as { is_folder: boolean } | null)?.is_folder ?? false,
+      is_folder: ((p.file as unknown) as { is_folder: boolean } | null)?.is_folder ?? false,
     }));
 
     return NextResponse.json({ pins });
