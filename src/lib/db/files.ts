@@ -29,6 +29,7 @@ export interface FileRow {
   parent_keys_claim_wrapped_by: string | null;
   deleted_at: string | null;
   is_workspace_root: boolean;
+  workspace_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +74,17 @@ export async function createFile(data: {
   // immediately visible. Chunked uploads pass false and flip it on finalize.
   uploadComplete?: boolean;
 }): Promise<FileRow> {
+  // Inherit workspace_id from parent folder
+  let workspaceId: string | null = null;
+  if (data.parentId) {
+    const { data: parent } = await supabase
+      .from("files")
+      .select("workspace_id")
+      .eq("id", data.parentId)
+      .single();
+    workspaceId = (parent?.workspace_id as string | null) ?? null;
+  }
+
   const { data: file, error } = await supabase
     .from("files")
     .insert({
@@ -89,6 +101,7 @@ export async function createFile(data: {
       session_key_nonce: data.sessionKeyNonce,
       parent_keys_claim: data.parentKeysClaim ?? null,
       parent_keys_claim_wrapped_by: data.parentKeysClaimWrappedBy ?? null,
+      workspace_id: workspaceId,
     })
     .select()
     .single();
@@ -188,6 +201,7 @@ export async function getSharedWithUser(userId: string): Promise<FileRowWithKey[
     .neq("owner_id", userId)
     .eq("upload_complete", true)
     .is("deleted_at", null)
+    .is("workspace_id", null)
     .order("created_at", { ascending: false });
 
   if (error) throw new Error(`Failed to fetch shared files: ${error.message}`);
@@ -580,6 +594,7 @@ export async function getTrashedForUser(userId: string): Promise<FileRowWithKey[
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
     .not("deleted_at", "is", null)
+    .is("workspace_id", null)
     .order("deleted_at", { ascending: false });
   if (error) throw new Error(`Failed to fetch trashed: ${error.message}`);
 
@@ -617,6 +632,7 @@ export async function getRecentForUser(userId: string): Promise<FileRowWithKey[]
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
     .is("deleted_at", null)
+    .is("workspace_id", null)
     .order("updated_at", { ascending: false })
     .limit(50);
   if (error) throw new Error(`Failed to fetch recent: ${error.message}`);
@@ -637,6 +653,7 @@ export async function getAllAccessibleFiles(userId: string): Promise<FileRowWith
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
     .is("deleted_at", null)
+    .is("workspace_id", null)
     .limit(500);
   if (ownErr) throw new Error(`Failed to fetch owned files: ${ownErr.message}`);
 
@@ -648,6 +665,7 @@ export async function getAllAccessibleFiles(userId: string): Promise<FileRowWith
     .neq("owner_id", userId)
     .eq("upload_complete", true)
     .is("deleted_at", null)
+    .is("workspace_id", null)
     .limit(200);
   if (sharedErr) throw new Error(`Failed to fetch shared files: ${sharedErr.message}`);
 
@@ -699,7 +717,8 @@ export async function getStarredForUser(userId: string): Promise<FileRowWithKey[
     .in("id", fileIds)
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
-    .is("deleted_at", null);
+    .is("deleted_at", null)
+    .is("workspace_id", null);
   if (error) throw new Error(`Failed to fetch starred files: ${error.message}`);
   return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
 }
