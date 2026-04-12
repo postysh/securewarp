@@ -8,6 +8,8 @@ import FolderShared01Icon from "@hugeicons/core-free-icons/FolderShared01Icon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import CheckmarkCircle01Icon from "@hugeicons/core-free-icons/CheckmarkCircle01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import { supabaseClient } from "@/lib/db/supabase-client";
+import { useUserKeys } from "@/hooks/use-user-keys";
 
 interface Notification {
   id: string;
@@ -70,6 +72,7 @@ export function NotificationBell() {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, right: 0 });
+  const userKeys = useUserKeys();
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -88,12 +91,46 @@ export function NotificationBell() {
     }
   }, []);
 
-  // Fetch on mount + every 30 seconds while open
+  // Initial fetch + Supabase Realtime subscription
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30_000);
-    return () => clearInterval(interval);
-  }, [fetchNotifications]);
+
+    let channel: ReturnType<typeof supabaseClient.channel> | null = null;
+
+    // Get the user's ID from the session endpoint so we can filter
+    // realtime events to only this user's notifications.
+    (async () => {
+      try {
+        const sessionRes = await fetch("/api/auth/session");
+        if (!sessionRes.ok) return;
+        const session = await sessionRes.json();
+        if (!session.userId) return;
+
+        channel = supabaseClient
+          .channel(`notifications-${session.userId}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "INSERT",
+              schema: "public",
+              table: "notifications",
+              filter: `user_id=eq.${session.userId}`,
+            },
+            (payload) => {
+              const row = payload.new as Notification;
+              setNotifications((prev) => [row, ...prev]);
+            }
+          )
+          .subscribe();
+      } catch {
+        // Realtime failed — fall back to polling
+      }
+    })();
+
+    return () => {
+      if (channel) supabaseClient.removeChannel(channel);
+    };
+  }, [fetchNotifications, userKeys]);
 
   useEffect(() => {
     if (!open) return;
