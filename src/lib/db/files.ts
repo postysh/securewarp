@@ -784,6 +784,55 @@ export async function getFileForDownload(
 }
 
 /**
+ * Get the caller's permission level on a file. Returns "owner",
+ * "editor", "viewer", or null (no access). Checks the direct
+ * file_keys row only — inherited access isn't modeled here because
+ * inherited children share the parent's permission level.
+ */
+export async function getUserPermission(
+  fileId: string,
+  userId: string
+): Promise<"owner" | PermissionLevel | null> {
+  const { data, error } = await supabase
+    .from("file_keys")
+    .select("permission_level")
+    .eq("file_id", fileId)
+    .eq("user_id", userId)
+    .single();
+  if (error || !data) return null;
+  return (data.permission_level as "owner" | PermissionLevel) ?? "editor";
+}
+
+/**
+ * Get the caller's effective permission on a file, walking up the
+ * parent chain if no direct file_keys row exists (inherited access).
+ */
+export async function getEffectivePermission(
+  fileId: string,
+  userId: string
+): Promise<"owner" | PermissionLevel | null> {
+  // Direct check first
+  const direct = await getUserPermission(fileId, userId);
+  if (direct) return direct;
+
+  // Walk up parents
+  let currentId: string | null = fileId;
+  const MAX_DEPTH = 64;
+  for (let depth = 0; depth < MAX_DEPTH && currentId; depth++) {
+    const { data } = await supabase
+      .from("files")
+      .select("parent_id")
+      .eq("id", currentId)
+      .single();
+    if (!data?.parent_id) return null;
+    const parentPerm = await getUserPermission(data.parent_id as string, userId);
+    if (parentPerm) return parentPerm;
+    currentId = data.parent_id as string;
+  }
+  return null;
+}
+
+/**
  * Move: change a file's `parent_id` and re-wrap its
  * `parent_keys_claim`. Owner-only; the route handler validates the
  * caller owns both the file being moved and the destination folder

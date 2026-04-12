@@ -99,6 +99,7 @@ interface UseFilesState {
   currentFolder: string | null;
   breadcrumb: { id: string | null; name: string }[];
   viewMode: ViewMode;
+  callerPermission: string | null;
 }
 
 /**
@@ -117,6 +118,7 @@ export function useFiles(keys: {
     uploadProgress: 0,
     error: null,
     currentFolder: null,
+    callerPermission: null,
     breadcrumb: [{ id: null, name: "My Drive" }],
     viewMode: "own",
   });
@@ -355,6 +357,7 @@ export function useFiles(keys: {
           ...s,
           files: results,
           loading: false,
+          callerPermission: data.callerPermission ?? null,
           currentFolder: mode !== "own" ? null : parentId,
           viewMode: mode === "own" && parentId ? s.viewMode : mode,
           breadcrumb:
@@ -1887,7 +1890,7 @@ export function useFiles(keys: {
     // the caller owns it or accesses it via an inherited file_keys row.
     // Going back to null switches to the owned-root view.
     if (folderId === null) {
-      setState((s) => ({ ...s, currentFolder: null, viewMode: "own", breadcrumb: [{ id: null, name: "My Drive" }] }));
+      setState((s) => ({ ...s, currentFolder: null, callerPermission: null, viewMode: "own", breadcrumb: [{ id: null, name: "My Drive" }] }));
     } else {
       setState((s) => {
         // Guard against double-click / rapid re-entry producing duplicate

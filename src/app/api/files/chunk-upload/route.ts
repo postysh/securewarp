@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { createFile, createFileKey } from "@/lib/db/files";
+import { createFile, createFileKey, getEffectivePermission } from "@/lib/db/files";
 import { getUploadUrl } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
 import { assertWithinQuota } from "@/lib/db/quota";
@@ -66,6 +66,17 @@ export async function POST(request: Request) {
       }
 
       const data = parsed.data;
+
+      // Permission check: viewers cannot upload into shared folders.
+      if (data.parentId) {
+        const perm = await getEffectivePermission(data.parentId, session.userId);
+        if (perm === "viewer") {
+          return NextResponse.json({ error: "Viewers cannot upload files" }, { status: 403 });
+        }
+        if (!perm) {
+          return NextResponse.json({ error: "Parent folder not found" }, { status: 404 });
+        }
+      }
 
       // Reject uploads that would exceed the per-user storage quota.
       try {

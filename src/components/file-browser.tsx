@@ -374,7 +374,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               Invite
             </button>
           )}
-          {(fileOps.viewMode === "own" || fileOps.currentFolder) && fileOps.viewMode !== "trash" && (
+          {(fileOps.viewMode === "own" || fileOps.currentFolder) && fileOps.viewMode !== "trash" && fileOps.callerPermission !== "viewer" && (
             <>
               <button onClick={() => setNewFolderOpen(true)} className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer">
                 <HugeiconsIcon icon={FolderAddIcon} size={14} />

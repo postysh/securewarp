@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { createFolder, createFileKey, getFileById } from "@/lib/db/files";
+import { createFolder, createFileKey, getFileById, getEffectivePermission } from "@/lib/db/files";
 import { logError } from "@/lib/log";
 
 const FolderSchema = z.object({
@@ -42,10 +42,24 @@ export async function POST(request: Request) {
     if (data.parentId) {
       const parent = await getFileById(data.parentId, session.userId);
       if (!parent) {
-        return NextResponse.json({ error: "Parent folder not found" }, { status: 404 });
-      }
-      if (!parent.is_folder) {
-        return NextResponse.json({ error: "Parent is not a folder" }, { status: 400 });
+        // getFileById requires a direct file_keys row — for inherited
+        // access, check via the permission chain instead.
+        const perm = await getEffectivePermission(data.parentId, session.userId);
+        if (!perm) {
+          return NextResponse.json({ error: "Parent folder not found" }, { status: 404 });
+        }
+        if (perm === "viewer") {
+          return NextResponse.json({ error: "Viewers cannot create folders" }, { status: 403 });
+        }
+      } else {
+        if (!parent.is_folder) {
+          return NextResponse.json({ error: "Parent is not a folder" }, { status: 400 });
+        }
+        // Check permission — owner and editor can create, viewer cannot
+        const perm = await getEffectivePermission(data.parentId, session.userId);
+        if (perm === "viewer") {
+          return NextResponse.json({ error: "Viewers cannot create folders" }, { status: 403 });
+        }
       }
     }
 

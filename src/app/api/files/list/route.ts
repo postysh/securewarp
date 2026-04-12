@@ -4,11 +4,11 @@ import {
   getFilesForUser,
   getSharedWithUser,
   getCollaboratorsBulk,
-  getFileById,
   getInheritedChildren,
   getTrashedForUser,
   getStarredForUser,
   getRecentForUser,
+  getEffectivePermission,
   type FileRowWithKey,
 } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
@@ -47,20 +47,12 @@ export async function GET(request: Request) {
       // Root listing of own files.
       files = await getFilesForUser(session.userId, null);
     } else {
-      // Listing inside a specific folder. If the caller owns the folder,
-      // the fast getFilesForUser path applies. Otherwise the caller must
-      // still have access via a direct file_keys row on the folder
-      // (gated inside getInheritedChildren), and the response includes
-      // children that may not have direct rows — the client decrypts
-      // those via the parent_keys_claim chain.
-      const parent = await getFileById(parentId, session.userId);
-      if (!parent) {
-        return NextResponse.json({ error: "Folder not found" }, { status: 404 });
-      }
-      files =
-        parent.owner_id === session.userId
-          ? await getFilesForUser(session.userId, parentId)
-          : await getInheritedChildren(parentId, session.userId);
+      // Listing inside a specific folder. Always use
+      // getInheritedChildren so the response includes ALL children
+      // regardless of owner — collaborators who create subfolders
+      // inside a shared folder own those subfolders, but the parent
+      // folder's owner still needs to see them.
+      files = await getInheritedChildren(parentId, session.userId);
     }
 
     // Enrich each file with its collaborator list and per-user star state.
@@ -86,7 +78,14 @@ export async function GET(request: Request) {
       })),
     }));
 
-    return NextResponse.json({ files: enriched });
+    // Include the caller's effective permission on the current folder
+    // so the client can hide write actions for viewers.
+    let callerPermission: string | null = null;
+    if (parentId) {
+      callerPermission = await getEffectivePermission(parentId, session.userId);
+    }
+
+    return NextResponse.json({ files: enriched, callerPermission });
   } catch (err) {
     logError("files.list", err);
     return NextResponse.json({ error: "Failed to list files" }, { status: 500 });

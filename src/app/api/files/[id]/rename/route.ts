@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { getFileById, updateFileMetadata } from "@/lib/db/files";
+import { getFileById, updateFileMetadata, getEffectivePermission } from "@/lib/db/files";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -37,7 +37,10 @@ export async function POST(
     // revoked or in-flight file won't match.
     const file = await getFileById(fileId, session.userId);
     if (!file) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      // Check inherited access
+      const perm = await getEffectivePermission(fileId, session.userId);
+      if (!perm) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      if (perm === "viewer") return NextResponse.json({ error: "Viewers cannot rename" }, { status: 403 });
     }
 
     const body = await request.json();
