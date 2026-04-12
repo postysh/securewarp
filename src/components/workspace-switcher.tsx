@@ -83,7 +83,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
 
   const switchToWorkspace = (ws: Workspace) => {
     setActiveId(ws.id);
-    fileOps.navigateToFolder(ws.rootFolderId, ws.name);
+    fileOps.navigateToWorkspace(ws.rootFolderId, ws.name);
     setOpen(false);
   };
 

@@ -1935,6 +1935,21 @@ export function useFiles(keys: {
     await fetchFiles(folderId, "own");
   }, [fetchFiles]);
 
+  /**
+   * Switch to a workspace. Sets the workspace root folder as the
+   * breadcrumb root so the view is clean (not nested under My Drive).
+   * Clicking the breadcrumb root re-fetches the workspace root.
+   */
+  const navigateToWorkspace = useCallback(async (rootFolderId: string, workspaceName: string) => {
+    setState((s) => ({
+      ...s,
+      currentFolder: rootFolderId,
+      viewMode: "own",
+      breadcrumb: [{ id: rootFolderId, name: workspaceName }],
+    }));
+    await fetchFiles(rootFolderId, "own");
+  }, [fetchFiles]);
+
   const navigateToBreadcrumb = useCallback(async (index: number) => {
     setState((s) => ({
       ...s,
@@ -2238,6 +2253,7 @@ export function useFiles(keys: {
     loadCollaborators,
     setViewMode,
     navigateToFolder,
+    navigateToWorkspace,
     navigateToBreadcrumb,
     clearError,
     searchFiles,
