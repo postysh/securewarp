@@ -464,7 +464,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <div className="absolute left-[26px] top-[28px] w-[160px] h-[90px] rounded-xl border border-border-tertiary bg-bg-main rotate-[3deg] flex flex-col items-center justify-center">
                   <div className="w-10 h-10 rounded-xl bg-accent-green/10 flex items-center justify-center mb-1">
                     <HugeiconsIcon
-                      icon={fileOps.viewMode === "shared" ? UserGroupIcon : LockIcon}
+                      icon={
+                        fileOps.viewMode === "trash"
+                          ? Delete02Icon
+                          : fileOps.viewMode === "shared"
+                            ? UserGroupIcon
+                            : LockIcon
+                      }
                       size={20}
                       color="var(--accent-green-primary)"
                     />
@@ -476,7 +482,22 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 </div>
               </div>
 
-              {fileOps.viewMode === "shared" ? (
+              {fileOps.viewMode === "trash" ? (
+                <>
+                  <h3 className="text-[18px] font-semibold text-text-primary mb-2">Trash is empty</h3>
+                  <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
+                    Files and folders you delete land here. Restore them from the context menu, or empty the trash to free up space.
+                  </p>
+                  <div className="flex items-center justify-center">
+                    <button
+                      onClick={() => fileOps.setViewMode("own")}
+                      className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer flex items-center gap-2"
+                    >
+                      Back to My Drive
+                    </button>
+                  </div>
+                </>
+              ) : fileOps.viewMode === "shared" ? (
                 <>
                   <h3 className="text-[18px] font-semibold text-text-primary mb-2">Nothing shared with you yet</h3>
                   <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
