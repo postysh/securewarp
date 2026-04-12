@@ -605,13 +605,70 @@ export function useFiles(keys: {
     }
   }, [keys, fetchFiles]);
 
+  /**
+   * Unwrap the session key from a chunk-download response. Handles
+   * both the direct path (user has a file_keys row on this file) and
+   * the inherited path (user has a file_keys row on an ancestor
+   * folder and walks the parent_keys_claim chain down).
+   */
+  const unwrapSessionKeyFromDownload = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (data: any): Uint8Array => {
+      if (!keys) throw new Error("Not signed in");
+      if (data.encryptedPrivateHierarchicalKey) {
+        // Direct path
+        const privHier = unwrapPrivateHierarchicalKey(
+          data.encryptedPrivateHierarchicalKey,
+          data.wrappedByPublicKey,
+          keys.encryptionPrivateKey
+        );
+        return unwrapSessionKeyFromFile(
+          data.encryptedSessionKeyByFile,
+          data.sessionKeyNonce,
+          data.ownerPublicKey,
+          privHier
+        );
+      }
+      // Inherited path: walk the parent chain from the ancestor down
+      if (!data.ancestorKey || !data.parentChain?.length) {
+        throw new Error("No decryption path available");
+      }
+      // Start from the ancestor's direct key
+      let currentPrivHier = unwrapPrivateHierarchicalKey(
+        data.ancestorKey.encrypted_private_hierarchical_key,
+        data.ancestorKey.wrapped_by_public_key,
+        keys.encryptionPrivateKey
+      );
+      // Walk chain from top (closest to ancestor) to bottom (the file)
+      for (const link of data.parentChain) {
+        const unwrapped = unwrapParentKeysClaim(
+          link.parentKeysClaim,
+          link.parentKeysClaimWrappedBy,
+          currentPrivHier
+        );
+        currentPrivHier = unwrapped.childPrivateHierarchicalKey;
+        // If this is the target file, unwrapped.sessionKey is what we need
+        if (link.fileId === data.parentChain[data.parentChain.length - 1].fileId) {
+          return unwrapped.sessionKey;
+        }
+      }
+      // If the chain was length 1, the loop returned above.
+      // Fallback: use the last unwrapped privHier to get the session key
+      return unwrapSessionKeyFromFile(
+        data.encryptedSessionKeyByFile,
+        data.sessionKeyNonce,
+        data.ownerPublicKey,
+        currentPrivHier
+      );
+    },
+    [keys]
+  );
+
   const downloadFile = useCallback(async (fileId: string) => {
     if (!keys) return;
 
-    // Hoisted so the finally block can zero the key on any exit path.
     let sessionKey: Uint8Array | null = null;
     try {
-      // 1. Get download info
       const res = await fetch(`/api/files/chunk-download?fileId=${fileId}`);
       const data = await res.json();
 
@@ -620,19 +677,7 @@ export function useFiles(keys: {
         return;
       }
 
-      // 2. Two-step unwrap: our file_keys row → file's private hier key →
-      //    session key wrapped to the file's pub hier key by the owner.
-      const privHier = unwrapPrivateHierarchicalKey(
-        data.encryptedPrivateHierarchicalKey,
-        data.wrappedByPublicKey,
-        keys.encryptionPrivateKey
-      );
-      sessionKey = unwrapSessionKeyFromFile(
-        data.encryptedSessionKeyByFile,
-        data.sessionKeyNonce,
-        data.ownerPublicKey,
-        privHier
-      );
+      sessionKey = unwrapSessionKeyFromDownload(data);
 
       // 3. Decrypt metadata
       const encMeta = typeof data.encryptedMetadata === "string"
@@ -685,7 +730,7 @@ export function useFiles(keys: {
     } finally {
       if (sessionKey) sessionKey.fill(0);
     }
-  }, [keys]);
+  }, [keys, unwrapSessionKeyFromDownload]);
 
   /**
    * Decrypt a file and return a blob URL for inline preview. Same
@@ -708,17 +753,7 @@ export function useFiles(keys: {
         const data = await res.json();
         if (!res.ok) return { ok: false, error: data.error || "Download failed" };
 
-        const privHier = unwrapPrivateHierarchicalKey(
-          data.encryptedPrivateHierarchicalKey,
-          data.wrappedByPublicKey,
-          keys.encryptionPrivateKey
-        );
-        sessionKey = unwrapSessionKeyFromFile(
-          data.encryptedSessionKeyByFile,
-          data.sessionKeyNonce,
-          data.ownerPublicKey,
-          privHier
-        );
+        sessionKey = unwrapSessionKeyFromDownload(data);
 
         const encMeta =
           typeof data.encryptedMetadata === "string"
@@ -776,7 +811,7 @@ export function useFiles(keys: {
         if (sessionKey) sessionKey.fill(0);
       }
     },
-    [keys]
+    [keys, unwrapSessionKeyFromDownload]
   );
 
   const createFolder = useCallback(async (name: string, parentId: string | null = null) => {
@@ -935,7 +970,7 @@ export function useFiles(keys: {
         if (sessionKey) sessionKey.fill(0);
       }
     },
-    [keys]
+    [keys, unwrapSessionKeyFromDownload]
   );
 
   /**

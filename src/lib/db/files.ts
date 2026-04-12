@@ -653,6 +653,119 @@ export async function getStarredForUser(userId: string): Promise<FileRowWithKey[
 }
 
 /**
+ * Get a file for download/preview, supporting both direct file_keys
+ * access AND inherited access via the parent_keys_claim chain.
+ * Returns the file row plus the full parent chain data the client
+ * needs to walk. Falls back through parents until a direct
+ * file_keys row is found for this user.
+ */
+export async function getFileForDownload(
+  fileId: string,
+  userId: string
+): Promise<{
+  file: FileRow & { owner_public_key: string };
+  directKey: { encrypted_private_hierarchical_key: string; wrapped_by_public_key: string } | null;
+  parentChain: {
+    fileId: string;
+    parentKeysClaim: string;
+    parentKeysClaimWrappedBy: string;
+    publicHierarchicalKey: string;
+  }[];
+  ancestorKey: { encrypted_private_hierarchical_key: string; wrapped_by_public_key: string; owner_public_key: string } | null;
+} | null> {
+  // 1. Fetch the file itself
+  const { data: fileRow, error: fileErr } = await supabase
+    .from("files")
+    .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+    .eq("id", fileId)
+    .eq("upload_complete", true)
+    .is("deleted_at", null)
+    .single();
+  if (fileErr || !fileRow) return null;
+
+  const ownerPub = (fileRow.owner as { public_encryption_key: string } | null)?.public_encryption_key || "";
+  const { owner: _o, ...fileData } = fileRow;
+  const file = { ...fileData, owner_public_key: ownerPub } as FileRow & { owner_public_key: string };
+
+  // 2. Check for direct file_keys row
+  const { data: directFk } = await supabase
+    .from("file_keys")
+    .select("encrypted_private_hierarchical_key, wrapped_by_public_key")
+    .eq("file_id", fileId)
+    .eq("user_id", userId)
+    .single();
+
+  if (directFk) {
+    return { file, directKey: directFk, parentChain: [], ancestorKey: null };
+  }
+
+  // 3. Walk up the parent chain collecting parent_keys_claim entries
+  //    until we find a folder the user has a direct file_keys row on.
+  const chain: {
+    fileId: string;
+    parentKeysClaim: string;
+    parentKeysClaimWrappedBy: string;
+    publicHierarchicalKey: string;
+  }[] = [];
+
+  let current = file;
+  const MAX_DEPTH = 64;
+  for (let depth = 0; depth < MAX_DEPTH; depth++) {
+    if (!current.parent_id || !current.parent_keys_claim || !current.parent_keys_claim_wrapped_by) {
+      return null; // no access path
+    }
+
+    chain.push({
+      fileId: current.id,
+      parentKeysClaim: current.parent_keys_claim,
+      parentKeysClaimWrappedBy: current.parent_keys_claim_wrapped_by,
+      publicHierarchicalKey: current.public_hierarchical_key,
+    });
+
+    // Check if user has a key on the parent
+    const { data: parentFk } = await supabase
+      .from("file_keys")
+      .select("encrypted_private_hierarchical_key, wrapped_by_public_key")
+      .eq("file_id", current.parent_id)
+      .eq("user_id", userId)
+      .single();
+
+    if (parentFk) {
+      // Also get the parent file's owner pub key and pub hier key
+      const { data: parentFile } = await supabase
+        .from("files")
+        .select("public_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, owner:users!files_owner_id_fkey(public_encryption_key)")
+        .eq("id", current.parent_id)
+        .single();
+      const parentOwnerPub = ((parentFile?.owner as unknown) as { public_encryption_key: string } | null)?.public_encryption_key || "";
+      return {
+        file,
+        directKey: null,
+        parentChain: chain,
+        ancestorKey: {
+          encrypted_private_hierarchical_key: parentFk.encrypted_private_hierarchical_key,
+          wrapped_by_public_key: parentFk.wrapped_by_public_key,
+          owner_public_key: parentOwnerPub,
+        },
+      };
+    }
+
+    // Move up to the parent
+    const { data: parentRow } = await supabase
+      .from("files")
+      .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+      .eq("id", current.parent_id)
+      .single();
+    if (!parentRow) return null;
+    const pOwner = (parentRow.owner as { public_encryption_key: string } | null)?.public_encryption_key || "";
+    const { owner: _po, ...pData } = parentRow;
+    current = { ...pData, owner_public_key: pOwner } as FileRow & { owner_public_key: string };
+  }
+
+  return null; // depth limit
+}
+
+/**
  * Move: change a file's `parent_id` and re-wrap its
  * `parent_keys_claim`. Owner-only; the route handler validates the
  * caller owns both the file being moved and the destination folder
