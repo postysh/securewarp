@@ -963,6 +963,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 onClick={async () => {
                   if (!contextMenu) return;
                   const isPinned = pinnedIds.has(contextMenu.fileId);
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
                   await fetch("/api/pins", {
                     method: isPinned ? "DELETE" : "POST",
                     headers: { "Content-Type": "application/json" },
@@ -970,8 +971,25 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   });
                   setPinnedIds((prev) => {
                     const next = new Set(prev);
-                    if (isPinned) next.delete(contextMenu.fileId);
-                    else next.add(contextMenu.fileId);
+                    if (isPinned) {
+                      next.delete(contextMenu.fileId);
+                      // Remove cached name
+                      try {
+                        const cache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}");
+                        delete cache[contextMenu.fileId];
+                        localStorage.setItem("securewarp_pin_names", JSON.stringify(cache));
+                      } catch { /* */ }
+                    } else {
+                      next.add(contextMenu.fileId);
+                      // Cache the decrypted name so the sidebar can show it
+                      if (full) {
+                        try {
+                          const cache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}");
+                          cache[contextMenu.fileId] = full.name;
+                          localStorage.setItem("securewarp_pin_names", JSON.stringify(cache));
+                        } catch { /* */ }
+                      }
+                    }
                     return next;
                   });
                   setContextMenu(null);

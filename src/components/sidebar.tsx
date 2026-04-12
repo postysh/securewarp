@@ -220,11 +220,21 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   useEffect(() => {
     fetch("/api/pins").then((r) => r.json()).then((d) => {
       if (d.pins) {
+        // Read cached pin names from localStorage (saved at pin time)
+        let nameCache: Record<string, string> = {};
+        try { nameCache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}"); } catch { /* */ }
+
         const resolved = d.pins.map((p: { file_id: string; is_folder: boolean }) => {
-          // Try to get the decrypted name from the current file list
+          // Priority: current file list > localStorage cache > fallback
           const f = fileOps.files.find((x) => x.id === p.file_id);
-          return { file_id: p.file_id, name: f?.name ?? "Pinned item", isFolder: p.is_folder };
+          const name = f?.name ?? nameCache[p.file_id] ?? (p.is_folder ? "Folder" : "File");
+          // Update cache if we got a fresh name
+          if (f?.name && f.name !== nameCache[p.file_id]) {
+            nameCache[p.file_id] = f.name;
+          }
+          return { file_id: p.file_id, name, isFolder: p.is_folder };
         });
+        try { localStorage.setItem("securewarp_pin_names", JSON.stringify(nameCache)); } catch { /* */ }
         setPins(resolved);
       }
     }).catch(() => {});
