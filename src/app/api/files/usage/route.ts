@@ -11,19 +11,58 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // All owned files with their trash state
     const { data, error } = await supabase
       .from("files")
-      .select("size_bytes")
-      .eq("owner_id", session.userId);
+      .select("size_bytes, deleted_at, id")
+      .eq("owner_id", session.userId)
+      .eq("upload_complete", true);
 
     if (error) throw error;
 
-    const usedBytes = (data || []).reduce((sum: number, f: { size_bytes: number }) => sum + (f.size_bytes || 0), 0);
+    const rows = data || [];
+    let filesBytes = 0;
+    let trashBytes = 0;
+    let filesCount = 0;
+    let trashCount = 0;
+    for (const f of rows) {
+      const size = (f as { size_bytes: number }).size_bytes || 0;
+      if ((f as { deleted_at: string | null }).deleted_at) {
+        trashBytes += size;
+        trashCount++;
+      } else {
+        filesBytes += size;
+        filesCount++;
+      }
+    }
+
+    // Shared files (where user has access but doesn't own)
+    const { data: shared, error: sharedErr } = await supabase
+      .from("file_keys")
+      .select("file_id")
+      .eq("user_id", session.userId);
+    if (sharedErr) throw sharedErr;
+
+    let sharedCount = 0;
+    if (shared) {
+      const { data: ownedIds } = await supabase
+        .from("files")
+        .select("id")
+        .eq("owner_id", session.userId);
+      const ownedSet = new Set((ownedIds || []).map((r) => r.id));
+      sharedCount = shared.filter((r) => !ownedSet.has(r.file_id)).length;
+    }
+
+    const usedBytes = filesBytes + trashBytes;
 
     return NextResponse.json({
       usedBytes,
       maxBytes: MAX_STORAGE_BYTES,
-      fileCount: data?.length || 0,
+      filesBytes,
+      filesCount,
+      trashBytes,
+      trashCount,
+      sharedCount,
     });
   } catch (err) {
     logError("files.usage", err);

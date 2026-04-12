@@ -77,7 +77,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
-  const [storageUsage, setStorageUsage] = useState<{ usedBytes: number; maxBytes: number } | null>(null);
+  const [storageUsage, setStorageUsage] = useState<{
+    usedBytes: number; maxBytes: number;
+    filesBytes: number; filesCount: number;
+    trashBytes: number; trashCount: number;
+    sharedCount: number;
+  } | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
@@ -369,6 +374,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         const used = storageUsage?.usedBytes ?? 0;
         const max = storageUsage?.maxBytes ?? 20 * 1024 * 1024 * 1024;
         const pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
+        const filesBytes = storageUsage?.filesBytes ?? 0;
+        const trashBytes = storageUsage?.trashBytes ?? 0;
+        const filesPct = max > 0 ? (filesBytes / max) * 100 : 0;
+        const trashPct = max > 0 ? (trashBytes / max) * 100 : 0;
+        const categories = [
+          { label: "Files", size: formatBytes(filesBytes), count: storageUsage?.filesCount ?? 0, percent: filesPct, color: "var(--accent-blue-primary)" },
+          { label: "Shared with me", size: `${storageUsage?.sharedCount ?? 0} files`, count: storageUsage?.sharedCount ?? 0, percent: 0, color: "var(--accent-green-primary)" },
+          { label: "Trash", size: formatBytes(trashBytes), count: storageUsage?.trashCount ?? 0, percent: trashPct, color: "var(--accent-red-primary)" },
+        ];
         return (
           <div>
             <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
@@ -378,18 +392,36 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <p className="text-[11px] text-text-disabled mt-0.5">{formatBytes(max)} storage included</p>
                 </div>
               </div>
-              <div className="h-[8px] bg-bg-field rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{ width: `${pct}%`, backgroundColor: pct > 90 ? "var(--accent-red-primary)" : "var(--accent-green-primary)" }}
-                />
+              <div className="h-[8px] bg-bg-field rounded-full overflow-hidden flex">
+                {categories.filter((c) => c.percent > 0).map((cat) => (
+                  <div
+                    key={cat.label}
+                    className="h-full first:rounded-l-full last:rounded-r-full"
+                    style={{ width: `${cat.percent}%`, backgroundColor: cat.color }}
+                  />
+                ))}
               </div>
               <div className="flex items-center justify-between mt-2">
                 <span className="text-[12px] text-text-primary font-medium">{formatBytes(used)} used</span>
                 <span className="text-[11px] text-text-disabled">of {formatBytes(max)}</span>
               </div>
             </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-text-disabled">
+
+            <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-2">Breakdown</p>
+            <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
+              {categories.map((cat) => (
+                <div key={cat.label} className="flex items-center gap-3 px-3 py-3 border-b border-border-tertiary last:border-b-0">
+                  <div className="w-[10px] h-[10px] rounded-[3px]" style={{ backgroundColor: cat.color }} />
+                  <div className="flex-1">
+                    <p className="text-[12px] text-text-primary">{cat.label}</p>
+                    <p className="text-[10px] text-text-disabled">{cat.count} items</p>
+                  </div>
+                  <span className="text-[12px] text-text-secondary font-mono">{cat.size}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1.5 mt-4 text-[10px] text-text-disabled">
               <HugeiconsIcon icon={LockIcon} size={10} />
               Storage usage is calculated from encrypted file sizes
             </div>
