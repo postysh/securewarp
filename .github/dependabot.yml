@@ -5,8 +5,15 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    # Only open PRs for security patches, not every version bump
+    open-pull-requests-limit: 5
     labels:
-      - "dependencies"
+      - "security"
     commit-message:
-      prefix: "deps"
+      prefix: "security"
+    # Ignore non-security version bumps
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
