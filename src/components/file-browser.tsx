@@ -736,7 +736,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   <FileIcon type={file.type} />
                 )}
                 <div className="min-w-0 flex-1">
-                  <span className={`text-[13px] truncate block ${file.uploading ? "text-text-tertiary" : "text-text-primary"}`}>{file.name}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[13px] truncate ${file.uploading ? "text-text-tertiary" : "text-text-primary"}`}>{file.name}</span>
+                    {fileOps.files.find((f) => f.id === file.id)?.isStarred && (
+                      <HugeiconsIcon icon={StarIcon} size={12} color="var(--accent-yellow-primary)" className="shrink-0" />
+                    )}
+                  </div>
                   {file.uploading && (
                     <span className="text-[10px] text-accent-green block mt-0.5">{fileOps.uploadStep || "Processing..."}</span>
                   )}
@@ -764,7 +769,18 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
                 {/* Hover actions */}
                 <div className="absolute right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
-                  <button onClick={(e) => { e.stopPropagation(); }} className="p-1.5 rounded-md text-icon-tertiary hover:text-accent-yellow hover:bg-cta-nav-hover transition-colors cursor-pointer">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const full = fileOps.files.find((f) => f.id === file.id);
+                      if (full) fileOps.toggleStar(full.id, !full.isStarred);
+                    }}
+                    className={`p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer ${
+                      fileOps.files.find((f) => f.id === file.id)?.isStarred
+                        ? "text-accent-yellow"
+                        : "text-icon-tertiary hover:text-accent-yellow"
+                    }`}
+                  >
                     <HugeiconsIcon icon={StarIcon} size={15} />
                   </button>
                   {fileOps.viewMode === "own" && (
