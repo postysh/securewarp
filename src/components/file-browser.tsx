@@ -174,10 +174,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
 
-  // Load files on mount and when keys become available
+  // Load files on mount and when keys become available.
+  // Skip if a workspace is saved — the workspace switcher will
+  // call navigateToWorkspace after it fetches the workspace list.
   useEffect(() => {
     if (keys) {
-      fileOps.fetchFiles(fileOps.currentFolder);
+      const savedWs = sessionStorage.getItem("securewarp_active_workspace");
+      if (!savedWs) {
+        fileOps.fetchFiles(fileOps.currentFolder);
+      }
     }
   }, [keys]); // eslint-disable-line react-hooks/exhaustive-deps
 
