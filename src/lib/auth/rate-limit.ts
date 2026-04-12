@@ -31,3 +31,24 @@ export async function checkRateLimit(
 
   return data === true;
 }
+
+/**
+ * Reset a rate-limit counter. Call after a successful auth event
+ * (login verify, recovery) so genuine users never burn their bucket.
+ * The limiter's purpose is spraying + online guessing defence —
+ * both of which are by definition failed attempts, so counting
+ * successes against the budget only punishes legitimate users.
+ *
+ * Silent on error — this is a nice-to-have; failing the request
+ * because we couldn't delete a row would be worse than keeping the
+ * stale count.
+ */
+export async function resetRateLimit(key: string): Promise<void> {
+  const { error } = await supabase
+    .from("rate_limits")
+    .delete()
+    .eq("key", key);
+  if (error) {
+    console.error("Rate limit reset failed:", error.message);
+  }
+}

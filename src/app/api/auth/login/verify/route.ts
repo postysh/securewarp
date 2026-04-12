@@ -4,6 +4,7 @@ import { getUserById } from "@/lib/db/users";
 import { getSrpSession, deleteSrpSession } from "@/lib/db/srp-sessions";
 import { verifyClientAndDeriveSession } from "@/lib/srp/server";
 import { createSession } from "@/lib/auth/session";
+import { resetRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -68,6 +69,14 @@ export async function POST(request: Request) {
     // Create JWT session
     await createSession({ userId: user.id, email: user.email });
     auditEvent({ event: "auth.login.success", actorUserId: user.id });
+
+    // Successful login — clear the rate limit bucket so genuine
+    // users can come back an hour from now without waiting. An
+    // attacker who's mid-spray never hits this path because their
+    // SRP proof doesn't verify. `user.email` is already normalized
+    // at registration (see registerUser) so it matches the key
+    // used in /login/init.
+    await resetRateLimit(`login:${user.email}`);
 
     return NextResponse.json({
       serverProof,

@@ -4,7 +4,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { timingSafeEqual } from "crypto";
 import { getUserByEmail, updateUserAuth } from "@/lib/db/users";
 import { createSession } from "@/lib/auth/session";
-import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { checkRateLimit, resetRateLimit } from "@/lib/auth/rate-limit";
 import { consumeRecoveryToken } from "@/lib/auth/used-tokens";
 import { normalizeEmail } from "@/lib/auth/email";
 import { verifyTurnstile } from "@/lib/auth/turnstile";
@@ -142,6 +142,11 @@ export async function POST(request: Request) {
       // Create session
       await createSession({ userId, email });
       auditEvent({ event: "auth.recovery.update", actorUserId: userId });
+
+      // Successful recovery — clear the bucket so the user can
+      // sign in immediately without waiting out their own earlier
+      // (failed) attempts.
+      await resetRateLimit(`recover:${email}`);
 
       return NextResponse.json({ success: true });
     }
