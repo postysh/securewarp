@@ -1765,8 +1765,8 @@ export function useFiles(keys: {
           currentFolder: folderId,
           viewMode: "own",
           breadcrumb:
-            s.viewMode === "shared"
-              ? [{ id: null, name: "Shared with me" }, { id: folderId, name: folderName }]
+            s.viewMode !== "own"
+              ? [{ id: null, name: "My Drive" }, { id: folderId, name: folderName }]
               : [...s.breadcrumb, { id: folderId, name: folderName }],
         };
       });

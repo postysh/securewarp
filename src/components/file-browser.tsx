@@ -686,7 +686,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 await fileOps.moveFile(source, dest.id, dest.publicHierarchicalKey);
               }}
               onClick={() => {
-                if (file.isFolder && fileOps.viewMode === "own") {
+                if (file.isFolder && fileOps.viewMode !== "trash") {
                   fileOps.navigateToFolder(file.id, file.name);
                 } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
                   setPreviewFileId(file.id);
