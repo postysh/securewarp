@@ -157,7 +157,7 @@ export function useFiles(keys: {
   }, [keys]);
 
   const fetchFiles = useCallback(
-    async (parentId: string | null = null, mode: ViewMode = "own", breadcrumbOverride?: { id: string | null; name: string }[]) => {
+    async (parentId: string | null = null, mode: ViewMode = "own", breadcrumbOverride?: { id: string | null; name: string }[], viewModeOverride?: ViewMode) => {
       if (!keys) return;
       const isFirstLoad = !initialized;
       setState((s) => ({ ...s, loading: isFirstLoad, error: null }));
@@ -366,7 +366,7 @@ export function useFiles(keys: {
           loading: false,
           callerPermission: data.callerPermission ?? null,
           currentFolder: mode !== "own" ? null : parentId,
-          viewMode: mode === "own" && parentId ? s.viewMode : mode,
+          viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
           // Breadcrumb: applied atomically with the data so there's
           // no race between two setState calls. If the caller passed
           // a breadcrumbOverride, use it. Otherwise preserve existing.
@@ -1968,7 +1968,7 @@ export function useFiles(keys: {
     async (mode: ViewMode) => {
       if (mode === "own" && state.activeWorkspace) {
         const bc = [{ id: state.activeWorkspace.rootFolderId, name: state.activeWorkspace.name }];
-        await fetchFiles(state.activeWorkspace.rootFolderId, "own", bc);
+        await fetchFiles(state.activeWorkspace.rootFolderId, "own", bc, "own");
       } else {
         const bc =
           mode === "starred" ? [{ id: null as string | null, name: "Starred" }]
