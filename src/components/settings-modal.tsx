@@ -414,9 +414,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <div className="w-[10px] h-[10px] rounded-[3px]" style={{ backgroundColor: cat.color }} />
                   <div className="flex-1">
                     <p className="text-[12px] text-text-primary">{cat.label}</p>
-                    <p className="text-[10px] text-text-disabled">{cat.count} items</p>
                   </div>
-                  <span className="text-[12px] text-text-secondary font-mono">{cat.size}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[12px] text-text-secondary font-mono">{cat.size}</span>
+                    <div className="w-[60px] h-[4px] bg-bg-field rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${Math.max(cat.percent, cat.count > 0 ? 2 : 0)}%`, backgroundColor: cat.color }} />
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
