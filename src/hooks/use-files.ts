@@ -157,7 +157,7 @@ export function useFiles(keys: {
   }, [keys]);
 
   const fetchFiles = useCallback(
-    async (parentId: string | null = null, mode: ViewMode = "own") => {
+    async (parentId: string | null = null, mode: ViewMode = "own", breadcrumbOverride?: { id: string | null; name: string }[]) => {
       if (!keys) return;
       const isFirstLoad = !initialized;
       setState((s) => ({ ...s, loading: isFirstLoad, error: null }));
@@ -360,10 +360,6 @@ export function useFiles(keys: {
           }
         }
 
-        // fetchFiles ONLY updates data fields. Breadcrumb is managed
-        // exclusively by callers (setViewMode, navigateToFolder,
-        // navigateToWorkspace, navigateToBreadcrumb) BEFORE calling
-        // fetchFiles.
         setState((s) => ({
           ...s,
           files: results,
@@ -371,6 +367,10 @@ export function useFiles(keys: {
           callerPermission: data.callerPermission ?? null,
           currentFolder: mode !== "own" ? null : parentId,
           viewMode: mode === "own" && parentId ? s.viewMode : mode,
+          // Breadcrumb: applied atomically with the data so there's
+          // no race between two setState calls. If the caller passed
+          // a breadcrumbOverride, use it. Otherwise preserve existing.
+          ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
         }));
       } catch (err) {
         console.error("Fetch files error:", err);
@@ -1895,41 +1895,33 @@ export function useFiles(keys: {
     // Going back to null switches to the owned-root view.
     if (folderId === null) {
       if (state.activeWorkspace) {
-        setState((s) => ({ ...s, currentFolder: state.activeWorkspace!.rootFolderId, callerPermission: null, viewMode: "own", breadcrumb: [{ id: state.activeWorkspace!.rootFolderId, name: state.activeWorkspace!.name }] }));
-        await fetchFiles(state.activeWorkspace.rootFolderId, "own");
+        const bc = [{ id: state.activeWorkspace.rootFolderId, name: state.activeWorkspace.name }];
+        await fetchFiles(state.activeWorkspace.rootFolderId, "own", bc);
         return;
       }
-      setState((s) => ({ ...s, currentFolder: null, callerPermission: null, viewMode: "own", breadcrumb: [{ id: null, name: "My Drive" }] }));
+      const bc = [{ id: null as string | null, name: "My Drive" }];
+      await fetchFiles(null, "own", bc);
+      return;
     } else {
-      setState((s) => {
-        // Guard against double-click / rapid re-entry producing duplicate
-        // breadcrumb entries for the same folder ID — the breadcrumb
-        // render keys by crumb.id and duplicates crash React.
-        const lastCrumb = s.breadcrumb[s.breadcrumb.length - 1];
-        if (lastCrumb?.id === folderId) {
-          return { ...s, currentFolder: folderId };
-        }
-        const isNonOwn = s.viewMode !== "own";
-        const rootName =
-          s.viewMode === "starred" ? "Starred"
-            : s.viewMode === "recent" ? "Recent"
-              : s.viewMode === "shared" ? "Shared with me"
-                : null;
-        return {
-          ...s,
-          currentFolder: folderId,
-          // Keep the view mode so sidebar highlight stays correct.
-          // The server fetch always uses "own" for parentId-based
-          // queries, but the UI state remembers where we came from.
-          breadcrumb:
-            isNonOwn && rootName
-              ? [{ id: null, name: rootName }, { id: folderId, name: folderName }]
-              : [...s.breadcrumb, { id: folderId, name: folderName }],
-        };
-      });
+      // Compute the new breadcrumb from current state
+      const lastCrumb = state.breadcrumb[state.breadcrumb.length - 1];
+      if (lastCrumb?.id === folderId) {
+        // Double-click guard — just refetch
+        await fetchFiles(folderId, "own");
+        return;
+      }
+      const isNonOwn = state.viewMode !== "own";
+      const rootName =
+        state.viewMode === "starred" ? "Starred"
+          : state.viewMode === "recent" ? "Recent"
+            : state.viewMode === "shared" ? "Shared with me"
+              : null;
+      const bc = isNonOwn && rootName
+        ? [{ id: null as string | null, name: rootName }, { id: folderId, name: folderName }]
+        : [...state.breadcrumb, { id: folderId, name: folderName }];
+      await fetchFiles(folderId, "own", bc);
     }
-    await fetchFiles(folderId, "own");
-  }, [fetchFiles]);
+  }, [fetchFiles, state.activeWorkspace, state.breadcrumb, state.viewMode]);
 
   /**
    * Switch to a workspace. Sets the workspace root folder as the
@@ -1939,31 +1931,20 @@ export function useFiles(keys: {
   const navigateToWorkspace = useCallback(async (workspaceId: string, rootFolderId: string, workspaceName: string) => {
     setState((s) => ({
       ...s,
-      currentFolder: rootFolderId,
-      viewMode: "own",
       activeWorkspace: { id: workspaceId, rootFolderId, name: workspaceName },
-      breadcrumb: [{ id: rootFolderId, name: workspaceName }],
     }));
-    await fetchFiles(rootFolderId, "own");
+    const bc = [{ id: rootFolderId, name: workspaceName }];
+    await fetchFiles(rootFolderId, "own", bc);
   }, [fetchFiles]);
 
   const leaveWorkspace = useCallback(() => {
-    setState((s) => ({
-      ...s,
-      currentFolder: null,
-      callerPermission: null,
-      activeWorkspace: null,
-      viewMode: "own",
-      breadcrumb: [{ id: null, name: "My Drive" }],
-    }));
-    fetchFiles(null, "own");
+    setState((s) => ({ ...s, activeWorkspace: null }));
+    const bc = [{ id: null as string | null, name: "My Drive" }];
+    fetchFiles(null, "own", bc);
   }, [fetchFiles]);
 
   const navigateToBreadcrumb = useCallback(async (index: number) => {
-    setState((s) => ({
-      ...s,
-      breadcrumb: s.breadcrumb.slice(0, index + 1),
-    }));
+    const bc = state.breadcrumb.slice(0, index + 1);
     const target = state.breadcrumb[index];
     const targetId = target?.id ?? null;
     const rootName = state.breadcrumb[0]?.name;
@@ -1974,9 +1955,9 @@ export function useFiles(keys: {
             : rootName === "Trash" ? "trash"
               : "own";
     if (targetId === null) {
-      await fetchFiles(null, rootMode);
+      await fetchFiles(null, rootMode, bc);
     } else {
-      await fetchFiles(targetId, "own");
+      await fetchFiles(targetId, "own", bc);
     }
   }, [fetchFiles, state.breadcrumb]);
 
@@ -1985,25 +1966,17 @@ export function useFiles(keys: {
    */
   const setViewMode = useCallback(
     async (mode: ViewMode) => {
-      // Set breadcrumb FIRST, then fetch. fetchFiles no longer
-      // touches breadcrumb — all navigation state is managed here.
       if (mode === "own" && state.activeWorkspace) {
-        setState((s) => ({
-          ...s,
-          currentFolder: state.activeWorkspace!.rootFolderId,
-          viewMode: "own",
-          breadcrumb: [{ id: state.activeWorkspace!.rootFolderId, name: state.activeWorkspace!.name }],
-        }));
-        await fetchFiles(state.activeWorkspace.rootFolderId, "own");
+        const bc = [{ id: state.activeWorkspace.rootFolderId, name: state.activeWorkspace.name }];
+        await fetchFiles(state.activeWorkspace.rootFolderId, "own", bc);
       } else {
-        const breadcrumb =
+        const bc =
           mode === "starred" ? [{ id: null as string | null, name: "Starred" }]
             : mode === "recent" ? [{ id: null as string | null, name: "Recent" }]
               : mode === "trash" ? [{ id: null as string | null, name: "Trash" }]
                 : mode === "shared" ? [{ id: null as string | null, name: "Shared with me" }]
                   : [{ id: null as string | null, name: "My Drive" }];
-        setState((s) => ({ ...s, viewMode: mode, currentFolder: null, breadcrumb }));
-        await fetchFiles(null, mode);
+        await fetchFiles(null, mode, bc);
       }
     },
     [fetchFiles, state.activeWorkspace]
