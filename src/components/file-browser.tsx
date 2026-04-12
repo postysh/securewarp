@@ -215,8 +215,11 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0) {
         e.preventDefault();
-        for (const id of selected) fileOps.deleteItem(id);
+        const ids = [...selected];
         selectNone();
+        (async () => {
+          for (const id of ids) await fileOps.deleteItem(id);
+        })();
         return;
       }
     };
@@ -450,10 +453,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             </button>
             <button
               onClick={async () => {
-                for (const id of selected) {
-                  await fileOps.deleteItem(id);
-                }
+                const ids = [...selected];
                 selectNone();
+                for (const id of ids) await fileOps.deleteItem(id);
               }}
               title="Trash"
               className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-accent-red"
@@ -945,8 +947,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 if (!contextMenu) return;
                 const fileId = contextMenu.fileId;
                 setContextMenu(null);
-                const res = await fileOps.leaveShare(fileId);
-                if (res.ok) await fileOps.fetchFiles(null, "shared");
+                await fileOps.leaveShare(fileId);
               }}
               className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
             >

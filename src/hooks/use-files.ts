@@ -681,6 +681,7 @@ export function useFiles(keys: {
 
   const downloadFile = useCallback(async (fileId: string) => {
     if (!keys) return;
+    setState((s) => ({ ...s, error: null }));
 
     let sessionKey: Uint8Array | null = null;
     try {
