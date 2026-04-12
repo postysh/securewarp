@@ -623,22 +623,15 @@ export function useFiles(keys: {
           setCachedFiles(cacheKey, entries, idbKey);
         } catch { /* non-fatal */ }
 
-        setState((s) => {
-          // Skip re-render if the file list hasn't actually changed
-          // (stale-while-revalidate returned same data as cache)
-          const sameFiles =
-            s.files.length === results.length &&
-            s.files.every((f, i) => f.id === results[i]?.id && f.name === results[i]?.name);
-          return {
-            ...s,
-            files: sameFiles ? s.files : results,
-            loading: false,
-            callerPermission: data.callerPermission ?? null,
-            currentFolder: mode !== "own" ? null : parentId,
-            viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
-            ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
-          };
-        });
+        setState((s) => ({
+          ...s,
+          files: results,
+          loading: false,
+          callerPermission: data.callerPermission ?? null,
+          currentFolder: mode !== "own" ? null : parentId,
+          viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
+          ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
+        }));
       } catch (err) {
         console.error("Fetch files error:", err);
         setState((s) => ({ ...s, loading: false, error: "Failed to load files" }));
