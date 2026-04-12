@@ -57,7 +57,11 @@ export default function DriveClient() {
     });
   };
 
-  if (hydrated && !keys) {
+  if (!hydrated) {
+    return null;
+  }
+
+  if (!keys) {
     return (
       <ThemeProvider>
         <AuthScreen mode="login" />
