@@ -412,9 +412,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <HugeiconsIcon icon={FolderAddIcon} size={14} />
                 New folder
               </button>
-              <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer">
+              <button onClick={() => fileInputRef.current?.click()} className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer">
                 <HugeiconsIcon icon={Upload04Icon} size={14} />
-                <span className="hidden md:inline">Upload</span>
+                Upload
               </button>
             </>
           )}
@@ -1144,7 +1144,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             className="w-[48px] h-[48px] rounded-full bg-cta-primary flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
             style={{ boxShadow: "var(--shadow-l2)" }}
           >
-            <HugeiconsIcon icon={Upload04Icon} size={20} color="white" />
+            <HugeiconsIcon icon={Upload04Icon} size={20} color="#ffffff" />
           </button>
         </div>
       )}
