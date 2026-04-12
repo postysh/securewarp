@@ -332,6 +332,22 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           <button onClick={onToggleSidebar} className="hidden md:block p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer mr-1">
             <HugeiconsIcon icon={SidebarLeft01Icon} size={16} />
           </button>
+          {/* Mobile breadcrumb: back arrow + current name */}
+          <div className="flex md:hidden items-center gap-1.5 min-w-0">
+            {fileOps.breadcrumb.length > 1 && (
+              <button
+                onClick={() => fileOps.navigateToBreadcrumb(fileOps.breadcrumb.length - 2)}
+                className="p-1 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer shrink-0"
+              >
+                <HugeiconsIcon icon={ArrowLeft01Icon} size={16} />
+              </button>
+            )}
+            <span className="text-text-primary font-medium truncate">
+              {fileOps.breadcrumb[fileOps.breadcrumb.length - 1]?.name ?? "My Drive"}
+            </span>
+          </div>
+          {/* Desktop breadcrumb: full path */}
+          <div className="hidden md:flex items-center gap-1.5">
           {(() => {
             const crumbs = fileOps.breadcrumb;
             const maxVisible = 3;
@@ -339,8 +355,6 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             const visible = collapsed ? [crumbs[0], ...crumbs.slice(-2)] : crumbs;
 
             return visible.map((crumb, i) => (
-              // Key by (position, id) — defends against transient duplicate
-              // breadcrumb entries without hiding the bug in state.
               <span key={`${i}-${crumb.id ?? "root"}`} className="flex items-center gap-1.5">
                 {i > 0 && <span className="text-text-disabled">/</span>}
                 {i === 1 && collapsed && (
@@ -359,6 +373,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               </span>
             ));
           })()}
+          </div>
         </div>
 
         {/* Center: search trigger (hidden on mobile, use Cmd+K or search icon) */}
@@ -712,7 +727,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
-              className={`group flex items-center h-[56px] px-4 rounded-xl border cursor-pointer transition-colors mb-1.5 ${
+              className={`group flex items-center h-[64px] md:h-[56px] px-4 rounded-xl border cursor-pointer transition-colors mb-1.5 ${
                 dropTargetId === file.id
                   ? "border-accent-green bg-accent-green/5"
                   : dragFileId === file.id
@@ -840,16 +855,33 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         })}
       </div>
 
-      {/* Context menu */}
+      {/* Context menu: bottom sheet on mobile, floating dropdown on desktop */}
       {contextMenu && createPortal(
-        <div
-          className="fixed z-[9999] w-[180px] rounded-[8px] bg-bg-l3 border border-border-primary overflow-hidden py-1 animate-fade-in"
-          style={{
-            top: Math.min(contextMenu.y, window.innerHeight - 300),
-            left: Math.min(contextMenu.x, window.innerWidth - 200),
-            boxShadow: "var(--shadow-l2)",
-          }}
-        >
+        <div className="fixed inset-0 z-[9999]" onClick={() => setContextMenu(null)}>
+          {/* Backdrop (mobile only) */}
+          <div className="absolute inset-0 bg-black/40 md:bg-transparent" />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="fixed md:absolute w-full md:w-[180px] bottom-0 md:bottom-auto left-0 md:left-auto rounded-t-2xl md:rounded-[8px] bg-bg-l3 border-t md:border border-border-primary overflow-hidden py-2 md:py-1 animate-fade-in"
+            style={{
+              top: undefined,
+              ...(typeof window !== "undefined" && window.innerWidth >= 768
+                ? {
+                    position: "fixed" as const,
+                    top: Math.min(contextMenu.y, window.innerHeight - 300),
+                    left: Math.min(contextMenu.x, window.innerWidth - 200),
+                    bottom: "auto",
+                    width: 180,
+                    borderRadius: 8,
+                  }
+                : {}),
+              boxShadow: "var(--shadow-l2)",
+            }}
+          >
+            {/* Bottom sheet handle (mobile only) */}
+            <div className="flex justify-center pb-2 md:hidden">
+              <div className="w-10 h-1 rounded-full bg-border-secondary" />
+            </div>
           {fileOps.viewMode !== "trash" && (
             <>
               <button
@@ -863,7 +895,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   }
                   setContextMenu(null);
                 }}
-                className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
               >
                 <HugeiconsIcon icon={FolderAddIcon} size={14} color="var(--icon-tertiary)" /> Open
               </button>
@@ -879,7 +911,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                     }
                     setContextMenu(null);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
                 >
                   <HugeiconsIcon icon={Edit02Icon} size={14} color="var(--icon-tertiary)" /> Rename
                 </button>
@@ -891,7 +923,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   if (full) fileOps.toggleStar(full.id, !full.isStarred);
                   setContextMenu(null);
                 }}
-                className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
               >
                 <HugeiconsIcon icon={StarIcon} size={14} color="var(--icon-tertiary)" />
                 {(() => {
@@ -909,7 +941,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 setContextMenu(null);
                 await fileOps.restoreItem(fileId);
               }}
-              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
             >
               <HugeiconsIcon icon={ArrowLeft01Icon} size={14} color="var(--icon-tertiary)" /> Restore
             </button>
@@ -923,13 +955,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 }
                 setContextMenu(null);
               }}
-              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
             >
               <HugeiconsIcon icon={Share01Icon} size={14} color="var(--icon-tertiary)" /> Share
             </button>
           )}
           {fileOps.viewMode !== "trash" && !contextMenu?.isFolder && (
-            <button onClick={() => { if (contextMenu) { fileOps.downloadFile(contextMenu.fileId); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+            <button onClick={() => { if (contextMenu) { fileOps.downloadFile(contextMenu.fileId); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
               <HugeiconsIcon icon={Download04Icon} size={14} color="var(--icon-tertiary)" /> Download
             </button>
           )}
@@ -943,12 +975,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                     if (full) setMoveTarget(full);
                     setContextMenu(null);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
                 >
                   <HugeiconsIcon icon={Move01Icon} size={14} color="var(--icon-tertiary)" /> Move to
                 </button>
               )}
-              <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+              <button className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
                 <HugeiconsIcon icon={InformationCircleIcon} size={14} color="var(--icon-tertiary)" /> Details
               </button>
             </>
@@ -962,7 +994,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 if (full) setPurgeTarget(full);
                 setContextMenu(null);
               }}
-              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
             >
               <HugeiconsIcon icon={Delete02Icon} size={14} /> Delete forever
             </button>
@@ -974,7 +1006,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 setContextMenu(null);
                 await fileOps.leaveShare(fileId);
               }}
-              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
             >
               <HugeiconsIcon icon={Delete02Icon} size={14} /> Remove from shared
             </button>
@@ -986,11 +1018,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   setContextMenu(null);
                 }
               }}
-              className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
             >
               <HugeiconsIcon icon={Delete02Icon} size={14} /> Trash
             </button>
           )}
+        </div>
         </div>,
         document.body
       )}
@@ -1095,6 +1128,26 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           }
         }}
       />
+
+      {/* Mobile FAB for upload + new folder */}
+      {fileOps.viewMode !== "trash" && fileOps.callerPermission !== "viewer" && (fileOps.viewMode === "own" || fileOps.currentFolder) && (
+        <div className="fixed bottom-[76px] right-4 z-20 flex flex-col gap-2 md:hidden">
+          <button
+            onClick={() => setNewFolderOpen(true)}
+            className="w-[48px] h-[48px] rounded-full bg-bg-l3 border border-border-secondary flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
+            style={{ boxShadow: "var(--shadow-l2)" }}
+          >
+            <HugeiconsIcon icon={FolderAddIcon} size={20} color="var(--icon-secondary)" />
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-[48px] h-[48px] rounded-full bg-cta-primary flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
+            style={{ boxShadow: "var(--shadow-l2)" }}
+          >
+            <HugeiconsIcon icon={Upload04Icon} size={20} color="white" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
