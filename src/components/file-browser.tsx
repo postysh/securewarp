@@ -655,7 +655,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           return (
             <div
               key={file.id}
-              draggable={fileOps.viewMode === "own" && !file.uploading}
+              draggable={fileOps.viewMode === "own" && !file.uploading && fileOps.callerPermission !== "viewer"}
               onDragStart={(e) => {
                 setDragFileId(file.id);
                 e.dataTransfer.effectAllowed = "move";
@@ -840,21 +840,23 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               >
                 <HugeiconsIcon icon={FolderAddIcon} size={14} color="var(--icon-tertiary)" /> Open
               </button>
-              <button
-                onClick={() => {
-                  if (!contextMenu) return;
-                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
-                  if (full) {
-                    setRenameTarget(full);
-                    setRenameValue(full.name);
-                    setRenameError(null);
-                  }
-                  setContextMenu(null);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={Edit02Icon} size={14} color="var(--icon-tertiary)" /> Rename
-              </button>
+              {fileOps.callerPermission !== "viewer" && (
+                <button
+                  onClick={() => {
+                    if (!contextMenu) return;
+                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                    if (full) {
+                      setRenameTarget(full);
+                      setRenameValue(full.name);
+                      setRenameError(null);
+                    }
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={Edit02Icon} size={14} color="var(--icon-tertiary)" /> Rename
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (!contextMenu) return;
@@ -906,17 +908,19 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           )}
           {fileOps.viewMode !== "trash" && (
             <>
-              <button
-                onClick={() => {
-                  if (!contextMenu) return;
-                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
-                  if (full) setMoveTarget(full);
-                  setContextMenu(null);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={Move01Icon} size={14} color="var(--icon-tertiary)" /> Move to
-              </button>
+              {fileOps.callerPermission !== "viewer" && (
+                <button
+                  onClick={() => {
+                    if (!contextMenu) return;
+                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                    if (full) setMoveTarget(full);
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={Move01Icon} size={14} color="var(--icon-tertiary)" /> Move to
+                </button>
+              )}
               <button className="w-full flex items-center gap-2.5 px-3 h-[30px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
                 <HugeiconsIcon icon={InformationCircleIcon} size={14} color="var(--icon-tertiary)" /> Details
               </button>
