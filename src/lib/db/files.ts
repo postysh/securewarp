@@ -750,11 +750,12 @@ export async function getFileForDownload(
       };
     }
 
-    // Move up to the parent
+    // Move up to the parent — must also be live (not trashed)
     const { data: parentRow } = await supabase
       .from("files")
       .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
       .eq("id", current.parent_id)
+      .is("deleted_at", null)
       .single();
     if (!parentRow) return null;
     const pOwner = (parentRow.owner as { public_encryption_key: string } | null)?.public_encryption_key || "";
