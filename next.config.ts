@@ -40,6 +40,7 @@ const connectSources = [
   // Supabase REST + realtime, in case any client-side direct fetches
   // are added later (today the service-role client is server-only).
   "https://*.supabase.co",
+  "wss://*.supabase.co",
   // Cloudflare Web Analytics beacon data endpoint.
   "https://cloudflareinsights.com",
   // Sentry error reporting.
@@ -85,6 +86,7 @@ const csp = [
   `frame-ancestors 'none'`,
   `base-uri 'self'`,
   `form-action 'self'`,
+  `worker-src 'self' blob:`,
   `object-src 'none'`,
   `upgrade-insecure-requests`,
 ].join("; ");
