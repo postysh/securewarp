@@ -536,19 +536,22 @@ export function useFiles(keys: {
               name: wr.name, type: wr.type, size: wr.size,
             } as DecryptedFile);
           }
-          // Flush worker results to UI
-          setState((s) => ({ ...s, files: [...results], loading: false }));
+          // Don't flush yet — wait for deferred pass so we get one
+          // single render with all files (no flicker).
         } else {
-          // Fallback: main-thread streaming decrypt
+          // Fallback: main-thread streaming decrypt. Only flush
+          // batches for large lists (>30 items) to balance perceived
+          // speed vs flicker.
           const BATCH_SIZE = 15;
           let batchCount = 0;
+          const shouldStream = directFiles.length > 30;
           for (const f of directFiles) {
             try {
               const result = tryDecrypt(f);
               if (result) {
                 results.push(result);
                 batchCount++;
-                if (batchCount >= BATCH_SIZE) {
+                if (shouldStream && batchCount >= BATCH_SIZE) {
                   setState((s) => ({ ...s, files: [...results], loading: false }));
                   batchCount = 0;
                   await new Promise((r) => setTimeout(r, 0));
