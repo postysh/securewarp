@@ -228,9 +228,11 @@ export async function getInheritedChildren(
   parentId: string,
   userId: string
 ): Promise<FileRowWithKey[]> {
-  // 1. Access check + fetch children in parallel
-  const [parent, childResult] = await Promise.all([
-    getFileById(parentId, userId),
+  // 1. Lightweight access check + fetch children in parallel.
+  // Instead of the full getFileById (joins file_keys + users), just
+  // check if the caller owns the folder OR has a file_keys row on it.
+  const [accessResult, childResult] = await Promise.all([
+    supabase.from("file_keys").select("user_id").eq("file_id", parentId).eq("user_id", userId).single(),
     supabase
       .from("files")
       .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
@@ -241,7 +243,9 @@ export async function getInheritedChildren(
       .order("created_at", { ascending: false })
       .limit(100),
   ]);
-  if (!parent) return [];
+  // Access denied if no file_keys row (neither owner nor collaborator)
+  if (!accessResult.data && accessResult.error?.code === "PGRST116") return [];
+  if (accessResult.error && accessResult.error.code !== "PGRST116") return [];
   const { data: files, error } = childResult;
   if (error) throw new Error(`Failed to fetch children: ${error.message}`);
   if (!files || files.length === 0) return [];

@@ -52,19 +52,10 @@ export async function GET(request: Request) {
       // Root listing of own files.
       files = await getFilesForUser(session.userId, null);
     } else {
-      // Fast path for owned folders (1 query with join).
-      // Slow path for shared folders (3 queries for inherited access).
-      // Check ownership first — one lightweight query.
-      const { data: parentRow } = await supabase
-        .from("files")
-        .select("owner_id")
-        .eq("id", parentId)
-        .single();
-      if (parentRow?.owner_id === session.userId) {
-        files = await getFilesForUser(session.userId, parentId);
-      } else {
-        files = await getInheritedChildren(parentId, session.userId);
-      }
+      // Always use getInheritedChildren — it returns ALL children
+      // regardless of owner, so collaborator-created subfolders
+      // are visible. Parallelized internally for speed.
+      files = await getInheritedChildren(parentId, session.userId);
     }
 
     // Enrich each file with collaborators, stars, and labels.
