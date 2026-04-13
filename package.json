@@ -32,6 +32,7 @@
     "server-only": "^0.0.1",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
+    "use-scramble": "^2.2.15",
     "zod": "^4.3.6"
   },
   "devDependencies": {
