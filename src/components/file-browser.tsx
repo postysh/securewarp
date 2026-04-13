@@ -465,17 +465,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           {fileOps.activeWorkspace && (
             <>
               <div className="hidden md:block">
-                <Facepile members={workspaceMembers} onClick={() => setWorkspaceSettingsOpen(true)} onOverflowClick={() => setWorkspaceSettingsOpen(true)} />
+                <Facepile members={workspaceMembers} onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
               </div>
-              {fileOps.activeWorkspace && (
-                <button
-                  onClick={() => setWorkspaceSettingsOpen(true)}
-                  className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
-                >
-                  <HugeiconsIcon icon={UserAdd01Icon} size={14} />
-                  Invite
-                </button>
-              )}
+              <button
+                onClick={() => setWorkspaceSettingsOpen(true)}
+                className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={UserAdd01Icon} size={14} />
+                Invite
+              </button>
             </>
           )}
           {/* No Facepile/Invite in personal — file-level sharing uses
@@ -1285,7 +1283,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       />
       <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
-      <MembersModal open={membersOpen} onClose={() => setMembersOpen(false)} />
+      <MembersModal
+        open={membersOpen}
+        onClose={() => setMembersOpen(false)}
+        workspaceId={fileOps.activeWorkspace?.id ?? null}
+        isAdmin={fileOps.callerPermission === null || fileOps.callerPermission === "owner"}
+      />
       <WorkspaceSettings
         open={workspaceSettingsOpen}
         onClose={() => setWorkspaceSettingsOpen(false)}

@@ -7,76 +7,74 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import { RoleDropdown } from "./role-dropdown";
+import { colorForEmail } from "./facepile";
 
-const WORKSPACE_ROLES = ["Admin", "Editor", "Viewer"] as const;
-type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
+const WORKSPACE_ROLES = ["admin", "editor", "viewer"] as const;
+const ROLE_LABELS: Record<string, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
 
 interface MembersModalProps {
   open: boolean;
   onClose: () => void;
+  workspaceId: string | null;
+  isAdmin: boolean;
 }
-
-type Permission = WorkspaceRole;
 
 interface Member {
-  initials: string;
-  name: string;
+  userId: string;
   email: string;
-  bg: string;
-  permission: Permission;
-  online: boolean;
-  isOwner?: boolean;
+  role: string;
 }
 
-const allMembers: Member[] = [
-  { initials: "You", name: "You", email: "you@example.com", bg: "var(--accent-green-primary)", permission: "Admin", online: true, isOwner: true },
-  { initials: "JD", name: "John Doe", email: "john@example.com", bg: "var(--accent-blue-primary)", permission: "Editor", online: true },
-  { initials: "AM", name: "Alice Martin", email: "alice@example.com", bg: "var(--accent-green-primary)", permission: "Editor", online: true },
-  { initials: "SK", name: "Sam Kim", email: "sam@example.com", bg: "var(--accent-orange-primary)", permission: "Viewer", online: false },
-  { initials: "LW", name: "Lisa Wang", email: "lisa@example.com", bg: "var(--accent-pink-primary)", permission: "Viewer", online: false },
-  { initials: "RJ", name: "Ryan Johnson", email: "ryan@example.com", bg: "var(--accent-dark-blue-primary)", permission: "Editor", online: true },
-];
-
-export function MembersModal({ open, onClose }: MembersModalProps) {
-  const [members, setMembers] = useState(allMembers);
+export function MembersModal({ open, onClose, workspaceId, isAdmin }: MembersModalProps) {
+  const [members, setMembers] = useState<Member[]>([]);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    if (open) setSearch("");
-  }, [open]);
+    if (!open || !workspaceId) return;
+    setSearch("");
+    fetch(`/api/workspaces/members?workspaceId=${workspaceId}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.members) setMembers(d.members); })
+      .catch(() => {});
+  }, [open, workspaceId]);
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
-  const updateRole = (email: string, permission: Permission) => {
-    setMembers(members.map((m) => m.email === email ? { ...m, permission } : m));
+  const changeRole = async (userId: string, role: string) => {
+    await fetch("/api/workspaces/change-role", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId, userId, role }),
+    });
+    setMembers((prev) => prev.map((m) => m.userId === userId ? { ...m, role } : m));
   };
 
-  const removeMember = (email: string) => {
-    setMembers(members.filter((m) => m.email !== email));
+  const removeMember = async (userId: string) => {
+    await fetch("/api/workspaces/remove-member", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId, userId }),
+    });
+    setMembers((prev) => prev.filter((m) => m.userId !== userId));
   };
 
   const filtered = members.filter((m) =>
-    m.name.toLowerCase().includes(search.toLowerCase()) ||
     m.email.toLowerCase().includes(search.toLowerCase())
   );
-
-  const onlineCount = members.filter((m) => m.online).length;
 
   if (!open) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center">
       <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={onClose} />
-
       <div
-        role="dialog" aria-modal="true" aria-label="Members" className="relative w-full h-full md:h-auto max-w-none md:max-w-[440px] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in flex flex-col"
+        role="dialog" aria-modal="true" aria-label="Members"
+        className="relative w-full h-full md:h-auto max-w-none md:max-w-[440px] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in flex flex-col"
         style={{ boxShadow: "var(--shadow-l2)", maxHeight: "80vh" }}
       >
         {/* Header */}
@@ -87,7 +85,7 @@ export function MembersModal({ open, onClose }: MembersModalProps) {
             </div>
             <div>
               <span className="text-[14px] font-semibold text-text-primary">Members</span>
-              <p className="text-[11px] text-text-disabled">{members.length} members, {onlineCount} online</p>
+              <p className="text-[11px] text-text-disabled">{members.length} members</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer">
@@ -115,39 +113,29 @@ export function MembersModal({ open, onClose }: MembersModalProps) {
         <div className="flex-1 overflow-y-auto px-5 pb-5">
           <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
             {filtered.map((m) => (
-              <div key={m.email} className="flex items-center gap-3 px-3 py-2.5 border-b border-border-tertiary last:border-b-0 hover:bg-bg-cell-hover transition-colors">
-                {/* Avatar with online dot */}
+              <div key={m.userId} className="flex items-center gap-3 px-3 py-2.5 border-b border-border-tertiary last:border-b-0 hover:bg-bg-cell-hover transition-colors">
                 <div className="relative shrink-0">
                   <div
                     className="w-8 h-8 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white"
-                    style={{ backgroundColor: m.bg }}
+                    style={{ backgroundColor: colorForEmail(m.email) }}
                   >
-                    {m.initials}
+                    {m.email.charAt(0).toUpperCase()}
                   </div>
-                  {m.online && (
-                    <div
-                      className="absolute -bottom-0.5 -right-0.5 w-[10px] h-[10px] rounded-full border-2"
-                      style={{ backgroundColor: "var(--accent-green-primary)", borderColor: "var(--bg-l3-solid)" }}
-                    />
-                  )}
                 </div>
-
-                {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-[12px] text-text-primary truncate">{m.name}</p>
-                  <p className="text-[10px] text-text-disabled truncate">{m.email}</p>
+                  <p className="text-[12px] text-text-primary truncate">{m.email}</p>
+                  <p className="text-[10px] text-text-disabled capitalize">{ROLE_LABELS[m.role] ?? m.role}</p>
                 </div>
-
-                {/* Role */}
-                {m.isOwner ? (
-                  <span className="text-[11px] text-text-disabled px-2">Owner</span>
-                ) : (
-                  <RoleDropdown<WorkspaceRole>
-                    value={m.permission}
+                {isAdmin && m.role !== "admin" ? (
+                  <RoleDropdown
+                    value={m.role}
                     options={WORKSPACE_ROLES}
-                    onChange={(v) => updateRole(m.email, v)}
-                    onRemove={() => removeMember(m.email)}
+                    labels={ROLE_LABELS}
+                    onChange={(v) => changeRole(m.userId, v)}
+                    onRemove={() => removeMember(m.userId)}
                   />
+                ) : (
+                  <span className="text-[11px] text-text-disabled px-2 capitalize">{ROLE_LABELS[m.role] ?? m.role}</span>
                 )}
               </div>
             ))}
