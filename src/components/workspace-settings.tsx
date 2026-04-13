@@ -228,7 +228,8 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value as "admin" | "editor" | "viewer")}
                   disabled={inviteBusy}
-                  className="h-[34px] px-2 rounded-[8px] bg-bg-field text-[11px] text-text-secondary border border-transparent focus:outline-none focus:ring-2 focus:ring-accent-green/25 cursor-pointer disabled:opacity-50"
+                  className="h-[34px] px-2.5 rounded-[8px] bg-bg-field text-[11px] text-text-secondary border border-border-secondary focus:outline-none focus:ring-2 focus:ring-accent-green/25 focus:border-accent-green/40 cursor-pointer disabled:opacity-50 appearance-none"
+                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center", paddingRight: "24px" }}
                 >
                   <option value="editor">Editor</option>
                   <option value="viewer">Viewer</option>
@@ -274,7 +275,8 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
                         });
                         setMembers((prev) => prev.map((x) => x.userId === m.userId ? { ...x, role: newRole } : x));
                       }}
-                      className="h-[26px] px-1.5 rounded-[6px] bg-bg-field text-[10px] text-text-secondary border-none focus:outline-none cursor-pointer"
+                      className="h-[26px] px-2 rounded-[6px] bg-bg-field text-[10px] text-text-secondary border border-border-secondary focus:outline-none focus:ring-1 focus:ring-accent-green/25 cursor-pointer appearance-none"
+                      style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 6px center", paddingRight: "20px" }}
                     >
                       <option value="admin">Admin</option>
                       <option value="editor">Editor</option>

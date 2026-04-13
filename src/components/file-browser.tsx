@@ -36,6 +36,7 @@ const RenameModal = dynamic(() => import("./rename-modal").then((m) => ({ defaul
 const MoveModal = dynamic(() => import("./move-modal").then((m) => ({ default: m.MoveModal })), { ssr: false });
 const FilePreview = dynamic(() => import("./file-preview").then((m) => ({ default: m.FilePreview })), { ssr: false });
 import { ConfirmDialog } from "./confirm-dialog";
+import { WorkspaceSettings } from "./workspace-settings";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
@@ -171,6 +172,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [userLabels, setUserLabels] = useState<{ id: string; name: string; color: string }[]>([]);
   const [filterLabel, setFilterLabel] = useState<{ id: string; name: string; color: string } | null>(null);
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -441,21 +443,42 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
         {/* Right: actions */}
         <div className="flex items-center gap-1 md:gap-2 shrink-0 z-10">
-          {/* Facepile */}
-          <div className="hidden md:block">
-            <Facepile onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
-          </div>
-          {fileOps.viewMode === "own" && (
-            <button
-              onClick={() => {
-                const first = fileOps.files.find((f) => selected.has(f.id));
-                if (first) setShareTarget(first);
-              }}
-              className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
-            >
-              <HugeiconsIcon icon={UserAdd01Icon} size={14} />
-              Invite
-            </button>
+          {/* Facepile + Invite — workspace context */}
+          {fileOps.activeWorkspace && (
+            <>
+              <div className="hidden md:block">
+                <Facepile onClick={() => setWorkspaceSettingsOpen(true)} onOverflowClick={() => setWorkspaceSettingsOpen(true)} />
+              </div>
+              {fileOps.activeWorkspace && (
+                <button
+                  onClick={() => setWorkspaceSettingsOpen(true)}
+                  className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={UserAdd01Icon} size={14} />
+                  Invite
+                </button>
+              )}
+            </>
+          )}
+          {/* Facepile + Invite — personal file sharing context */}
+          {!fileOps.activeWorkspace && (
+            <>
+              <div className="hidden md:block">
+                <Facepile onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
+              </div>
+              {fileOps.viewMode === "own" && (
+                <button
+                  onClick={() => {
+                    const first = fileOps.files.find((f) => selected.has(f.id));
+                    if (first) setShareTarget(first);
+                  }}
+                  className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={UserAdd01Icon} size={14} />
+                  Invite
+                </button>
+              )}
+            </>
           )}
           {(fileOps.viewMode === "own" || fileOps.currentFolder) && fileOps.viewMode !== "trash" && fileOps.callerPermission !== "viewer" && (
             <>
@@ -1263,6 +1286,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
       <MembersModal open={membersOpen} onClose={() => setMembersOpen(false)} />
+      <WorkspaceSettings
+        open={workspaceSettingsOpen}
+        onClose={() => setWorkspaceSettingsOpen(false)}
+        workspace={fileOps.activeWorkspace ? { ...fileOps.activeWorkspace, role: fileOps.callerPermission === "viewer" ? "viewer" : fileOps.callerPermission === "editor" ? "editor" : "admin" } : null}
+        onDeleted={() => { setWorkspaceSettingsOpen(false); fileOps.leaveWorkspace(); }}
+      />
       <CommandPalette
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
