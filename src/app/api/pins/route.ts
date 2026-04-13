@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
+import { getEffectivePermission } from "@/lib/db/files";
 import { logError } from "@/lib/log";
 
 const PinSchema = z.object({
@@ -41,6 +42,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const parsed = PinSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: "Invalid data" }, { status: 400 });
+
+    const perm = await getEffectivePermission(parsed.data.fileId, session.userId);
+    if (!perm) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
     const { error } = await supabase
       .from("user_pins")

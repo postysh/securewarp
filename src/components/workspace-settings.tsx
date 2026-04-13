@@ -7,8 +7,11 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import Logout01Icon from "@hugeicons/core-free-icons/Logout01Icon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import { ConfirmDialog } from "./confirm-dialog";
 import { RoleDropdown } from "./role-dropdown";
+import { colorForEmail } from "./facepile";
+import { WorkspaceActivityModal } from "./workspace-activity-modal";
 
 interface WorkspaceSettingsProps {
   open: boolean;
@@ -21,6 +24,7 @@ interface WorkspaceSettingsProps {
     color?: string;
     description?: string;
     defaultRole?: string;
+    ownerId?: string;
   } | null;
   onDeleted: () => void;
   onUpdated?: () => void;
@@ -56,6 +60,11 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
   const [wsDescription, setWsDescription] = useState("");
   const [editingDescription, setEditingDescription] = useState(false);
   const [wsDefaultRole, setWsDefaultRole] = useState<"admin" | "editor" | "viewer">("editor");
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferTarget, setTransferTarget] = useState<{ userId: string; email: string } | null>(null);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [adminMembers, setAdminMembers] = useState<{ userId: string; email: string }[]>([]);
+  const [activityOpen, setActivityOpen] = useState(false);
 
   const isAdmin = workspace?.role === "admin";
 
@@ -67,6 +76,8 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
       setWsDescription(workspace.description || "");
       setEditingDescription(false);
       setWsDefaultRole((workspace.defaultRole as "admin" | "editor" | "viewer") || "editor");
+      setTransferOpen(false);
+      setTransferTarget(null);
     }
   }, [open, workspace]);
 
@@ -261,6 +272,122 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
             </div>
           </div>
 
+          {/* Activity — admin only */}
+          {isAdmin && (
+            <div className="px-5 py-4 border-b border-border-tertiary">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-0.5">Activity</p>
+                  <p className="text-[11px] text-text-disabled">Recent workspace events</p>
+                </div>
+                <button
+                  onClick={() => setActivityOpen(true)}
+                  className="text-[11px] text-text-link hover:underline cursor-pointer shrink-0"
+                >
+                  View
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Transfer ownership — admin only, API enforces owner check */}
+          {isAdmin && (
+            <div className="px-5 py-4 border-b border-border-tertiary">
+              {!transferOpen ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-0.5">Transfer ownership</p>
+                    <p className="text-[11px] text-text-disabled">Transfer to another admin</p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      setTransferOpen(true);
+                      const res = await fetch(`/api/workspaces/members?workspaceId=${workspace.id}`);
+                      const d = await res.json();
+                      if (d.members) {
+                        let myEmail = "";
+                        try { myEmail = JSON.parse(sessionStorage.getItem("securewarp_keys") || "{}").email || ""; } catch { /* */ }
+                        setAdminMembers(
+                          d.members
+                            .filter((m: { role: string; email: string }) => m.role === "admin" && m.email !== myEmail)
+                            .map((m: { userId: string; email: string }) => ({ userId: m.userId, email: m.email }))
+                        );
+                      }
+                    }}
+                    className="text-[11px] text-text-link hover:underline cursor-pointer shrink-0"
+                  >
+                    Transfer
+                  </button>
+                </div>
+              ) : adminMembers.length === 0 ? (
+                <div>
+                  <p className="text-[12px] text-text-tertiary mb-2">No other admin members. Promote a member to admin first.</p>
+                  <button
+                    onClick={() => setTransferOpen(false)}
+                    className="text-[11px] text-text-link hover:underline cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <div className="rounded-[10px] border border-border-tertiary overflow-hidden mb-2">
+                    {adminMembers.map((m) => (
+                      <button
+                        key={m.userId}
+                        onClick={() => setTransferTarget(m)}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 border-b border-border-tertiary last:border-b-0 hover:bg-bg-cell-hover transition-colors cursor-pointer ${
+                          transferTarget?.userId === m.userId ? "bg-bg-cell-hover" : ""
+                        }`}
+                      >
+                        <div
+                          className="w-6 h-6 rounded-[5px] flex items-center justify-center text-[9px] font-bold text-white shrink-0"
+                          style={{ backgroundColor: colorForEmail(m.email) }}
+                        >
+                          {m.email.charAt(0).toUpperCase()}
+                        </div>
+                        <span className="text-[12px] text-text-primary truncate">{m.email}</span>
+                        {transferTarget?.userId === m.userId && (
+                          <HugeiconsIcon icon={Tick01Icon} size={12} color="var(--accent-green-primary)" className="ml-auto shrink-0" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setTransferOpen(false); setTransferTarget(null); }}
+                      className="h-[30px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!transferTarget || transferBusy) return;
+                        setTransferBusy(true);
+                        const res = await fetch("/api/workspaces/transfer", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ workspaceId: workspace.id, newOwnerId: transferTarget.userId }),
+                        });
+                        setTransferBusy(false);
+                        if (res.ok) {
+                          setTransferOpen(false);
+                          setTransferTarget(null);
+                          onUpdated?.();
+                          window.dispatchEvent(new Event("securewarp-workspace-updated"));
+                        }
+                      }}
+                      disabled={!transferTarget || transferBusy}
+                      className="h-[30px] px-3 rounded-[6px] text-[11px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {transferBusy ? "Transferring..." : "Confirm transfer"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Danger zone */}
           <div className="px-5 py-4">
             {isAdmin ? (
@@ -291,6 +418,11 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
           </div>
         </div>
 
+        <WorkspaceActivityModal
+          open={activityOpen}
+          onClose={() => setActivityOpen(false)}
+          workspaceId={workspace.id}
+        />
         <ConfirmDialog
           open={deleteOpen}
           title="Delete workspace?"

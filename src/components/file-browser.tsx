@@ -177,6 +177,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [workspaceInviteOpen, setWorkspaceInviteOpen] = useState(false);
   const [workspaceMembers, setWorkspaceMembers] = useState<FacepileUser[]>([]);
   const [wsDefaultRole, setWsDefaultRole] = useState<"admin" | "editor" | "viewer">("editor");
+  const [wsOwnerId, setWsOwnerId] = useState<string | undefined>(undefined);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -217,6 +218,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       .then((d) => {
         const ws = d.workspaces?.find((w: { id: string }) => w.id === fileOps.activeWorkspace?.id);
         if (ws?.defaultRole) setWsDefaultRole(ws.defaultRole);
+        if (ws?.ownerId) setWsOwnerId(ws.ownerId);
       })
       .catch(() => {});
   }, [fileOps.activeWorkspace]);
@@ -561,37 +563,43 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             >
               <HugeiconsIcon icon={Download04Icon} size={15} />
             </button>
-            <button
-              onClick={() => {
-                const first = fileOps.files.find((f) => selected.has(f.id));
-                if (first) setShareTarget(first);
-              }}
-              title="Share"
-              className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"
-            >
-              <HugeiconsIcon icon={Share01Icon} size={15} />
-            </button>
-            <button
-              onClick={() => {
-                const first = fileOps.files.find((f) => selected.has(f.id));
-                if (first) setMoveTarget(first);
-              }}
-              title="Move"
-              className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"
-            >
-              <HugeiconsIcon icon={Move01Icon} size={15} />
-            </button>
-            <button
-              onClick={async () => {
-                const ids = [...selected];
-                selectNone();
-                for (const id of ids) await fileOps.deleteItem(id);
-              }}
-              title="Trash"
-              className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-accent-red"
-            >
-              <HugeiconsIcon icon={Delete02Icon} size={15} />
-            </button>
+            {fileOps.callerPermission !== "viewer" && (
+              <button
+                onClick={() => {
+                  const first = fileOps.files.find((f) => selected.has(f.id));
+                  if (first) setShareTarget(first);
+                }}
+                title="Share"
+                className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"
+              >
+                <HugeiconsIcon icon={Share01Icon} size={15} />
+              </button>
+            )}
+            {fileOps.callerPermission !== "viewer" && (
+              <button
+                onClick={() => {
+                  const first = fileOps.files.find((f) => selected.has(f.id));
+                  if (first) setMoveTarget(first);
+                }}
+                title="Move"
+                className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"
+              >
+                <HugeiconsIcon icon={Move01Icon} size={15} />
+              </button>
+            )}
+            {fileOps.callerPermission !== "viewer" && (
+              <button
+                onClick={async () => {
+                  const ids = [...selected];
+                  selectNone();
+                  for (const id of ids) await fileOps.deleteItem(id);
+                }}
+                title="Trash"
+                className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-accent-red"
+              >
+                <HugeiconsIcon icon={Delete02Icon} size={15} />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1068,47 +1076,47 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   return f?.isStarred ? "Unstar" : "Star";
                 })()}
               </button>
-              <button
-                onClick={async () => {
-                  if (!contextMenu) return;
-                  const isPinned = pinnedIds.has(contextMenu.fileId);
-                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
-                  await fetch("/api/pins", {
-                    method: isPinned ? "DELETE" : "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ fileId: contextMenu.fileId }),
-                  });
-                  setPinnedIds((prev) => {
-                    const next = new Set(prev);
-                    if (isPinned) {
-                      next.delete(contextMenu.fileId);
-                      // Remove cached name
-                      try {
-                        const cache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}");
-                        delete cache[contextMenu.fileId];
-                        localStorage.setItem("securewarp_pin_names", JSON.stringify(cache));
-                      } catch { /* */ }
-                    } else {
-                      next.add(contextMenu.fileId);
-                      // Cache the decrypted name so the sidebar can show it
-                      if (full) {
+              {!fileOps.activeWorkspace && (
+                <button
+                  onClick={async () => {
+                    if (!contextMenu) return;
+                    const isPinned = pinnedIds.has(contextMenu.fileId);
+                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                    await fetch("/api/pins", {
+                      method: isPinned ? "DELETE" : "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ fileId: contextMenu.fileId }),
+                    });
+                    setPinnedIds((prev) => {
+                      const next = new Set(prev);
+                      if (isPinned) {
+                        next.delete(contextMenu.fileId);
                         try {
                           const cache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}");
-                          cache[contextMenu.fileId] = full.name;
+                          delete cache[contextMenu.fileId];
                           localStorage.setItem("securewarp_pin_names", JSON.stringify(cache));
                         } catch { /* */ }
+                      } else {
+                        next.add(contextMenu.fileId);
+                        if (full) {
+                          try {
+                            const cache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}");
+                            cache[contextMenu.fileId] = full.name;
+                            localStorage.setItem("securewarp_pin_names", JSON.stringify(cache));
+                          } catch { /* */ }
+                        }
                       }
-                    }
-                    return next;
-                  });
-                  setContextMenu(null);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={PinIcon} size={14} color="var(--icon-tertiary)" />
-                {pinnedIds.has(contextMenu?.fileId ?? "") ? "Unpin from sidebar" : "Pin to sidebar"}
-              </button>
-              {userLabels.length > 0 && (() => {
+                      return next;
+                    });
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={PinIcon} size={14} color="var(--icon-tertiary)" />
+                  {pinnedIds.has(contextMenu?.fileId ?? "") ? "Unpin from sidebar" : "Pin to sidebar"}
+                </button>
+              )}
+              {!fileOps.activeWorkspace && userLabels.length > 0 && (() => {
                 const fileEntry = fileOps.files.find((f) => f.id === contextMenu?.fileId);
                 const assignedIds = new Set((fileEntry?.fileLabels ?? []).map((l) => l.id));
                 return (
@@ -1222,7 +1230,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             >
               <HugeiconsIcon icon={Delete02Icon} size={14} /> Remove from shared
             </button>
-          ) : (
+          ) : fileOps.callerPermission !== "viewer" ? (
             <button
               onClick={() => {
                 if (contextMenu) {
@@ -1234,7 +1242,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             >
               <HugeiconsIcon icon={Delete02Icon} size={14} /> Trash
             </button>
-          )}
+          ) : null}
         </div>
         </div>,
         document.body
@@ -1319,7 +1327,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       <WorkspaceSettings
         open={workspaceSettingsOpen}
         onClose={() => setWorkspaceSettingsOpen(false)}
-        workspace={fileOps.activeWorkspace ? { ...fileOps.activeWorkspace, role: fileOps.callerPermission === "viewer" ? "viewer" : fileOps.callerPermission === "editor" ? "editor" : "admin" } : null}
+        workspace={fileOps.activeWorkspace ? { ...fileOps.activeWorkspace, role: fileOps.callerPermission === "viewer" ? "viewer" : fileOps.callerPermission === "editor" ? "editor" : "admin", ownerId: wsOwnerId } : null}
         onDeleted={() => { setWorkspaceSettingsOpen(false); fileOps.leaveWorkspace(); }}
       />
       <WorkspaceInviteModal

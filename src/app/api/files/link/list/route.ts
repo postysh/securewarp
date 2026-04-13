@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { getFileById, getLinksForFile } from "@/lib/db/files";
+import { getFileById, getLinksForFile, getEffectivePermission } from "@/lib/db/files";
 import { logError } from "@/lib/log";
 
 const QuerySchema = z.object({ fileId: z.string().uuid() });
@@ -26,9 +26,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Invalid fileId" }, { status: 400 });
     }
 
+    // Access check — direct file_keys row or inherited via parent chain
     const file = await getFileById(parsed.data.fileId, session.userId);
     if (!file) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
+      const perm = await getEffectivePermission(parsed.data.fileId, session.userId);
+      if (!perm) {
+        return NextResponse.json({ error: "File not found" }, { status: 404 });
+      }
     }
 
     const rows = await getLinksForFile(parsed.data.fileId);

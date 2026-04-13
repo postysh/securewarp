@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { getFileById, grantFileAccess } from "@/lib/db/files";
+import { getFileById, grantFileAccess, getEffectivePermission } from "@/lib/db/files";
 import { getPublicUserByEmail } from "@/lib/db/users";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
@@ -55,13 +55,16 @@ export async function POST(request: Request) {
     }
     const { fileId, recipientEmail, encryptedPrivateHierarchicalKey, wrappedByPublicKey, permissionLevel } = parsed.data;
 
-    // Caller must hold a file_keys row for this file — enforces both access
-    // and existence in one query. Non-owners can re-share. Folders are
-    // allowed from Phase 3 onward: sharing a folder grants access to every
-    // descendant via parent_keys_claim, so no per-child rows needed.
-    const file = await getFileById(fileId, session.userId);
+    // Caller must have access to this file — either a direct file_keys row
+    // or inherited access via workspace parent chain. Non-owners can
+    // re-share. Folders are allowed from Phase 3 onward: sharing a folder
+    // grants access to every descendant via parent_keys_claim.
+    let file = await getFileById(fileId, session.userId);
     if (!file) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
+      const perm = await getEffectivePermission(fileId, session.userId);
+      if (!perm || perm === "viewer") {
+        return NextResponse.json({ error: "File not found" }, { status: 404 });
+      }
     }
 
     const recipient = await getPublicUserByEmail(recipientEmail);

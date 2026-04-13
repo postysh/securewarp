@@ -27,6 +27,7 @@ interface Member {
 
 export function MembersModal({ open, onClose, workspaceId, isAdmin }: MembersModalProps) {
   const [members, setMembers] = useState<Member[]>([]);
+  const myEmail = (() => { try { return JSON.parse(sessionStorage.getItem("securewarp_keys") || "{}").email || ""; } catch { return ""; } })();
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -126,7 +127,7 @@ export function MembersModal({ open, onClose, workspaceId, isAdmin }: MembersMod
                   <p className="text-[12px] text-text-primary truncate">{m.email}</p>
                   <p className="text-[10px] text-text-disabled capitalize">{ROLE_LABELS[m.role] ?? m.role}</p>
                 </div>
-                {isAdmin && m.role !== "admin" ? (
+                {isAdmin && m.email !== myEmail ? (
                   <RoleDropdown
                     value={m.role}
                     options={WORKSPACE_ROLES}

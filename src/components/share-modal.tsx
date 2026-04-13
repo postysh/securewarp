@@ -19,6 +19,15 @@ const ROLE_LABELS: Record<PermissionLevel, string> = {
   viewer: "Viewer",
 };
 
+const EXPIRY_OPTIONS = ["never", "1h", "1d", "7d", "30d"] as const;
+const EXPIRY_LABELS: Record<string, string> = {
+  never: "No expiry",
+  "1h": "1 hour",
+  "1d": "1 day",
+  "7d": "7 days",
+  "30d": "30 days",
+};
+
 interface ShareModalProps {
   file: DecryptedFile | null;
   onClose: () => void;
@@ -49,6 +58,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
   const [linkCopied, setLinkCopied] = useState(false);
   const [linkPassword, setLinkPassword] = useState("");
   const [showPasswordField, setShowPasswordField] = useState(false);
+  const [linkExpiry, setLinkExpiry] = useState<string>("never");
   // userId currently being rotated out (for inline spinner state). null
   // when no rotation is in flight.
   const [rotatingUserId, setRotatingUserId] = useState<string | null>(null);
@@ -68,6 +78,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
     setLinkCopied(false);
     setLinkPassword("");
     setShowPasswordField(false);
+    setLinkExpiry("never");
     setLoadingCollabs(true);
     fileOps
       .loadCollaborators(file.id)
@@ -170,7 +181,16 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
     // Worth flagging to the user via the "Creating…" spinner already
     // on the button.
     const password = showPasswordField && linkPassword.length > 0 ? linkPassword : undefined;
-    const result = await fileOps.createLink(file, { password });
+    let expiresAt: string | undefined;
+    if (linkExpiry !== "never") {
+      const d = new Date();
+      if (linkExpiry === "1h") d.setHours(d.getHours() + 1);
+      else if (linkExpiry === "1d") d.setDate(d.getDate() + 1);
+      else if (linkExpiry === "7d") d.setDate(d.getDate() + 7);
+      else if (linkExpiry === "30d") d.setDate(d.getDate() + 30);
+      expiresAt = d.toISOString();
+    }
+    const result = await fileOps.createLink(file, { password, expiresAt });
     setCreatingLink(false);
     if (!result.ok) {
       setInputError(result.error);
@@ -351,11 +371,17 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                 <span className="text-[12px] font-medium text-text-primary">Public link</span>
               </div>
               <div className="flex items-center gap-2">
+                <RoleDropdown
+                  value={linkExpiry}
+                  options={EXPIRY_OPTIONS}
+                  labels={EXPIRY_LABELS}
+                  onChange={(v) => setLinkExpiry(v)}
+                />
                 <button
                   onClick={() => setShowPasswordField((v) => !v)}
                   className="text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer"
                 >
-                  {showPasswordField ? "No password" : "Add password"}
+                  {showPasswordField ? "No password" : "Password"}
                 </button>
                 <button
                   onClick={handleCreateLink}

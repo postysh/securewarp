@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { getFileById, getCollaborators } from "@/lib/db/files";
+import { getCollaborators, getEffectivePermission } from "@/lib/db/files";
+import { supabase } from "@/lib/db/supabase";
 import { logError } from "@/lib/log";
 
 const QuerySchema = z.object({ fileId: z.string().uuid() });
@@ -19,9 +20,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Invalid fileId" }, { status: 400 });
     }
 
-    // Anyone with access to the file may list its collaborators — reuses the
-    // existing file_keys join in getFileById to enforce that.
-    const file = await getFileById(parsed.data.fileId, session.userId);
+    // Check access: direct file_keys row OR inherited permission via parent chain
+    const perm = await getEffectivePermission(parsed.data.fileId, session.userId);
+    if (!perm) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+
+    // Fetch the file's owner_id
+    const { data: file } = await supabase
+      .from("files")
+      .select("owner_id")
+      .eq("id", parsed.data.fileId)
+      .single();
     if (!file) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }

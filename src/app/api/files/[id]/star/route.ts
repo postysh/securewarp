@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { toggleStar } from "@/lib/db/files";
+import { toggleStar, getEffectivePermission } from "@/lib/db/files";
 import { logError } from "@/lib/log";
 
 const StarSchema = z.object({
@@ -22,6 +22,10 @@ export async function POST(
     const parsed = StarSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid data" }, { status: 400 });
+    }
+    const perm = await getEffectivePermission(fileId, session.userId);
+    if (!perm) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
     await toggleStar(fileId, session.userId, parsed.data.starred);
     return NextResponse.json({ success: true });
