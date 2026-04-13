@@ -352,7 +352,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     setIsDragging(false);
     // Drag-drop uploads only make sense in the owned drive. In "Shared with
     // me" the user has no write target — silently drop the files.
-    if (fileOps.viewMode === "shared" || fileOps.viewMode === "trash") return;
+    if (fileOps.viewMode === "shared" || fileOps.viewMode === "trash" || fileOps.callerPermission === "viewer") return;
     // Ignore internal file-move drags (they set text/plain with a UUID).
     if (e.dataTransfer.types.includes("text/plain") && !e.dataTransfer.files.length) return;
     const files = e.dataTransfer.files;
@@ -485,13 +485,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <div className="hidden md:block">
                 <Facepile members={workspaceMembers} onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
               </div>
-              <button
-                onClick={() => setWorkspaceInviteOpen(true)}
-                className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={UserAdd01Icon} size={14} />
-                Invite
-              </button>
+              {fileOps.callerPermission !== "viewer" && fileOps.callerPermission !== "editor" && (
+                <button
+                  onClick={() => setWorkspaceInviteOpen(true)}
+                  className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={UserAdd01Icon} size={14} />
+                  Invite
+                </button>
+              )}
             </>
           )}
           {/* No Facepile/Invite in personal — file-level sharing uses
@@ -735,6 +737,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                       Back to My Drive
                     </button>
                   </div>
+                </>
+              ) : fileOps.callerPermission === "viewer" ? (
+                <>
+                  <h3 className="text-[18px] font-semibold text-text-primary mb-2">No files yet</h3>
+                  <p className="text-[13px] text-text-tertiary leading-relaxed">
+                    This workspace is empty. Files added by other members will appear here.
+                  </p>
                 </>
               ) : (
                 <>

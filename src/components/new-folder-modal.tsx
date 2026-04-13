@@ -5,8 +5,6 @@ import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
-import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
-import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 
 interface NewFolderModalProps {
@@ -15,25 +13,13 @@ interface NewFolderModalProps {
   onCreate?: (name: string) => void;
 }
 
-const suggestedMembers = [
-  { initials: "JD", name: "John Doe", email: "john@example.com", bg: "var(--accent-blue-primary)" },
-  { initials: "AM", name: "Alice Martin", email: "alice@example.com", bg: "var(--accent-green-primary)" },
-  { initials: "SK", name: "Sam Kim", email: "sam@example.com", bg: "var(--accent-orange-primary)" },
-];
-
 export function NewFolderModal({ open, onClose, onCreate }: NewFolderModalProps) {
   const [name, setName] = useState("");
-  const [memberEmail, setMemberEmail] = useState("");
-  const [addedMembers, setAddedMembers] = useState<typeof suggestedMembers>([]);
-  const [showMembers, setShowMembers] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
       setName("");
-      setMemberEmail("");
-      setAddedMembers([]);
-      setShowMembers(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
@@ -52,17 +38,6 @@ export function NewFolderModal({ open, onClose, onCreate }: NewFolderModalProps)
     if (!name.trim()) return;
     if (onCreate) onCreate(name.trim());
     onClose();
-  };
-
-  const addMember = (member: typeof suggestedMembers[0]) => {
-    if (!addedMembers.find((m) => m.email === member.email)) {
-      setAddedMembers([...addedMembers, member]);
-    }
-    setMemberEmail("");
-  };
-
-  const removeMember = (email: string) => {
-    setAddedMembers(addedMembers.filter((m) => m.email !== email));
   };
 
   if (!open) return null;
@@ -104,92 +79,6 @@ export function NewFolderModal({ open, onClose, onCreate }: NewFolderModalProps)
             placeholder="Untitled folder"
             className="w-full px-3.5 py-2.5 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40"
           />
-
-          {/* Add members toggle */}
-          {!showMembers ? (
-            <button
-              type="button"
-              onClick={() => setShowMembers(true)}
-              className="flex items-center gap-2 mt-4 text-[12px] text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer"
-            >
-              <HugeiconsIcon icon={UserGroupIcon} size={14} />
-              Add members
-            </button>
-          ) : (
-            <div className="mt-4">
-              <label className="block text-[11px] font-medium text-text-disabled uppercase tracking-wider mb-1.5 font-mono">
-                Members
-              </label>
-
-              {/* Added members */}
-              {addedMembers.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2.5">
-                  {addedMembers.map((m) => (
-                    <div key={m.email} className="flex items-center gap-1.5 h-[26px] pl-1 pr-2 rounded-[6px] bg-bg-overlay-tertiary">
-                      <div
-                        className="w-[18px] h-[18px] rounded-[4px] flex items-center justify-center text-[8px] font-bold text-white"
-                        style={{ backgroundColor: m.bg }}
-                      >
-                        {m.initials}
-                      </div>
-                      <span className="text-[11px] text-text-secondary">{m.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeMember(m.email)}
-                        className="text-icon-tertiary hover:text-text-secondary transition-colors cursor-pointer ml-0.5"
-                      >
-                        <HugeiconsIcon icon={Cancel01Icon} size={10} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Email input */}
-              <div className="relative">
-                <input
-                  type="email"
-                  value={memberEmail}
-                  onChange={(e) => setMemberEmail(e.target.value)}
-                  placeholder="Add by email"
-                  className="w-full px-3.5 py-2.5 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40"
-                />
-              </div>
-
-              {/* Suggested members */}
-              {suggestedMembers.filter((m) => !addedMembers.find((a) => a.email === m.email)).length > 0 && (
-                <div className="mt-2.5">
-                  <span className="text-[10px] text-text-disabled uppercase tracking-wider font-mono">Suggested</span>
-                  <div className="mt-1.5 flex flex-col gap-0.5">
-                    {suggestedMembers
-                      .filter((m) => !addedMembers.find((a) => a.email === m.email))
-                      .map((m) => (
-                      <button
-                        key={m.email}
-                        type="button"
-                        onClick={() => addMember(m)}
-                        className="flex items-center gap-2.5 px-2 py-1.5 rounded-[6px] hover:bg-bg-cell-hover transition-colors cursor-pointer"
-                      >
-                        <div
-                          className="w-6 h-6 rounded-[5px] flex items-center justify-center text-[9px] font-bold text-white"
-                          style={{ backgroundColor: m.bg }}
-                        >
-                          {m.initials}
-                        </div>
-                        <div className="flex flex-col items-start">
-                          <span className="text-[12px] text-text-primary">{m.name}</span>
-                          <span className="text-[10px] text-text-disabled">{m.email}</span>
-                        </div>
-                        <div className="ml-auto">
-                          <HugeiconsIcon icon={PlusSignIcon} size={12} color="var(--icon-tertiary)" />
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* E2E note */}
           <div className="flex items-center gap-1.5 mt-4 text-[11px] text-text-disabled">
