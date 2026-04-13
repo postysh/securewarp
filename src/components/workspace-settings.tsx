@@ -9,6 +9,7 @@ import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import Logout01Icon from "@hugeicons/core-free-icons/Logout01Icon";
 import { useFilesContext } from "@/hooks/use-files";
 import { ConfirmDialog } from "./confirm-dialog";
+import { RoleDropdown } from "./role-dropdown";
 import {
   unwrapPrivateHierarchicalKey,
   wrapPrivateHierarchicalKeyForUser,
@@ -224,17 +225,13 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
                   className="flex-1 px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40 disabled:opacity-50"
                   onKeyDown={(e) => { if (e.key === "Enter") handleInvite(); }}
                 />
-                <select
+                <RoleDropdown
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as "admin" | "editor" | "viewer")}
+                  options={["editor", "viewer", "admin"] as const}
+                  labels={{ editor: "Editor", viewer: "Viewer", admin: "Admin" }}
+                  onChange={(v) => setInviteRole(v as "admin" | "editor" | "viewer")}
                   disabled={inviteBusy}
-                  className="h-[34px] px-2.5 rounded-[8px] bg-bg-field text-[11px] text-text-secondary border border-border-secondary focus:outline-none focus:ring-2 focus:ring-accent-green/25 focus:border-accent-green/40 cursor-pointer disabled:opacity-50 appearance-none"
-                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center", paddingRight: "24px" }}
-                >
-                  <option value="editor">Editor</option>
-                  <option value="viewer">Viewer</option>
-                  <option value="admin">Admin</option>
-                </select>
+                />
                 <button
                   onClick={handleInvite}
                   disabled={inviteBusy || !inviteEmail.trim()}
@@ -264,10 +261,11 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
                     <p className="text-[12px] text-text-primary truncate">{m.email}</p>
                   </div>
                   {isAdmin && m.role !== "admin" ? (
-                    <select
+                    <RoleDropdown
                       value={m.role}
-                      onChange={async (e) => {
-                        const newRole = e.target.value;
+                      options={["admin", "editor", "viewer"] as const}
+                      labels={{ admin: "Admin", editor: "Editor", viewer: "Viewer" }}
+                      onChange={async (newRole) => {
                         await fetch("/api/workspaces/change-role", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
@@ -275,13 +273,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
                         });
                         setMembers((prev) => prev.map((x) => x.userId === m.userId ? { ...x, role: newRole } : x));
                       }}
-                      className="h-[26px] px-2 rounded-[6px] bg-bg-field text-[10px] text-text-secondary border border-border-secondary focus:outline-none focus:ring-1 focus:ring-accent-green/25 cursor-pointer appearance-none"
-                      style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 6px center", paddingRight: "20px" }}
-                    >
-                      <option value="admin">Admin</option>
-                      <option value="editor">Editor</option>
-                      <option value="viewer">Viewer</option>
-                    </select>
+                    />
                   ) : (
                     <span className="text-[10px] text-text-disabled capitalize">{m.role}</span>
                   )}

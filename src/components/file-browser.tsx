@@ -460,26 +460,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               )}
             </>
           )}
-          {/* Facepile + Invite — personal file sharing context */}
-          {!fileOps.activeWorkspace && (
-            <>
-              <div className="hidden md:block">
-                <Facepile onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
-              </div>
-              {fileOps.viewMode === "own" && (
-                <button
-                  onClick={() => {
-                    const first = fileOps.files.find((f) => selected.has(f.id));
-                    if (first) setShareTarget(first);
-                  }}
-                  className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
-                >
-                  <HugeiconsIcon icon={UserAdd01Icon} size={14} />
-                  Invite
-                </button>
-              )}
-            </>
-          )}
+          {/* No Facepile/Invite in personal — file-level sharing uses
+              the context menu Share action instead */}
           {(fileOps.viewMode === "own" || fileOps.currentFolder) && fileOps.viewMode !== "trash" && fileOps.callerPermission !== "viewer" && (
             <>
               <button onClick={() => setNewFolderOpen(true)} className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer">
