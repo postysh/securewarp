@@ -598,7 +598,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
       {/* Scrollable file list */}
-      <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
+      <div className="flex-1 overflow-y-auto px-3 md:px-5 pt-1 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
 
         {/* Empty state */}
         {!fileOps.loading && fileOps.initialized && displayFiles.length === 0 && (
@@ -797,7 +797,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
-              className={`group flex items-center h-[64px] md:h-[56px] px-4 rounded-xl border cursor-pointer transition-colors mb-1.5 ${
+              className={`group flex items-center min-h-[64px] md:min-h-[56px] h-[64px] md:h-[56px] px-4 rounded-xl border cursor-pointer transition-colors mb-1.5 shrink-0 ${
                 dropTargetId === file.id
                   ? "border-accent-green bg-accent-green/5"
                   : dragFileId === file.id
