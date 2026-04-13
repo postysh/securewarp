@@ -7,6 +7,7 @@ import { grantFileAccess } from "@/lib/db/files";
 import { normalizeEmail } from "@/lib/auth/email";
 import { createNotification } from "@/lib/db/notifications";
 import { auditEvent } from "@/lib/audit";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
 const InviteSchema = z.object({
@@ -21,6 +22,10 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    if (!(await checkRateLimit(`ws:invite:${session.userId}`, 30))) {
+      return NextResponse.json({ error: "Too many invites. Try again later." }, { status: 429 });
+    }
 
     const body = await request.json();
     const parsed = InviteSchema.safeParse(body);

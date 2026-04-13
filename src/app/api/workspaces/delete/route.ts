@@ -18,15 +18,14 @@ export async function POST(request: Request) {
     const parsed = Schema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: "Invalid data" }, { status: 400 });
 
-    // Owner check
-    const { data: mem } = await supabase
-      .from("workspace_members")
-      .select("role")
-      .eq("workspace_id", parsed.data.workspaceId)
-      .eq("user_id", session.userId)
+    // Only the workspace owner can delete
+    const { data: wsCheck } = await supabase
+      .from("workspaces")
+      .select("owner_id")
+      .eq("id", parsed.data.workspaceId)
       .single();
-    if (!mem || mem.role !== "admin") {
-      return NextResponse.json({ error: "Only the owner can delete" }, { status: 403 });
+    if (!wsCheck || wsCheck.owner_id !== session.userId) {
+      return NextResponse.json({ error: "Only the workspace owner can delete" }, { status: 403 });
     }
 
     // Get root folder ID

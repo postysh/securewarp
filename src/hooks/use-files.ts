@@ -1061,9 +1061,20 @@ export function useFiles(keys: {
           // private hier key. The cache is populated on the fetch that
           // rendered this row, so as long as the user has an open view
           // on the parent folder this works without extra requests.
-          const parentEntry = folderPrivHierCache.current.get(file.parentId);
+          let parentEntry = folderPrivHierCache.current.get(file.parentId);
           if (!parentEntry) {
-            return { ok: false, error: "Parent folder not loaded — reopen it first" };
+            const dlRes = await fetch(`/api/files/chunk-download?fileId=${file.parentId}`);
+            if (dlRes.ok) {
+              const dlData = await dlRes.json();
+              if (dlData.encryptedPrivateHierarchicalKey) {
+                const parentPrivHier = unwrapPrivateHierarchicalKey(dlData.encryptedPrivateHierarchicalKey, dlData.wrappedByPublicKey, keys.encryptionPrivateKey);
+                parentEntry = { publicHierarchicalKey: dlData.publicHierarchicalKey || "", privateHierarchicalKey: parentPrivHier };
+                folderPrivHierCache.current.set(file.parentId, parentEntry);
+              }
+            }
+          }
+          if (!parentEntry) {
+            return { ok: false, error: "Cannot access parent folder keys" };
           }
           const unwrapped = unwrapParentKeysClaim(
             file.parentKeysClaim,
@@ -1144,9 +1155,25 @@ export function useFiles(keys: {
             privHier
           );
         } else if (file.parentKeysClaim && file.parentKeysClaimWrappedBy && file.parentId) {
-          const parentEntry = folderPrivHierCache.current.get(file.parentId);
+          let parentEntry = folderPrivHierCache.current.get(file.parentId);
           if (!parentEntry) {
-            return { ok: false, error: "Parent folder not loaded — reopen it first" };
+            // Fetch the parent folder's keys on demand
+            const dlRes = await fetch(`/api/files/chunk-download?fileId=${file.parentId}`);
+            if (dlRes.ok) {
+              const dlData = await dlRes.json();
+              if (dlData.encryptedPrivateHierarchicalKey) {
+                const parentPrivHier = unwrapPrivateHierarchicalKey(
+                  dlData.encryptedPrivateHierarchicalKey,
+                  dlData.wrappedByPublicKey,
+                  keys.encryptionPrivateKey
+                );
+                parentEntry = { publicHierarchicalKey: dlData.publicHierarchicalKey || "", privateHierarchicalKey: parentPrivHier };
+                folderPrivHierCache.current.set(file.parentId, parentEntry);
+              }
+            }
+          }
+          if (!parentEntry) {
+            return { ok: false, error: "Cannot access parent folder keys" };
           }
           const unwrapped = unwrapParentKeysClaim(
             file.parentKeysClaim,
@@ -1429,14 +1456,24 @@ export function useFiles(keys: {
         let parentKeysClaim: string | null = null;
         let parentKeysClaimWrappedBy: string | null = null;
         if (file.parentId) {
-          const parentEntry = folderPrivHierCache.current.get(file.parentId);
+          let parentEntry = folderPrivHierCache.current.get(file.parentId);
+          if (!parentEntry) {
+            try {
+              const dlRes = await fetch(`/api/files/chunk-download?fileId=${file.parentId}`);
+              if (dlRes.ok) {
+                const dlData = await dlRes.json();
+                if (dlData.encryptedPrivateHierarchicalKey) {
+                  const parentPrivHier = unwrapPrivateHierarchicalKey(dlData.encryptedPrivateHierarchicalKey, dlData.wrappedByPublicKey, keys.encryptionPrivateKey);
+                  parentEntry = { publicHierarchicalKey: dlData.publicHierarchicalKey || "", privateHierarchicalKey: parentPrivHier };
+                  folderPrivHierCache.current.set(file.parentId, parentEntry);
+                }
+              }
+            } catch { /* */ }
+          }
           if (!parentEntry) {
             plaintext.fill(0);
             newSessionKey.fill(0);
-            return {
-              ok: false,
-              error: "Parent folder not loaded — open it before rotating",
-            };
+            return { ok: false, error: "Cannot access parent folder keys" };
           }
           parentKeysClaim = wrapParentKeysClaim(
             newSessionKey,
@@ -1717,15 +1754,24 @@ export function useFiles(keys: {
         let folderParentKeysClaim: string | null = null;
         let folderParentKeysClaimWrappedBy: string | null = null;
         if (folder.parentId) {
-          const parentEntry = folderPrivHierCache.current.get(folder.parentId);
+          let parentEntry = folderPrivHierCache.current.get(folder.parentId);
           if (!parentEntry) {
-            // Clean up unwrapped sessionKeys before erroring.
+            try {
+              const dlRes = await fetch(`/api/files/chunk-download?fileId=${folder.parentId}`);
+              if (dlRes.ok) {
+                const dlData = await dlRes.json();
+                if (dlData.encryptedPrivateHierarchicalKey) {
+                  const parentPrivHier = unwrapPrivateHierarchicalKey(dlData.encryptedPrivateHierarchicalKey, dlData.wrappedByPublicKey, keys.encryptionPrivateKey);
+                  parentEntry = { publicHierarchicalKey: dlData.publicHierarchicalKey || "", privateHierarchicalKey: parentPrivHier };
+                  folderPrivHierCache.current.set(folder.parentId, parentEntry);
+                }
+              }
+            } catch { /* */ }
+          }
+          if (!parentEntry) {
             for (const u of unwrapped) u.sessionKey.fill(0);
             newFolderSessionKey.fill(0);
-            return {
-              ok: false,
-              error: "Parent folder not loaded — open it first, then retry rotation",
-            };
+            return { ok: false, error: "Cannot access parent folder keys" };
           }
           folderParentKeysClaim = wrapParentKeysClaim(
             newFolderSessionKey,

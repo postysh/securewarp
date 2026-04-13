@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { createNotification } from "@/lib/db/notifications";
 import { logError } from "@/lib/log";
 
@@ -15,6 +16,10 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    if (!(await checkRateLimit(`ws:transfer:${session.userId}`, 5))) {
+      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
+    }
 
     const body = await request.json();
     const parsed = Schema.safeParse(body);
