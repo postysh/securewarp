@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       .eq("workspace_id", parsed.data.workspaceId)
       .eq("user_id", session.userId)
       .single();
-    if (!mem || mem.role !== "owner") {
+    if (!mem || mem.role !== "admin") {
       return NextResponse.json({ error: "Only the owner can rename" }, { status: 403 });
     }
 

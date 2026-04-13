@@ -11,8 +11,7 @@ import { logError } from "@/lib/log";
 const InviteSchema = z.object({
   workspaceId: z.string().uuid(),
   email: z.string().email(),
-  // The client wraps the root folder's private hierarchical key
-  // for the recipient — same as the existing share flow.
+  role: z.enum(["admin", "editor", "viewer"]).default("editor"),
   encryptedPrivateHierarchicalKey: z.string().min(1),
   wrappedByPublicKey: z.string().min(1),
 });
@@ -29,15 +28,15 @@ export async function POST(request: Request) {
     const { workspaceId, email: rawEmail, encryptedPrivateHierarchicalKey, wrappedByPublicKey } = parsed.data;
     const email = normalizeEmail(rawEmail);
 
-    // Verify caller is the workspace owner
+    // Verify caller is an admin
     const { data: membership } = await supabase
       .from("workspace_members")
       .select("role")
       .eq("workspace_id", workspaceId)
       .eq("user_id", session.userId)
       .single();
-    if (!membership || membership.role !== "owner") {
-      return NextResponse.json({ error: "Only the workspace owner can invite" }, { status: 403 });
+    if (!membership || membership.role !== "admin") {
+      return NextResponse.json({ error: "Only admins can invite members" }, { status: 403 });
     }
 
     // Get workspace root folder
@@ -59,19 +58,20 @@ export async function POST(request: Request) {
 
     // Grant file access to the root folder (Phase 3 inheritance
     // gives them access to everything inside automatically)
+    const filePermission = parsed.data.role === "viewer" ? "viewer" : "editor";
     await grantFileAccess({
       fileId: ws.root_folder_id,
       userId: recipient.id,
       encryptedPrivateHierarchicalKey,
       wrappedByPublicKey,
-      permissionLevel: "editor",
+      permissionLevel: filePermission,
     });
 
-    // Add as workspace member
+    // Add as workspace member with the selected role
     const { error: memErr } = await supabase
       .from("workspace_members")
       .upsert(
-        { workspace_id: workspaceId, user_id: recipient.id, role: "member" },
+        { workspace_id: workspaceId, user_id: recipient.id, role: parsed.data.role },
         { onConflict: "workspace_id,user_id" }
       );
     if (memErr) throw memErr;

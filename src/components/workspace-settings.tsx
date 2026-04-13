@@ -31,6 +31,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
   const fileOps = useFilesContext();
   const [members, setMembers] = useState<Member[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"admin" | "editor" | "viewer">("editor");
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
@@ -39,7 +40,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
   const [wsName, setWsName] = useState("");
   const [editingName, setEditingName] = useState(false);
 
-  const isOwner = workspace?.role === "owner";
+  const isAdmin = workspace?.role === "admin";
 
   useEffect(() => {
     if (!open || !workspace) return;
@@ -106,6 +107,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
         body: JSON.stringify({
           workspaceId: workspace.id,
           email: inviteEmail.trim(),
+          role: inviteRole,
           encryptedPrivateHierarchicalKey: wrappedForRecipient,
           wrappedByPublicKey: keys.encryptionPublicKey,
         }),
@@ -185,7 +187,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
           {/* Name */}
           <div className="px-5 py-4 border-b border-border-tertiary">
             <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-2">Name</p>
-            {editingName && isOwner ? (
+            {editingName && isAdmin ? (
               <div className="flex items-center gap-2">
                 <input
                   type="text"
@@ -201,7 +203,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
             ) : (
               <div className="flex items-center justify-between">
                 <span className="text-[14px] text-text-primary font-medium">{workspace.name}</span>
-                {isOwner && (
+                {isAdmin && (
                   <button onClick={() => setEditingName(true)} className="text-[11px] text-text-link hover:underline cursor-pointer">Edit</button>
                 )}
               </div>
@@ -209,7 +211,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
           </div>
 
           {/* Invite */}
-          {isOwner && (
+          {isAdmin && (
             <div className="px-5 py-4 border-b border-border-tertiary">
               <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-2">Invite Members</p>
               <div className="flex items-center gap-2">
@@ -222,6 +224,16 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
                   className="flex-1 px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40 disabled:opacity-50"
                   onKeyDown={(e) => { if (e.key === "Enter") handleInvite(); }}
                 />
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as "admin" | "editor" | "viewer")}
+                  disabled={inviteBusy}
+                  className="h-[34px] px-2 rounded-[8px] bg-bg-field text-[11px] text-text-secondary border border-transparent focus:outline-none focus:ring-2 focus:ring-accent-green/25 cursor-pointer disabled:opacity-50"
+                >
+                  <option value="editor">Editor</option>
+                  <option value="viewer">Viewer</option>
+                  <option value="admin">Admin</option>
+                </select>
                 <button
                   onClick={handleInvite}
                   disabled={inviteBusy || !inviteEmail.trim()}
@@ -249,9 +261,29 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[12px] text-text-primary truncate">{m.email}</p>
-                    <p className="text-[10px] text-text-disabled">{m.role}</p>
                   </div>
-                  {isOwner && m.role !== "owner" && (
+                  {isAdmin && m.role !== "admin" ? (
+                    <select
+                      value={m.role}
+                      onChange={async (e) => {
+                        const newRole = e.target.value;
+                        await fetch("/api/workspaces/change-role", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ workspaceId: workspace?.id, userId: m.userId, role: newRole }),
+                        });
+                        setMembers((prev) => prev.map((x) => x.userId === m.userId ? { ...x, role: newRole } : x));
+                      }}
+                      className="h-[26px] px-1.5 rounded-[6px] bg-bg-field text-[10px] text-text-secondary border-none focus:outline-none cursor-pointer"
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="editor">Editor</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                  ) : (
+                    <span className="text-[10px] text-text-disabled capitalize">{m.role}</span>
+                  )}
+                  {isAdmin && m.role !== "admin" && (
                     <button
                       onClick={() => handleRemoveMember(m.userId)}
                       className="text-[10px] text-accent-red hover:underline cursor-pointer shrink-0"
@@ -266,7 +298,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
 
           {/* Danger zone */}
           <div className="px-5 py-4">
-            {isOwner ? (
+            {isAdmin ? (
               <button
                 onClick={() => setDeleteOpen(true)}
                 className="flex items-center gap-2 h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-accent-red border border-accent-red/20 hover:bg-accent-red/10 transition-colors cursor-pointer"

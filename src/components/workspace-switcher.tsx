@@ -160,7 +160,9 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
               </div>
               <div className="flex-1 min-w-0 text-left">
                 <p className="text-[12px] text-text-primary truncate">{ws.name}</p>
-                <p className="text-[10px] text-text-disabled">{ws.role === "owner" ? "Created by you" : "Shared with you"}</p>
+                <p className="text-[10px] text-text-disabled">{
+                ws.role === "admin" ? "Admin" : ws.role === "editor" ? "Editor" : "Viewer"
+              }</p>
               </div>
               {ws.id === activeId && <HugeiconsIcon icon={Tick01Icon} size={14} color="var(--accent-green-primary)" />}
             </button>

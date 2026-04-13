@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       .eq("user_id", session.userId)
       .single();
     if (!mem) return NextResponse.json({ error: "Not a member" }, { status: 404 });
-    if (mem.role === "owner") return NextResponse.json({ error: "Owner cannot leave. Delete the workspace instead." }, { status: 400 });
+    if (mem.role === "admin") return NextResponse.json({ error: "Admins cannot leave. Transfer admin role or delete the workspace instead." }, { status: 400 });
 
     // Remove membership
     await supabase.from("workspace_members").delete()

@@ -82,7 +82,7 @@ export async function POST(request: Request) {
       .insert({
         workspace_id: ws.id,
         user_id: session.userId,
-        role: "owner",
+        role: "admin",
       });
     if (memErr) throw memErr;
 
