@@ -37,6 +37,7 @@ const MoveModal = dynamic(() => import("./move-modal").then((m) => ({ default: m
 const FilePreview = dynamic(() => import("./file-preview").then((m) => ({ default: m.FilePreview })), { ssr: false });
 import { ConfirmDialog } from "./confirm-dialog";
 import { WorkspaceSettings } from "./workspace-settings";
+import { WorkspaceInviteModal } from "./workspace-invite-modal";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
@@ -173,6 +174,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [filterLabel, setFilterLabel] = useState<{ id: string; name: string; color: string } | null>(null);
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
+  const [workspaceInviteOpen, setWorkspaceInviteOpen] = useState(false);
   const [workspaceMembers, setWorkspaceMembers] = useState<FacepileUser[]>([]);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -468,7 +470,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <Facepile members={workspaceMembers} onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
               </div>
               <button
-                onClick={() => setWorkspaceSettingsOpen(true)}
+                onClick={() => setWorkspaceInviteOpen(true)}
                 className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
               >
                 <HugeiconsIcon icon={UserAdd01Icon} size={14} />
@@ -1294,6 +1296,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         onClose={() => setWorkspaceSettingsOpen(false)}
         workspace={fileOps.activeWorkspace ? { ...fileOps.activeWorkspace, role: fileOps.callerPermission === "viewer" ? "viewer" : fileOps.callerPermission === "editor" ? "editor" : "admin" } : null}
         onDeleted={() => { setWorkspaceSettingsOpen(false); fileOps.leaveWorkspace(); }}
+      />
+      <WorkspaceInviteModal
+        open={workspaceInviteOpen}
+        onClose={() => setWorkspaceInviteOpen(false)}
+        workspaceId={fileOps.activeWorkspace?.id ?? null}
+        rootFolderId={fileOps.activeWorkspace?.rootFolderId ?? null}
       />
       <CommandPalette
         open={commandPaletteOpen}
