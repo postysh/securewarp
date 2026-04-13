@@ -487,7 +487,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <div className="hidden md:block">
                 <Facepile members={workspaceMembers} onClick={() => setMembersOpen(true)} onOverflowClick={() => setMembersOpen(true)} />
               </div>
-              {fileOps.callerPermission !== "viewer" && fileOps.callerPermission !== "editor" && (
+              {fileOps.callerPermission && fileOps.callerPermission !== "viewer" && fileOps.callerPermission !== "editor" && (
                 <button
                   onClick={() => setWorkspaceInviteOpen(true)}
                   className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"

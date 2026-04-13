@@ -5,7 +5,9 @@ import {
   getOwnedFile,
   moveFile,
   isDescendantOf,
+  getEffectivePermission,
 } from "@/lib/db/files";
+import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -64,11 +66,23 @@ export async function POST(
       }
     }
 
-    // 1. Caller owns the file being moved.
-    const file = await getOwnedFile(fileId, session.userId);
+    // 1. Caller must have editor+ access to the file being moved.
+    //    Try ownership first, fall back to inherited workspace permission.
+    let file: { id: string; parent_id: string | null; is_folder: boolean; deleted_at: string | null } | null = await getOwnedFile(fileId, session.userId);
     if (!file) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      const perm = await getEffectivePermission(fileId, session.userId);
+      if (!perm || perm === "viewer") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const { data } = await supabase
+        .from("files")
+        .select("id, parent_id, is_folder, deleted_at")
+        .eq("id", fileId)
+        .single();
+      if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      file = data;
     }
+    if (!file) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (file.deleted_at) {
       return NextResponse.json({ error: "File is in trash" }, { status: 400 });
     }
@@ -78,12 +92,23 @@ export async function POST(
       return NextResponse.json({ success: true });
     }
 
-    // 2. Destination must be an owned folder (or null).
+    // 2. Destination must be a folder the caller can write to (or null for root).
     if (newParentId !== null) {
-      const dest = await getOwnedFile(newParentId, session.userId);
+      let dest: { id: string; is_folder: boolean; deleted_at: string | null } | null = await getOwnedFile(newParentId, session.userId);
       if (!dest) {
-        return NextResponse.json({ error: "Destination not found" }, { status: 404 });
+        const destPerm = await getEffectivePermission(newParentId, session.userId);
+        if (!destPerm || destPerm === "viewer") {
+          return NextResponse.json({ error: "Destination not found" }, { status: 404 });
+        }
+        const { data } = await supabase
+          .from("files")
+          .select("id, is_folder, deleted_at")
+          .eq("id", newParentId)
+          .single();
+        if (!data) return NextResponse.json({ error: "Destination not found" }, { status: 404 });
+        dest = data;
       }
+      if (!dest) return NextResponse.json({ error: "Destination not found" }, { status: 404 });
       if (!dest.is_folder) {
         return NextResponse.json({ error: "Destination is not a folder" }, { status: 400 });
       }
@@ -103,12 +128,24 @@ export async function POST(
       }
     }
 
+    // Resolve workspace_id from destination folder so moved files
+    // stay correctly associated with the workspace (or personal).
+    let destWorkspaceId: string | null = null;
+    if (newParentId) {
+      const { data: destFile } = await supabase
+        .from("files")
+        .select("workspace_id")
+        .eq("id", newParentId)
+        .single();
+      destWorkspaceId = (destFile?.workspace_id as string | null) ?? null;
+    }
+
     await moveFile(
       fileId,
-      session.userId,
       newParentId,
       parentKeysClaim,
-      parentKeysClaimWrappedBy
+      parentKeysClaimWrappedBy,
+      destWorkspaceId
     );
 
     auditEvent({

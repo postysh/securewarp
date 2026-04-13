@@ -257,9 +257,11 @@ export async function getInheritedChildren(
       .order("created_at", { ascending: false })
       .limit(100),
   ]);
-  // Access denied if no file_keys row (neither owner nor collaborator)
-  if (!accessResult.data && accessResult.error?.code === "PGRST116") return [];
-  if (accessResult.error && accessResult.error.code !== "PGRST116") return [];
+  // Access denied if no direct file_keys row — fall back to inherited permission
+  if (!accessResult.data) {
+    const perm = await getEffectivePermission(parentId, userId);
+    if (!perm) return [];
+  }
   const { data: files, error } = childResult;
   if (error) throw new Error(`Failed to fetch children: ${error.message}`);
   if (!files || files.length === 0) return [];
@@ -920,20 +922,21 @@ export async function getEffectivePermission(
  */
 export async function moveFile(
   fileId: string,
-  ownerId: string,
   newParentId: string | null,
   parentKeysClaim: string | null,
-  parentKeysClaimWrappedBy: string | null
+  parentKeysClaimWrappedBy: string | null,
+  workspaceId?: string | null
 ): Promise<void> {
+  const updates: Record<string, unknown> = {
+    parent_id: newParentId,
+    parent_keys_claim: parentKeysClaim,
+    parent_keys_claim_wrapped_by: parentKeysClaimWrappedBy,
+  };
+  if (workspaceId !== undefined) updates.workspace_id = workspaceId;
   const { error } = await supabase
     .from("files")
-    .update({
-      parent_id: newParentId,
-      parent_keys_claim: parentKeysClaim,
-      parent_keys_claim_wrapped_by: parentKeysClaimWrappedBy,
-    })
-    .eq("id", fileId)
-    .eq("owner_id", ownerId);
+    .update(updates)
+    .eq("id", fileId);
   if (error) throw new Error(`Failed to move file: ${error.message}`);
 }
 
