@@ -30,6 +30,7 @@ export async function GET(request: Request) {
     const all = searchParams.get("all") === "true";
     const parentId = searchParams.get("parentId") || null;
     const cursor = searchParams.get("cursor") || undefined;
+    const workspaceId = searchParams.get("workspaceId") || null;
 
     let files: FileRowWithKey[];
     let nextCursor: string | null = null;
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
     } else if (recent) {
       files = await getRecentForUser(session.userId);
     } else if (trash) {
-      files = await getTrashedForUser(session.userId);
+      files = await getTrashedForUser(session.userId, workspaceId);
     } else if (shared) {
       files = await getSharedWithUser(session.userId);
     } else if (parentId === null) {

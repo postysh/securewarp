@@ -6,6 +6,7 @@ import { getUserByEmail } from "@/lib/db/users";
 import { grantFileAccess } from "@/lib/db/files";
 import { normalizeEmail } from "@/lib/auth/email";
 import { createNotification } from "@/lib/db/notifications";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const InviteSchema = z.object({
@@ -75,6 +76,14 @@ export async function POST(request: Request) {
         { onConflict: "workspace_id,user_id" }
       );
     if (memErr) throw memErr;
+
+    auditEvent({
+      event: "workspace.invite",
+      actorUserId: session.userId,
+      targetUserId: recipient.id,
+      targetFileId: ws.root_folder_id,
+      detail: `${parsed.data.role}:${workspaceId}`,
+    });
 
     createNotification({
       userId: recipient.id,

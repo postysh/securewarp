@@ -606,19 +606,59 @@ export async function restoreSubtree(fileId: string, ownerId: string): Promise<v
  * Returned shape matches `getFilesForUser` so the same client-side
  * decrypt loop can render it without branching.
  */
-export async function getTrashedForUser(userId: string): Promise<FileRowWithKey[]> {
-  // Pull every trashed row the user owns. Grouping by the roots is
-  // cheap at this point because trash sizes are small in practice;
-  // if that ever changes we can move this into a SQL function.
-  const { data: allTrashed, error } = await supabase
+export async function getTrashedForUser(userId: string, workspaceId?: string | null): Promise<FileRowWithKey[]> {
+  // In workspace context, show all trashed files in the workspace
+  // regardless of owner. In personal context, show only owned files.
+  let query = supabase
     .from("files")
     .select(LIST_SELECT)
-    .eq("owner_id", userId)
-    .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
     .not("deleted_at", "is", null)
-    .is("workspace_id", null)
     .order("deleted_at", { ascending: false });
+
+  if (workspaceId) {
+    // Workspace trash: show all trashed files regardless of owner.
+    // Use a left-join select since the caller may not have direct file_keys rows.
+    const { data: wsTrashed, error: wsErr } = await supabase
+      .from("files")
+      .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+      .eq("workspace_id", workspaceId)
+      .eq("upload_complete", true)
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false });
+    if (wsErr) throw new Error(`Failed to fetch trashed: ${wsErr.message}`);
+
+    const rows = (wsTrashed || []) as unknown as (FileJoinRow & { id: string; parent_id: string | null; deleted_at: string })[];
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const tops = rows.filter((r) => {
+      if (!r.parent_id) return true;
+      const parent = byId.get(r.parent_id);
+      if (!parent) return true;
+      return parent.deleted_at !== r.deleted_at;
+    });
+
+    // Fetch file_keys for these files so callers that have direct rows can decrypt
+    const topIds = tops.map((r) => r.id);
+    const { data: keyRows } = topIds.length > 0
+      ? await supabase.from("file_keys").select("file_id, encrypted_private_hierarchical_key, wrapped_by_public_key").eq("user_id", userId).in("file_id", topIds)
+      : { data: [] };
+    const keyMap = new Map((keyRows || []).map((k) => [k.file_id as string, k]));
+
+    return tops.map((row) => {
+      const key = keyMap.get(row.id);
+      const { owner, ...rest } = row as unknown as Record<string, unknown> & { owner: { public_encryption_key: string } | null };
+      return {
+        ...rest,
+        encrypted_private_hierarchical_key: (key?.encrypted_private_hierarchical_key as string) ?? "",
+        wrapped_by_public_key: (key?.wrapped_by_public_key as string) ?? "",
+        owner_public_key: owner?.public_encryption_key ?? "",
+      } as FileRowWithKey;
+    });
+  }
+
+  query = query.eq("owner_id", userId).is("workspace_id", null);
+
+  const { data: allTrashed, error } = await query;
   if (error) throw new Error(`Failed to fetch trashed: ${error.message}`);
 
   const rows = (allTrashed || []) as unknown as (FileJoinRow & {

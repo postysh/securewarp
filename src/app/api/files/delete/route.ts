@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { trashSubtree, getOwnedFile } from "@/lib/db/files";
+import { trashSubtree, getOwnedFile, getEffectivePermission } from "@/lib/db/files";
+import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -36,17 +37,32 @@ export async function POST(request: Request) {
 
     const fileId = parsed.data.fileId;
 
-    // Access gate: only the owner can trash. Non-owners use /leave
-    // to remove themselves from a shared file.
+    // Access gate: owner can trash directly. In workspaces, editors+
+    // can also trash files they don't own.
     const owned = await getOwnedFile(fileId, session.userId);
     if (!owned) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      const perm = await getEffectivePermission(fileId, session.userId);
+      if (!perm || perm === "viewer") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      // Verify the file exists and isn't a workspace root
+      const { data: fileRow } = await supabase
+        .from("files")
+        .select("id, is_workspace_root, owner_id")
+        .eq("id", fileId)
+        .single();
+      if (!fileRow) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      if (fileRow.is_workspace_root) {
+        return NextResponse.json({ error: "Cannot delete a workspace folder. Delete the workspace instead." }, { status: 400 });
+      }
+      // Trash using the file's actual owner so the RPC works
+      await trashSubtree(fileId, fileRow.owner_id as string);
+    } else {
+      if (owned.is_workspace_root) {
+        return NextResponse.json({ error: "Cannot delete a workspace folder. Delete the workspace instead." }, { status: 400 });
+      }
+      await trashSubtree(fileId, session.userId);
     }
-    if (owned.is_workspace_root) {
-      return NextResponse.json({ error: "Cannot delete a workspace folder. Delete the workspace instead." }, { status: 400 });
-    }
-
-    await trashSubtree(fileId, session.userId);
 
     auditEvent({
       event: "files.delete",

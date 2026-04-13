@@ -31,7 +31,11 @@ export type AuditEventType =
   | "link.create"
   | "link.revoke"
   | "link.access.anon"
-  | "cleanup.run";
+  | "cleanup.run"
+  | "workspace.invite"
+  | "workspace.remove"
+  | "workspace.role_change"
+  | "workspace.leave";
 
 export interface AuditInput {
   event: AuditEventType;

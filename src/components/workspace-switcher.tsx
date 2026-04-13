@@ -109,8 +109,8 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
 
   const switchToWorkspace = (ws: Workspace) => {
     setActiveId(ws.id);
-    sessionStorage.setItem("securewarp_active_workspace", JSON.stringify({ id: ws.id, rootFolderId: ws.rootFolderId, name: ws.name }));
-    fileOps.navigateToWorkspace(ws.id, ws.rootFolderId, ws.name);
+    sessionStorage.setItem("securewarp_active_workspace", JSON.stringify({ id: ws.id, rootFolderId: ws.rootFolderId, name: ws.name, role: ws.role }));
+    fileOps.navigateToWorkspace(ws.id, ws.rootFolderId, ws.name, ws.role);
     setOpen(false);
   };
 

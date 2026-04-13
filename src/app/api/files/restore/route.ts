@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { restoreSubtree } from "@/lib/db/files";
+import { restoreSubtree, getEffectivePermission } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
@@ -30,15 +30,11 @@ export async function POST(request: Request) {
 
     const fileId = parsed.data.fileId;
 
-    // Owner check AND trashed-state check. `getOwnedFile` wouldn't
-    // tell us whether the row is trashed, and we want to reject
-    // restore-of-live-file so the client can't rely on the endpoint
-    // being a no-op.
+    // Check ownership first, fall back to workspace permission
     const { data: row, error: loadErr } = await supabase
       .from("files")
-      .select("id, deleted_at")
+      .select("id, deleted_at, owner_id, workspace_id")
       .eq("id", fileId)
-      .eq("owner_id", session.userId)
       .single();
     if (loadErr || !row) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -47,7 +43,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not in trash" }, { status: 400 });
     }
 
-    await restoreSubtree(fileId, session.userId);
+    const isOwner = row.owner_id === session.userId;
+    if (!isOwner) {
+      // In workspace context, editors+ can restore
+      if (!row.workspace_id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const perm = await getEffectivePermission(fileId, session.userId);
+      if (!perm || perm === "viewer") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+    }
+
+    await restoreSubtree(fileId, row.owner_id as string);
 
     auditEvent({
       event: "files.restore",

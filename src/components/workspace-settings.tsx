@@ -11,7 +11,6 @@ import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import { ConfirmDialog } from "./confirm-dialog";
 import { RoleDropdown } from "./role-dropdown";
 import { colorForEmail } from "./facepile";
-import { WorkspaceActivityModal } from "./workspace-activity-modal";
 
 interface WorkspaceSettingsProps {
   open: boolean;
@@ -64,8 +63,6 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
   const [transferTarget, setTransferTarget] = useState<{ userId: string; email: string } | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
   const [adminMembers, setAdminMembers] = useState<{ userId: string; email: string }[]>([]);
-  const [activityOpen, setActivityOpen] = useState(false);
-
   const isAdmin = workspace?.role === "admin";
 
   useEffect(() => {
@@ -272,24 +269,6 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
             </div>
           </div>
 
-          {/* Activity — admin only */}
-          {isAdmin && (
-            <div className="px-5 py-4 border-b border-border-tertiary">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-0.5">Activity</p>
-                  <p className="text-[11px] text-text-disabled">Recent workspace events</p>
-                </div>
-                <button
-                  onClick={() => setActivityOpen(true)}
-                  className="text-[11px] text-text-link hover:underline cursor-pointer shrink-0"
-                >
-                  View
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Transfer ownership — admin only, API enforces owner check */}
           {isAdmin && (
             <div className="px-5 py-4 border-b border-border-tertiary">
@@ -418,11 +397,6 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
           </div>
         </div>
 
-        <WorkspaceActivityModal
-          open={activityOpen}
-          onClose={() => setActivityOpen(false)}
-          workspaceId={workspace.id}
-        />
         <ConfirmDialog
           open={deleteOpen}
           title="Delete workspace?"

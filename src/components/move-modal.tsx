@@ -94,10 +94,29 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
 
   useEffect(() => {
     if (!file) return;
-    setPath([{ id: null, name: "My Drive", publicHierarchicalKey: null }]);
     setError(null);
     setBusy(false);
-    fetchFolders(null);
+    if (fileOps.activeWorkspace) {
+      // In workspace context, start at the workspace root
+      // Fetch the root folder's public hier key for move wrapping
+      fetch(`/api/files/chunk-download?fileId=${fileOps.activeWorkspace.rootFolderId}`)
+        .then((r) => r.json())
+        .then((d) => {
+          setPath([{
+            id: fileOps.activeWorkspace!.rootFolderId,
+            name: fileOps.activeWorkspace!.name,
+            publicHierarchicalKey: d.publicHierarchicalKey || null,
+          }]);
+          fetchFolders(fileOps.activeWorkspace!.rootFolderId);
+        })
+        .catch(() => {
+          setPath([{ id: fileOps.activeWorkspace!.rootFolderId, name: fileOps.activeWorkspace!.name, publicHierarchicalKey: null }]);
+          fetchFolders(fileOps.activeWorkspace!.rootFolderId);
+        });
+    } else {
+      setPath([{ id: null, name: "My Drive", publicHierarchicalKey: null }]);
+      fetchFolders(null);
+    }
   }, [file]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

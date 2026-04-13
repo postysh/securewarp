@@ -29,6 +29,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useUserKeys } from "@/hooks/use-user-keys";
 import { useFilesContext } from "@/hooks/use-files";
+import AnalyticsUpIcon from "@hugeicons/core-free-icons/AnalyticsUpIcon";
 
 function formatStorageBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -191,8 +192,26 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   // the listing endpoint handles both ownership paths, but the user is
   // still semantically inside "Shared with me" — the breadcrumb root
   // reflects that truth.
-  const active =
-    fileOps.viewMode === "trash"
+  const [activityActive, setActivityActive] = useState(false);
+
+  // Listen for activity show/hide
+  useEffect(() => {
+    const showHandler = () => setActivityActive(true);
+    const hideHandler = () => setActivityActive(false);
+    window.addEventListener("securewarp-show-activity", showHandler);
+    window.addEventListener("securewarp-hide-activity", hideHandler);
+    return () => {
+      window.removeEventListener("securewarp-show-activity", showHandler);
+      window.removeEventListener("securewarp-hide-activity", hideHandler);
+    };
+  }, []);
+
+  // Clear activity when workspace changes
+  useEffect(() => { setActivityActive(false); }, [fileOps.activeWorkspace]);
+
+  const active = activityActive
+    ? "activity"
+    : fileOps.viewMode === "trash"
       ? "trash"
       : fileOps.viewMode === "starred"
         ? "starred"
@@ -282,6 +301,8 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
             .filter((item) => !fileOps.activeWorkspace || item.id === "drive" || item.id === "trash")
             .map((item) => {
             const handleClick = () => {
+              setActivityActive(false);
+              window.dispatchEvent(new Event("securewarp-hide-activity"));
               if (item.id === "drive") fileOps.setViewMode("own");
               else if (item.id === "recent") fileOps.setViewMode("recent");
               else if (item.id === "starred") fileOps.setViewMode("starred");
@@ -313,6 +334,32 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
             );
           })}
         </div>
+
+        {/* Activity (workspace admin only) */}
+        {fileOps.activeWorkspace && fileOps.activeWorkspace.role === "admin" && (
+          <div className={`mt-3 pt-3 border-t border-border-tertiary ${collapsed ? "flex flex-col items-center" : ""}`}>
+            {(() => {
+              const btn = (
+                <button
+                  onClick={() => window.dispatchEvent(new Event("securewarp-show-activity"))}
+                  className={`flex items-center rounded-[6px] transition-colors cursor-pointer ${
+                    collapsed
+                      ? "w-8 h-8 justify-center"
+                      : "w-full gap-3 px-2.5 h-[32px] text-[13px]"
+                  } ${
+                    active === "activity"
+                      ? "bg-cta-nav-active text-text-primary font-medium"
+                      : "text-text-secondary hover:bg-cta-nav-hover"
+                  }`}
+                >
+                  <HugeiconsIcon icon={AnalyticsUpIcon} size={18} />
+                  {!collapsed && <span className="whitespace-nowrap">Activity</span>}
+                </button>
+              );
+              return collapsed ? <Tooltip label="Activity">{btn}</Tooltip> : btn;
+            })()}
+          </div>
+        )}
 
         {/* Pinned (personal context only) */}
         {!fileOps.activeWorkspace && (collapsed ? (
@@ -484,6 +531,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
       <div className={`py-2 transition-all duration-200 ${collapsed ? "px-[10px]" : "px-2"}`}>
         <UserMenu collapsed={collapsed} />
       </div>
+
     </aside>
   );
 }

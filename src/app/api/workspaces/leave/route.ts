@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const Schema = z.object({
@@ -39,6 +40,12 @@ export async function POST(request: Request) {
         .eq("file_id", ws.root_folder_id)
         .eq("user_id", session.userId);
     }
+
+    auditEvent({
+      event: "workspace.leave",
+      actorUserId: session.userId,
+      detail: parsed.data.workspaceId,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

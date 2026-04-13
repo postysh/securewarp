@@ -104,7 +104,7 @@ interface UseFilesState {
   callerPermission: string | null;
   // Active workspace context. When set, "My Drive" means the
   // workspace root, not the personal root.
-  activeWorkspace: { id: string; rootFolderId: string; name: string } | null;
+  activeWorkspace: { id: string; rootFolderId: string; name: string; role: string } | null;
   nextCursor: string | null;
 }
 
@@ -275,7 +275,7 @@ export function useFiles(keys: {
             : mode === "recent"
               ? "/api/files/list?recent=true"
               : mode === "trash"
-                ? "/api/files/list?trash=true"
+                ? `/api/files/list?trash=true${state.activeWorkspace ? `&workspaceId=${state.activeWorkspace.id}` : ""}`
                 : mode === "shared"
                   ? "/api/files/list?shared=true"
                   : parentId
@@ -2045,13 +2045,13 @@ export function useFiles(keys: {
    * breadcrumb root so the view is clean (not nested under My Drive).
    * Clicking the breadcrumb root re-fetches the workspace root.
    */
-  const navigateToWorkspace = useCallback(async (workspaceId: string, rootFolderId: string, workspaceName: string) => {
+  const navigateToWorkspace = useCallback(async (workspaceId: string, rootFolderId: string, workspaceName: string, workspaceRole?: string) => {
     setState((s) => ({
       ...s,
       files: [],
       loading: true,
       callerPermission: null,
-      activeWorkspace: { id: workspaceId, rootFolderId, name: workspaceName },
+      activeWorkspace: { id: workspaceId, rootFolderId, name: workspaceName, role: workspaceRole || "editor" },
     }));
     const bc = [{ id: rootFolderId, name: workspaceName }];
     await fetchFiles(rootFolderId, "own", bc);

@@ -38,6 +38,7 @@ const FilePreview = dynamic(() => import("./file-preview").then((m) => ({ defaul
 import { ConfirmDialog } from "./confirm-dialog";
 import { WorkspaceSettings } from "./workspace-settings";
 import { WorkspaceInviteModal } from "./workspace-invite-modal";
+import { WorkspaceActivityPage } from "./workspace-activity-modal";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
@@ -177,6 +178,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [workspaceInviteOpen, setWorkspaceInviteOpen] = useState(false);
   const [workspaceMembers, setWorkspaceMembers] = useState<FacepileUser[]>([]);
   const [wsDefaultRole, setWsDefaultRole] = useState<"admin" | "editor" | "viewer">("editor");
+  const [showActivity, setShowActivity] = useState(false);
   const [wsOwnerId, setWsOwnerId] = useState<string | undefined>(undefined);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -189,9 +191,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     try {
       const savedStr = sessionStorage.getItem("securewarp_active_workspace");
       if (savedStr) {
-        const saved = JSON.parse(savedStr) as { id: string; rootFolderId: string; name: string };
-        // Navigate directly into the workspace root
-        fileOps.navigateToWorkspace(saved.id, saved.rootFolderId, saved.name);
+        const saved = JSON.parse(savedStr) as { id: string; rootFolderId: string; name: string; role?: string };
+        fileOps.navigateToWorkspace(saved.id, saved.rootFolderId, saved.name, saved.role);
         return;
       }
     } catch { /* */ }
@@ -228,14 +229,28 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   useEffect(() => {
     const handler = () => { fetchWorkspaceInfo(); };
     window.addEventListener("securewarp-workspace-updated", handler);
-    return () => window.removeEventListener("securewarp-workspace-updated", handler);
+    const activityHandler = () => { setShowActivity(true); };
+    const hideActivityHandler = () => { setShowActivity(false); };
+    window.addEventListener("securewarp-show-activity", activityHandler);
+    window.addEventListener("securewarp-hide-activity", hideActivityHandler);
+    return () => {
+      window.removeEventListener("securewarp-workspace-updated", handler);
+      window.removeEventListener("securewarp-show-activity", activityHandler);
+      window.removeEventListener("securewarp-hide-activity", hideActivityHandler);
+    };
   }, [fetchWorkspaceInfo]);
+
+  // Clear activity page when workspace changes
+  useEffect(() => {
+    setShowActivity(false);
+  }, [fileOps.activeWorkspace]);
 
   // Close context menu and clear label filter when navigating
   useEffect(() => {
     setContextMenu(null);
     setFilterLabel(null);
   }, [fileOps.viewMode, fileOps.currentFolder]);
+
 
   // Fetch pinned IDs on mount
   useEffect(() => {
@@ -426,21 +441,35 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           </button>
           {/* Mobile breadcrumb: back arrow + current name */}
           <div className="flex md:hidden items-center gap-1.5 min-w-0">
-            {fileOps.breadcrumb.length > 1 && (
+            {(showActivity || fileOps.breadcrumb.length > 1) && (
               <button
-                onClick={() => fileOps.navigateToBreadcrumb(fileOps.breadcrumb.length - 2)}
+                onClick={() => {
+                  if (showActivity) { setShowActivity(false); window.dispatchEvent(new Event("securewarp-hide-activity")); }
+                  else fileOps.navigateToBreadcrumb(fileOps.breadcrumb.length - 2);
+                }}
                 className="p-1 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer shrink-0"
               >
                 <HugeiconsIcon icon={ArrowLeft01Icon} size={16} />
               </button>
             )}
             <span className="text-text-primary font-medium truncate">
-              {fileOps.breadcrumb[fileOps.breadcrumb.length - 1]?.name ?? "My Drive"}
+              {showActivity ? "Activity" : (fileOps.breadcrumb[fileOps.breadcrumb.length - 1]?.name ?? "My Drive")}
             </span>
           </div>
           {/* Desktop breadcrumb: full path */}
           <div className="hidden md:flex items-center gap-1.5">
-          {(() => {
+          {showActivity ? (
+            <>
+              <button
+                onClick={() => { setShowActivity(false); window.dispatchEvent(new Event("securewarp-hide-activity")); }}
+                className="text-text-secondary hover:text-text-primary cursor-pointer transition-colors bg-transparent border-none p-0 text-[13px]"
+              >
+                {fileOps.activeWorkspace?.name ?? "Workspace"}
+              </button>
+              <span className="text-text-disabled">/</span>
+              <span className="text-text-primary font-medium">Activity</span>
+            </>
+          ) : (() => {
             const crumbs = fileOps.breadcrumb;
             const maxVisible = 3;
             const collapsed = crumbs.length > maxVisible;
@@ -546,7 +575,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
 
       {/* Selection bar */}
-      {selected.size > 0 && (
+      {!showActivity && selected.size > 0 && (
         <div className="hidden md:flex mx-5 mt-2 items-center gap-3 px-4 h-[36px] rounded-[8px] bg-bg-overlay-tertiary text-[12px] text-text-secondary animate-fade-in">
           <span className="font-medium text-text-primary">{selected.size} selected</span>
           <button onClick={selectNone} className="text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer">Clear</button>
@@ -607,7 +636,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
       {/* Table */}
       {/* Table header — sticky above scroll area */}
-      {displayFiles.length > 0 && (
+      {!showActivity && displayFiles.length > 0 && (
         <div className="hidden md:flex items-center h-[40px] px-4 mx-3 md:mx-5 box-border select-none shrink-0">
           {/* Checkbox */}
           <button
@@ -647,8 +676,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         </div>
       )}
 
+      {/* Activity page (workspace admin) */}
+      {showActivity && fileOps.activeWorkspace && (
+        <WorkspaceActivityPage workspaceId={fileOps.activeWorkspace.id} />
+      )}
+
       {/* Scrollable file list */}
-      <div className="flex-1 overflow-y-auto px-3 md:px-5 pt-1 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
+      {!showActivity && <div className="flex-1 overflow-y-auto px-3 md:px-5 pt-1 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
 
         {/* Empty state */}
         {!fileOps.loading && fileOps.initialized && displayFiles.length === 0 && (
@@ -1014,7 +1048,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             </button>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Context menu: bottom sheet on mobile, floating dropdown on desktop */}
       {contextMenu && createPortal(
