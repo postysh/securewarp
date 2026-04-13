@@ -264,8 +264,7 @@ export function useFiles(keys: {
         }));
         setInitialized(true);
       } else {
-        const isFirstLoad = !initialized;
-        setState((s) => ({ ...s, loading: isFirstLoad, error: null }));
+        setState((s) => ({ ...s, loading: s.loading || !initialized || s.files.length === 0, error: null }));
         setInitialized(true);
       }
 
@@ -2049,6 +2048,9 @@ export function useFiles(keys: {
   const navigateToWorkspace = useCallback(async (workspaceId: string, rootFolderId: string, workspaceName: string) => {
     setState((s) => ({
       ...s,
+      files: [],
+      loading: true,
+      callerPermission: null,
       activeWorkspace: { id: workspaceId, rootFolderId, name: workspaceName },
     }));
     const bc = [{ id: rootFolderId, name: workspaceName }];
@@ -2056,7 +2058,7 @@ export function useFiles(keys: {
   }, [fetchFiles]);
 
   const leaveWorkspace = useCallback(() => {
-    setState((s) => ({ ...s, activeWorkspace: null }));
+    setState((s) => ({ ...s, files: [], loading: true, callerPermission: null, activeWorkspace: null }));
     const bc = [{ id: null as string | null, name: "My Drive" }];
     fetchFiles(null, "own", bc);
   }, [fetchFiles]);

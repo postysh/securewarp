@@ -501,7 +501,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           )}
           {/* No Facepile/Invite in personal — file-level sharing uses
               the context menu Share action instead */}
-          {(fileOps.viewMode === "own" || fileOps.currentFolder) && fileOps.viewMode !== "trash" && fileOps.callerPermission !== "viewer" && (
+          {(fileOps.viewMode === "own" || fileOps.currentFolder) && fileOps.viewMode !== "trash" && (!fileOps.activeWorkspace || (fileOps.callerPermission && fileOps.callerPermission !== "viewer")) && (
             <>
               <button onClick={() => setNewFolderOpen(true)} className="hidden md:flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer">
                 <HugeiconsIcon icon={FolderAddIcon} size={14} />
@@ -564,7 +564,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             >
               <HugeiconsIcon icon={Download04Icon} size={15} />
             </button>
-            {fileOps.callerPermission !== "viewer" && (
+            {fileOps.callerPermission !== "viewer" && !fileOps.activeWorkspace && (
               <button
                 onClick={() => {
                   const first = fileOps.files.find((f) => selected.has(f.id));
@@ -963,7 +963,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                       <HugeiconsIcon icon={StarIcon} size={15} />
                     </button>
                   )}
-                  {fileOps.viewMode === "own" && (
+                  {fileOps.viewMode === "own" && !fileOps.activeWorkspace && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1184,7 +1184,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <HugeiconsIcon icon={ArrowLeft01Icon} size={14} color="var(--icon-tertiary)" /> Restore
             </button>
           )}
-          {fileOps.viewMode === "own" && (
+          {fileOps.viewMode === "own" && !fileOps.activeWorkspace && (
             <button
               onClick={() => {
                 if (contextMenu) {
@@ -1340,7 +1340,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         open={membersOpen}
         onClose={() => setMembersOpen(false)}
         workspaceId={fileOps.activeWorkspace?.id ?? null}
-        isAdmin={fileOps.callerPermission === null || fileOps.callerPermission === "owner"}
+        isAdmin={fileOps.callerPermission === "admin" || fileOps.callerPermission === "owner"}
       />
       <WorkspaceSettings
         open={workspaceSettingsOpen}
@@ -1363,8 +1363,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             case "a1": fileInputRef.current?.click(); break;
             case "a2": setNewFolderOpen(true); break;
             case "a3": {
-              const first = fileOps.files[0];
-              if (first) setShareTarget(first);
+              if (!fileOps.activeWorkspace) {
+                const first = fileOps.files[0];
+                if (first) setShareTarget(first);
+              }
               break;
             }
             case "a5": fileOps.setViewMode("starred"); break;
@@ -1386,7 +1388,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       />
 
       {/* Mobile FAB for upload + new folder */}
-      {fileOps.viewMode !== "trash" && fileOps.callerPermission !== "viewer" && (fileOps.viewMode === "own" || fileOps.currentFolder) && (
+      {fileOps.viewMode !== "trash" && (!fileOps.activeWorkspace || (fileOps.callerPermission && fileOps.callerPermission !== "viewer")) && (fileOps.viewMode === "own" || fileOps.currentFolder) && (
         <div className="fixed bottom-[76px] right-4 z-20 flex flex-col gap-2 md:hidden">
           <button
             onClick={() => setNewFolderOpen(true)}
