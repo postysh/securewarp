@@ -90,9 +90,27 @@ export async function GET(request: Request) {
 
     // Include the caller's effective permission on the current folder
     // so the client can hide write actions for viewers.
+    // In workspace context, use the workspace membership role (admin/editor/viewer)
+    // since file_keys permission doesn't distinguish admin from editor.
     let callerPermission: string | null = null;
     if (parentId) {
-      callerPermission = await getEffectivePermission(parentId, session.userId);
+      // Check if this folder belongs to a workspace
+      const { data: parentFile } = await supabase
+        .from("files")
+        .select("workspace_id")
+        .eq("id", parentId)
+        .single();
+      if (parentFile?.workspace_id) {
+        const { data: wsMem } = await supabase
+          .from("workspace_members")
+          .select("role")
+          .eq("workspace_id", parentFile.workspace_id)
+          .eq("user_id", session.userId)
+          .single();
+        callerPermission = wsMem?.role ?? null;
+      } else {
+        callerPermission = await getEffectivePermission(parentId, session.userId);
+      }
     }
 
     return NextResponse.json({ files: enriched, callerPermission, nextCursor });

@@ -895,10 +895,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className={`text-[13px] truncate ${file.uploading ? "text-text-tertiary" : "text-text-primary"}`}>{file.name}</span>
-                    {fileOps.files.find((f) => f.id === file.id)?.isStarred && (
+                    {!fileOps.activeWorkspace && fileOps.files.find((f) => f.id === file.id)?.isStarred && (
                       <HugeiconsIcon icon={StarIcon} size={12} color="var(--accent-yellow-primary)" className="shrink-0" />
                     )}
-                    {(fileOps.files.find((f) => f.id === file.id)?.fileLabels ?? []).map((label) => (
+                    {!fileOps.activeWorkspace && (fileOps.files.find((f) => f.id === file.id)?.fileLabels ?? []).map((label) => (
                       <div key={label.id} className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: label.color }} title={label.name} />
                     ))}
                   </div>
@@ -933,20 +933,22 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <div className={`absolute right-0 flex items-center gap-0.5 transition-opacity ${
                   contextMenu?.fileId === file.id ? "opacity-100 pointer-events-auto" : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
                 }`}>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const full = fileOps.files.find((f) => f.id === file.id);
-                      if (full) fileOps.toggleStar(full.id, !full.isStarred);
-                    }}
-                    className={`p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer ${
-                      fileOps.files.find((f) => f.id === file.id)?.isStarred
-                        ? "text-accent-yellow"
-                        : "text-icon-tertiary hover:text-accent-yellow"
-                    }`}
-                  >
-                    <HugeiconsIcon icon={StarIcon} size={15} />
-                  </button>
+                  {!fileOps.activeWorkspace && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const full = fileOps.files.find((f) => f.id === file.id);
+                        if (full) fileOps.toggleStar(full.id, !full.isStarred);
+                      }}
+                      className={`p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer ${
+                        fileOps.files.find((f) => f.id === file.id)?.isStarred
+                          ? "text-accent-yellow"
+                          : "text-icon-tertiary hover:text-accent-yellow"
+                      }`}
+                    >
+                      <HugeiconsIcon icon={StarIcon} size={15} />
+                    </button>
+                  )}
                   {fileOps.viewMode === "own" && (
                     <button
                       onClick={(e) => {
@@ -1061,21 +1063,23 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   <HugeiconsIcon icon={Edit02Icon} size={14} color="var(--icon-tertiary)" /> Rename
                 </button>
               )}
-              <button
-                onClick={() => {
-                  if (!contextMenu) return;
-                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
-                  if (full) fileOps.toggleStar(full.id, !full.isStarred);
-                  setContextMenu(null);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={StarIcon} size={14} color="var(--icon-tertiary)" />
-                {(() => {
-                  const f = fileOps.files.find((f) => f.id === contextMenu?.fileId);
-                  return f?.isStarred ? "Unstar" : "Star";
-                })()}
-              </button>
+              {!fileOps.activeWorkspace && (
+                <button
+                  onClick={() => {
+                    if (!contextMenu) return;
+                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                    if (full) fileOps.toggleStar(full.id, !full.isStarred);
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={StarIcon} size={14} color="var(--icon-tertiary)" />
+                  {(() => {
+                    const f = fileOps.files.find((f) => f.id === contextMenu?.fileId);
+                    return f?.isStarred ? "Unstar" : "Star";
+                  })()}
+                </button>
+              )}
               {!fileOps.activeWorkspace && (
                 <button
                   onClick={async () => {
