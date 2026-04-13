@@ -271,6 +271,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     uploading: f.uploading,
     uploadProgress: f.uploadProgress,
     collaborators: f.collaborators,
+    ownerEmail: f.ownerEmail,
   }));
 
   const selectAll = () => setSelected(new Set(displayFiles.map((f) => f.id)));
@@ -635,7 +636,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               </button>
             </div>
             <div className="w-[110px] justify-end hidden md:flex">
-              <span className="text-[11px] font-mono uppercase text-text-disabled">Shared</span>
+              <span className="text-[11px] font-mono uppercase text-text-disabled">{fileOps.activeWorkspace ? "Owner" : "Shared"}</span>
             </div>
             <div className="w-[100px] justify-end hidden lg:flex">
               <button onClick={() => toggleSort("modified")} className="flex items-center gap-1 text-[11px] font-mono uppercase text-text-disabled hover:text-text-tertiary cursor-pointer transition-colors">
@@ -921,7 +922,20 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   <span className="text-[12px] text-text-disabled">{file.size}</span>
                 </div>
                 <div className="w-[110px] justify-end hidden md:flex">
-                  <CollaboratorStack collaborators={file.collaborators} />
+                  {fileOps.activeWorkspace && file.ownerEmail ? (
+                    <Tooltip label={file.ownerEmail}>
+                      <div className="flex items-center justify-end">
+                        <div
+                          className="w-6 h-6 rounded-[5px] flex items-center justify-center text-[9px] font-bold text-white"
+                          style={{ backgroundColor: colorForEmail(file.ownerEmail) }}
+                        >
+                          {file.ownerEmail.charAt(0).toUpperCase()}
+                        </div>
+                      </div>
+                    </Tooltip>
+                  ) : (
+                    <CollaboratorStack collaborators={file.collaborators} />
+                  )}
                 </div>
                 <div className={`w-[100px] justify-end hidden lg:flex transition-opacity ${
                   contextMenu?.fileId === file.id ? "opacity-0" : "group-hover:opacity-0"

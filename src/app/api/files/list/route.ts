@@ -76,8 +76,16 @@ export async function GET(request: Request) {
       labelsByFile.get(fid)!.push(label);
     }
 
+    // Resolve owner emails for workspace file lists
+    const ownerIds = [...new Set(files.map((f) => f.owner_id))];
+    const { data: ownerRows } = ownerIds.length > 0
+      ? await supabase.from("users").select("id, email").in("id", ownerIds)
+      : { data: [] };
+    const ownerEmailMap = new Map((ownerRows || []).map((u) => [u.id, u.email as string]));
+
     const enriched = files.map((f) => ({
       ...f,
+      owner_email: ownerEmailMap.get(f.owner_id) ?? null,
       is_starred: starredSet.has(f.id),
       file_labels: labelsByFile.get(f.id) ?? [],
       collaborators: (collaboratorMap.get(f.id) ?? []).map((c) => ({
