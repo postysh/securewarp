@@ -17,6 +17,9 @@ interface Workspace {
   rootFolderId: string;
   ownerId: string;
   role: string;
+  color?: string;
+  description?: string;
+  defaultRole?: string;
 }
 
 const COLORS = [
@@ -111,18 +114,23 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
     setOpen(false);
   };
 
-  const refreshWorkspaces = async () => {
+  const refreshWorkspaces = useCallback(async () => {
     const res = await fetch("/api/workspaces");
     const d = await res.json();
     if (d.workspaces) setWorkspaces(d.workspaces);
-  };
+  }, []);
+
+  useEffect(() => {
+    const handler = () => { refreshWorkspaces(); };
+    window.addEventListener("securewarp-workspace-updated", handler);
+    return () => window.removeEventListener("securewarp-workspace-updated", handler);
+  }, [refreshWorkspaces]);
 
   const activeName = activeId
     ? workspaces.find((w) => w.id === activeId)?.name ?? "Workspace"
     : "Personal";
-  const activeColor = activeId
-    ? colorForName(workspaces.find((w) => w.id === activeId)?.name ?? "")
-    : "var(--accent-green-primary)";
+  const activeWs = activeId ? workspaces.find((w) => w.id === activeId) : null;
+  const activeColor = activeWs?.color || (activeWs ? colorForName(activeWs.name) : "var(--accent-green-primary)");
   const activeInitial = activeName.charAt(0).toUpperCase();
 
   const dropdown = open && createPortal(
@@ -155,13 +163,13 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
               onClick={() => switchToWorkspace(ws)}
               className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-bg-cell-hover transition-colors cursor-pointer"
             >
-              <div className="w-7 h-7 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ backgroundColor: colorForName(ws.name) }}>
+              <div className="w-7 h-7 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ backgroundColor: ws.color || colorForName(ws.name) }}>
                 {ws.name.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0 text-left">
                 <p className="text-[12px] text-text-primary truncate">{ws.name}</p>
-                <p className="text-[10px] text-text-disabled">{
-                ws.role === "admin" ? "Admin" : ws.role === "editor" ? "Editor" : "Viewer"
+                <p className="text-[10px] text-text-disabled truncate">{
+                ws.description || (ws.role === "admin" ? "Admin" : ws.role === "editor" ? "Editor" : "Viewer")
               }</p>
               </div>
               {ws.id === activeId && <HugeiconsIcon icon={Tick01Icon} size={14} color="var(--accent-green-primary)" />}
@@ -226,6 +234,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
           onClose={() => setShowSettings(false)}
           workspace={activeId ? workspaces.find((w) => w.id === activeId) ?? null : null}
           onDeleted={() => { setActiveId(null); fileOps.leaveWorkspace(); refreshWorkspaces(); }}
+          onUpdated={refreshWorkspaces}
         />
       </>
     );

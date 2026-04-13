@@ -6,22 +6,56 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import Logout01Icon from "@hugeicons/core-free-icons/Logout01Icon";
-import { useFilesContext } from "@/hooks/use-files";
+import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import { ConfirmDialog } from "./confirm-dialog";
+import { RoleDropdown } from "./role-dropdown";
 
 interface WorkspaceSettingsProps {
   open: boolean;
   onClose: () => void;
-  workspace: { id: string; rootFolderId: string; name: string; role: string } | null;
+  workspace: {
+    id: string;
+    rootFolderId: string;
+    name: string;
+    role: string;
+    color?: string;
+    description?: string;
+    defaultRole?: string;
+  } | null;
   onDeleted: () => void;
+  onUpdated?: () => void;
 }
 
-export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: WorkspaceSettingsProps) {
-  const fileOps = useFilesContext();
+const PRESET_COLORS = [
+  "var(--accent-green-primary)",
+  "var(--accent-blue-primary)",
+  "var(--accent-pink-primary)",
+  "var(--accent-orange-primary)",
+  "var(--accent-yellow-primary)",
+  "var(--accent-red-primary)",
+];
+
+const COLOR_NAMES: Record<string, string> = {
+  "var(--accent-green-primary)": "Green",
+  "var(--accent-blue-primary)": "Blue",
+  "var(--accent-pink-primary)": "Pink",
+  "var(--accent-orange-primary)": "Orange",
+  "var(--accent-yellow-primary)": "Yellow",
+  "var(--accent-red-primary)": "Red",
+};
+
+const ROLES = ["admin", "editor", "viewer"] as const;
+const ROLE_LABELS: Record<string, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
+
+export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdated }: WorkspaceSettingsProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [wsName, setWsName] = useState("");
   const [editingName, setEditingName] = useState(false);
+  const [wsColor, setWsColor] = useState("var(--accent-green-primary)");
+  const [wsDescription, setWsDescription] = useState("");
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [wsDefaultRole, setWsDefaultRole] = useState<"admin" | "editor" | "viewer">("editor");
 
   const isAdmin = workspace?.role === "admin";
 
@@ -29,6 +63,10 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
     if (open && workspace) {
       setWsName(workspace.name);
       setEditingName(false);
+      setWsColor(workspace.color || "var(--accent-green-primary)");
+      setWsDescription(workspace.description || "");
+      setEditingDescription(false);
+      setWsDefaultRole((workspace.defaultRole as "admin" | "editor" | "viewer") || "editor");
     }
   }, [open, workspace]);
 
@@ -41,14 +79,46 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
 
   if (!open || !workspace) return null;
 
+  const updateField = async (fields: Record<string, string>) => {
+    const res = await fetch("/api/workspaces/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: workspace.id, ...fields }),
+    });
+    if (res.ok) {
+      onUpdated?.();
+      window.dispatchEvent(new Event("securewarp-workspace-updated"));
+    }
+  };
+
   const handleRename = async () => {
     if (!wsName.trim() || wsName.trim() === workspace.name) { setEditingName(false); return; }
-    await fetch("/api/workspaces/rename", {
+    const res = await fetch("/api/workspaces/rename", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceId: workspace.id, name: wsName.trim() }),
     });
     setEditingName(false);
+    if (res.ok) {
+      onUpdated?.();
+      window.dispatchEvent(new Event("securewarp-workspace-updated"));
+    }
+  };
+
+  const handleColorChange = async (color: string) => {
+    setWsColor(color);
+    await updateField({ color });
+  };
+
+  const handleDescriptionSave = async () => {
+    if (wsDescription.trim() === (workspace.description || "")) { setEditingDescription(false); return; }
+    await updateField({ description: wsDescription.trim() });
+    setEditingDescription(false);
+  };
+
+  const handleDefaultRoleChange = async (role: string) => {
+    setWsDefaultRole(role as "admin" | "editor" | "viewer");
+    await updateField({ defaultRole: role });
   };
 
   const handleDelete = async () => {
@@ -88,7 +158,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
           </button>
         </div>
 
-        <div className="overflow-y-auto" style={{ maxHeight: "min(70vh, 400px)" }}>
+        <div className="overflow-y-auto" style={{ maxHeight: "min(70vh, 480px)" }}>
           {/* Name */}
           <div className="px-5 py-4 border-b border-border-tertiary">
             <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-2">Name</p>
@@ -113,6 +183,82 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted }: Works
                 )}
               </div>
             )}
+          </div>
+
+          {/* Color */}
+          <div className="px-5 py-4 border-b border-border-tertiary">
+            <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-2">Color</p>
+            <div className="flex items-center gap-2">
+              {PRESET_COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => isAdmin && handleColorChange(color)}
+                  disabled={!isAdmin}
+                  title={COLOR_NAMES[color]}
+                  className="w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer disabled:cursor-default"
+                  style={{
+                    backgroundColor: color,
+                    boxShadow: wsColor === color ? `0 0 0 2px var(--bg-l3), 0 0 0 4px ${color}` : "none",
+                  }}
+                >
+                  {wsColor === color && (
+                    <HugeiconsIcon icon={Tick01Icon} size={14} color="white" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Description */}
+          <div className="px-5 py-4 border-b border-border-tertiary">
+            <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-2">Description</p>
+            {editingDescription && isAdmin ? (
+              <div>
+                <textarea
+                  value={wsDescription}
+                  onChange={(e) => setWsDescription(e.target.value)}
+                  maxLength={200}
+                  autoFocus
+                  rows={3}
+                  placeholder="What is this workspace for?"
+                  className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40 resize-none"
+                  onKeyDown={(e) => { if (e.key === "Escape") { setEditingDescription(false); setWsDescription(workspace.description || ""); } }}
+                />
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-[10px] text-text-disabled">{wsDescription.length}/200</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setEditingDescription(false); setWsDescription(workspace.description || ""); }} className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary cursor-pointer">Cancel</button>
+                    <button onClick={handleDescriptionSave} className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 cursor-pointer">Save</button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] text-text-secondary">
+                  {workspace.description || "No description"}
+                </span>
+                {isAdmin && (
+                  <button onClick={() => setEditingDescription(true)} className="text-[11px] text-text-link hover:underline cursor-pointer shrink-0 ml-2">Edit</button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Default member role */}
+          <div className="px-5 py-4 border-b border-border-tertiary">
+            <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-1">Default member role</p>
+            <p className="text-[11px] text-text-disabled mb-2">Role assigned to new members when invited</p>
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-text-primary">{ROLE_LABELS[wsDefaultRole]}</span>
+              {isAdmin && (
+                <RoleDropdown
+                  value={wsDefaultRole}
+                  options={ROLES}
+                  labels={ROLE_LABELS}
+                  onChange={(v) => handleDefaultRoleChange(v)}
+                />
+              )}
+            </div>
           </div>
 
           {/* Danger zone */}

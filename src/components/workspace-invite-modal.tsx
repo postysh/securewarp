@@ -16,12 +16,13 @@ interface WorkspaceInviteModalProps {
   onClose: () => void;
   workspaceId: string | null;
   rootFolderId: string | null;
+  defaultRole?: "admin" | "editor" | "viewer";
 }
 
 const ROLES = ["editor", "viewer", "admin"] as const;
 const ROLE_LABELS: Record<string, string> = { editor: "Editor", viewer: "Viewer", admin: "Admin" };
 
-export function WorkspaceInviteModal({ open, onClose, workspaceId, rootFolderId }: WorkspaceInviteModalProps) {
+export function WorkspaceInviteModal({ open, onClose, workspaceId, rootFolderId, defaultRole = "editor" }: WorkspaceInviteModalProps) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "editor" | "viewer">("editor");
   const [busy, setBusy] = useState(false);
@@ -29,7 +30,7 @@ export function WorkspaceInviteModal({ open, onClose, workspaceId, rootFolderId 
   const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) { setEmail(""); setError(null); setSuccess(null); setRole("editor"); }
+    if (open) { setEmail(""); setError(null); setSuccess(null); setRole(defaultRole); }
   }, [open]);
 
   useEffect(() => {

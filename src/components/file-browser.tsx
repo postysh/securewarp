@@ -176,6 +176,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
   const [workspaceInviteOpen, setWorkspaceInviteOpen] = useState(false);
   const [workspaceMembers, setWorkspaceMembers] = useState<FacepileUser[]>([]);
+  const [wsDefaultRole, setWsDefaultRole] = useState<"admin" | "editor" | "viewer">("editor");
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -197,8 +198,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   }, [keys]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch workspace members for the Facepile
-  useEffect(() => {
-    if (!fileOps.activeWorkspace) { setWorkspaceMembers([]); return; }
+  const fetchWorkspaceInfo = useCallback(() => {
+    if (!fileOps.activeWorkspace) { setWorkspaceMembers([]); setWsDefaultRole("editor"); return; }
     fetch(`/api/workspaces/members?workspaceId=${fileOps.activeWorkspace.id}`)
       .then((r) => r.json())
       .then((d) => {
@@ -211,7 +212,22 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         }
       })
       .catch(() => {});
+    fetch("/api/workspaces")
+      .then((r) => r.json())
+      .then((d) => {
+        const ws = d.workspaces?.find((w: { id: string }) => w.id === fileOps.activeWorkspace?.id);
+        if (ws?.defaultRole) setWsDefaultRole(ws.defaultRole);
+      })
+      .catch(() => {});
   }, [fileOps.activeWorkspace]);
+
+  useEffect(() => { fetchWorkspaceInfo(); }, [fetchWorkspaceInfo]);
+
+  useEffect(() => {
+    const handler = () => { fetchWorkspaceInfo(); };
+    window.addEventListener("securewarp-workspace-updated", handler);
+    return () => window.removeEventListener("securewarp-workspace-updated", handler);
+  }, [fetchWorkspaceInfo]);
 
   // Close context menu and clear label filter when navigating
   useEffect(() => {
@@ -1302,6 +1318,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         onClose={() => setWorkspaceInviteOpen(false)}
         workspaceId={fileOps.activeWorkspace?.id ?? null}
         rootFolderId={fileOps.activeWorkspace?.rootFolderId ?? null}
+        defaultRole={wsDefaultRole}
       />
       <CommandPalette
         open={commandPaletteOpen}

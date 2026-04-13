@@ -19,17 +19,23 @@ export async function GET() {
     // All workspaces the user is a member of
     const { data, error } = await supabase
       .from("workspace_members")
-      .select("role, workspace:workspaces!workspace_members_workspace_id_fkey(id, name, root_folder_id, owner_id)")
+      .select("role, workspace:workspaces!workspace_members_workspace_id_fkey(id, name, root_folder_id, owner_id, color, description, default_role)")
       .eq("user_id", session.userId);
     if (error) throw error;
 
     const workspaces = (data || []).map((row) => {
-      const ws = (row.workspace as unknown) as { id: string; name: string; root_folder_id: string; owner_id: string };
+      const ws = (row.workspace as unknown) as {
+        id: string; name: string; root_folder_id: string; owner_id: string;
+        color: string; description: string; default_role: string;
+      };
       return {
         id: ws.id,
         name: ws.name,
         rootFolderId: ws.root_folder_id,
         ownerId: ws.owner_id,
+        color: ws.color,
+        description: ws.description,
+        defaultRole: ws.default_role,
         role: row.role,
       };
     });
