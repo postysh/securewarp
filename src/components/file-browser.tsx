@@ -27,7 +27,7 @@ import { NotificationBell } from "./notifications";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import { FileIcon, type FileKind } from "./file-icon";
 import { Tooltip } from "./tooltip";
-import { Facepile } from "./facepile";
+import { Facepile, type FacepileUser } from "./facepile";
 import dynamic from "next/dynamic";
 const CommandPalette = dynamic(() => import("./command-palette").then((m) => ({ default: m.CommandPalette })), { ssr: false });
 const NewFolderModal = dynamic(() => import("./new-folder-modal").then((m) => ({ default: m.NewFolderModal })), { ssr: false });
@@ -173,6 +173,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [filterLabel, setFilterLabel] = useState<{ id: string; name: string; color: string } | null>(null);
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
+  const [workspaceMembers, setWorkspaceMembers] = useState<FacepileUser[]>([]);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -192,6 +193,23 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     } catch { /* */ }
     fileOps.fetchFiles(fileOps.currentFolder);
   }, [keys]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch workspace members for the Facepile
+  useEffect(() => {
+    if (!fileOps.activeWorkspace) { setWorkspaceMembers([]); return; }
+    fetch(`/api/workspaces/members?workspaceId=${fileOps.activeWorkspace.id}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.members) {
+          setWorkspaceMembers(d.members.map((m: { email: string }) => ({
+            initials: m.email.charAt(0).toUpperCase(),
+            name: m.email,
+            bg: colorForEmail(m.email),
+          })));
+        }
+      })
+      .catch(() => {});
+  }, [fileOps.activeWorkspace]);
 
   // Close context menu and clear label filter when navigating
   useEffect(() => {
@@ -447,7 +465,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           {fileOps.activeWorkspace && (
             <>
               <div className="hidden md:block">
-                <Facepile onClick={() => setWorkspaceSettingsOpen(true)} onOverflowClick={() => setWorkspaceSettingsOpen(true)} />
+                <Facepile members={workspaceMembers} onClick={() => setWorkspaceSettingsOpen(true)} onOverflowClick={() => setWorkspaceSettingsOpen(true)} />
               </div>
               {fileOps.activeWorkspace && (
                 <button
