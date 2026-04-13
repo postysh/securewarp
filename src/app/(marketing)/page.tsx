@@ -16,10 +16,10 @@ function useInView(threshold = 0.15) {
   return { ref, visible };
 }
 
-function FadeIn({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
+function FadeIn({ children, delay = 0, className = "", style = {} }: { children: React.ReactNode; delay?: number; className?: string; style?: React.CSSProperties }) {
   const { ref, visible } = useInView();
   return (
-    <div ref={ref} className={className} style={{ opacity: visible ? 1 : 0, transform: visible ? "translateY(0)" : "translateY(24px)", transition: `opacity 0.7s ease ${delay}s, transform 0.7s ease ${delay}s` }}>
+    <div ref={ref} className={className} style={{ ...style, opacity: visible ? 1 : 0, transform: visible ? "translateY(0)" : "translateY(24px)", transition: `opacity 0.7s ease ${delay}s, transform 0.7s ease ${delay}s` }}>
       {children}
     </div>
   );
@@ -51,18 +51,15 @@ import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
 import Link04Icon from "@hugeicons/core-free-icons/Link04Icon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
+import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 
 const GREEN = "#04a45c";
 const LIGHT_BG = "#F5F5F4";
 
 export default function Home() {
-  useEffect(() => {
-    document.documentElement.classList.remove("dark");
-    return () => { document.documentElement.classList.add("dark"); };
-  }, []);
 
   return (
-    <div style={{ fontFamily: "var(--font-geist-sans), system-ui, sans-serif", background: LIGHT_BG, minHeight: "100vh" }}>
+    <div style={{ fontFamily: "var(--font-geist-sans), system-ui, sans-serif", background: "#111", minHeight: "100vh" }}>
 
       {/* Floating nav pill — top level so no parent clips it */}
       <div style={{ position: "fixed", left: "50%", top: 20, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 0, background: "rgba(30,30,30,0.95)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderRadius: 12, padding: "6px 10px", zIndex: 99999 }}>
@@ -296,118 +293,381 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ─── STATEMENT ─── dark section with visual break ─── */}
-      <FadeIn>
-        <section style={{ background: "#111", padding: "100px 32px" }}>
-          <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
-            <h2 style={{ fontSize: "clamp(26px, 4vw, 44px)", fontWeight: 700, color: "white", margin: "0 0 24px", letterSpacing: -1, lineHeight: 1.2 }}>
-              Your cloud provider can read your files.<br />We can&apos;t. By design.
+      {/* ─── STATEMENT + DIFFERENCE — single dark panel ─── */}
+      <section style={{ background: "#111", padding: "100px 32px" }}>
+        <FadeIn>
+          <div style={{ maxWidth: 960, margin: "0 auto", background: "#1a1a1a", borderRadius: 24, border: "1px solid rgba(255,255,255,0.06)", padding: "clamp(40px, 6vw, 72px) clamp(32px, 5vw, 56px)", overflow: "hidden" }}>
+            <h2 style={{ fontSize: "clamp(28px, 4.5vw, 48px)", fontWeight: 700, color: "white", margin: "0 0 8px", letterSpacing: -1.5, lineHeight: 1.1, textAlign: "center" }}>
+              Your cloud provider can read your files.
             </h2>
-            <p style={{ fontSize: 16, color: "rgba(255,255,255,0.45)", lineHeight: 1.7, maxWidth: 480, margin: "0 auto 48px" }}>
-              Everything is encrypted in your browser before it touches our servers. We never see your data. Not even if we wanted to.
+            <p style={{ fontSize: "clamp(28px, 4.5vw, 48px)", fontWeight: 700, color: GREEN, margin: "0 0 40px", letterSpacing: -1.5, lineHeight: 1.1, textAlign: "center" }}>
+              We can&apos;t. By design.
             </p>
-            {/* Encryption flow visual */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, flexWrap: "wrap" }}>
+            <div style={{ maxWidth: 560, margin: "0 auto 40px", textAlign: "center" }}>
+              <p style={{ fontSize: 15, color: "rgba(255,255,255,0.5)", lineHeight: 1.7, margin: 0 }}>
+                Everything is encrypted in your browser before it reaches our servers. Your password never leaves your device. We store only ciphertext — unreadable without your keys.
+              </p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, maxWidth: 700, margin: "0 auto" }}>
               {[
-                { label: "Your browser", sub: "Encrypts locally" },
-                null,
-                { label: "Our server", sub: "Stores ciphertext" },
-                null,
-                { label: "Recipient", sub: "Decrypts locally" },
-              ].map((item, i) => item === null ? (
-                <div key={i} style={{ width: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={GREEN} strokeWidth="2" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="14 7 19 12 14 17"/></svg>
-                </div>
-              ) : (
-                <div key={i} style={{ width: 160, padding: "20px 16px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)" }}>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "white", marginBottom: 4 }}>{item.label}</div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{item.sub}</div>
+                "Zero-knowledge encryption",
+                "Password never transmitted",
+                "XSalsa20-Poly1305 ciphers",
+                "Argon2id key derivation",
+                "BIP39 recovery phrase",
+                "SRP-6a authentication",
+              ].map((line) => (
+                <div key={line} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <span style={{ color: GREEN, fontSize: 14 }}>✓</span>
+                  <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>{line}</span>
                 </div>
               ))}
             </div>
           </div>
-        </section>
-      </FadeIn>
+        </FadeIn>
+      </section>
 
-      {/* ─── FEATURES ─── cards on light bg ─── */}
-      <section id="features" style={{ background: LIGHT_BG, padding: "100px 32px" }}>
-        <div style={{ maxWidth: 960, margin: "0 auto" }}>
-          <FadeIn>
-            <div style={{ textAlign: "center", marginBottom: 64 }}>
-              <h2 style={{ fontSize: "clamp(24px, 3vw, 36px)", fontWeight: 700, color: "#111", margin: 0, letterSpacing: -0.5 }}>
-                Everything you need to store securely
-              </h2>
+      {/* ─── FEATURES — alternating full-width sections with mockups ─── */}
+
+      {/* Feature 1: It works like a real drive */}
+      <section id="features" style={{ background: "#111", padding: "120px 32px 0" }}>
+        <div style={{ maxWidth: 1060, margin: "0 auto", display: "flex", gap: 48, flexWrap: "wrap", alignItems: "center" }}>
+          <FadeIn style={{ flex: "0 0 340px", maxWidth: 400 }}>
+            <span style={{ fontSize: 12, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", letterSpacing: 2, color: GREEN }}>File management</span>
+            <h2 style={{ fontSize: "clamp(26px, 3.5vw, 38px)", fontWeight: 700, color: "white", margin: "12px 0 16px", letterSpacing: -0.5, lineHeight: 1.15 }}>
+              Feels like Google Drive. Works like a vault.
+            </h2>
+            <p style={{ fontSize: 15, color: "rgba(255,255,255,0.45)", lineHeight: 1.7, margin: 0 }}>
+              Drag and drop files, create folders, preview documents and images, organize with labels and pins. Everything you expect — except we can&apos;t see any of it.
+            </p>
+          </FadeIn>
+          <FadeIn delay={0.1} style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ background: "#1a1a1a", borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+              {/* Mini header */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "white" }}>My Drive</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, color: "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                    <HugeiconsIcon icon={FolderAddIcon} size={12} color="rgba(255,255,255,0.4)" />
+                  </div>
+                  <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, color: "white", background: "white", display: "flex", alignItems: "center", gap: 4 }}>
+                    <HugeiconsIcon icon={Upload04Icon} size={12} color="#1a1a1a" />
+                    <span style={{ color: "#1a1a1a", fontWeight: 500 }}>Upload</span>
+                  </div>
+                </div>
+              </div>
+              {/* Column header */}
+              <div style={{ display: "flex", alignItems: "center", padding: "8px 16px", fontSize: 10, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", color: "rgba(255,255,255,0.2)" }}>
+                <span style={{ flex: 1 }}>Name</span>
+                <span style={{ width: 60, textAlign: "right" }}>Type</span>
+                <span style={{ width: 70, textAlign: "right" }}>Size</span>
+                <span style={{ width: 80, textAlign: "right" }}>Modified</span>
+              </div>
+              {([
+                { name: "Engineering", kind: "folder" as const, ext: "", size: "—", date: "Dec 15" },
+                { name: "Design Assets", kind: "folder" as const, ext: "", size: "—", date: "Dec 12" },
+                { name: "Q4 Report.pdf", kind: "pdf" as const, ext: "PDF", size: "2.4 MB", date: "Dec 10" },
+                { name: "Architecture.png", kind: "image" as const, ext: "PNG", size: "1.1 MB", date: "Dec 5" },
+                { name: "Budget.xlsx", kind: "spreadsheet" as const, ext: "XLSX", size: "340 KB", date: "Dec 3" },
+                { name: "Recording.mp4", kind: "video" as const, ext: "MP4", size: "48 MB", date: "Nov 29" },
+                { name: "App.tsx", kind: "code" as const, ext: "TSX", size: "12 KB", date: "Nov 20" },
+              ]).map((f) => {
+                const ic = { folder: { i: Folder01Icon, c: "rgb(100,170,220)" }, pdf: { i: Pdf01Icon, c: "rgb(220,120,120)" }, image: { i: Image01Icon, c: "rgba(110,210,170,0.85)" }, spreadsheet: { i: Table01Icon, c: "rgba(110,210,170,0.85)" }, video: { i: Video01Icon, c: "rgb(220,120,120)" }, code: { i: CodeIcon, c: "rgb(225,140,110)" } }[f.kind];
+                return (
+                  <div key={f.name} style={{ display: "flex", alignItems: "center", height: 44, padding: "0 16px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
+                      <div style={{ width: 26, height: 26, borderRadius: 6, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <HugeiconsIcon icon={ic.i} size={14} color={ic.c} />
+                      </div>
+                      <span style={{ fontSize: 13, color: "rgba(255,255,255,0.8)" }}>{f.name}</span>
+                    </div>
+                    <span style={{ width: 60, textAlign: "right", fontSize: 10, fontFamily: "var(--font-geist-mono), monospace", color: "rgba(255,255,255,0.15)" }}>{f.ext}</span>
+                    <span style={{ width: 70, textAlign: "right", fontSize: 12, color: "rgba(255,255,255,0.2)" }}>{f.size}</span>
+                    <span style={{ width: 80, textAlign: "right", fontSize: 12, color: "rgba(255,255,255,0.2)" }}>{f.date}</span>
+                  </div>
+                );
+              })}
             </div>
           </FadeIn>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
-            {[
-              { icon: LockIcon, color: GREEN, title: "Zero-knowledge encryption", desc: "Files are encrypted in your browser before upload. The server only stores ciphertext — it can never read your data." },
-              { icon: UserGroupIcon, color: "#6aa4dc", title: "Team workspaces", desc: "Shared spaces with admin, editor, and viewer roles. Invite your team and access is inherited through folders automatically." },
-              { icon: Link04Icon, color: "#e1886e", title: "Encrypted link sharing", desc: "Share via link with optional password and expiry. The decryption key stays in the URL fragment — never hits the server." },
-              { icon: CloudServerIcon, color: GREEN, title: "20 GB free storage", desc: "Start with 20 GB of encrypted storage. Every byte is encrypted with XSalsa20-Poly1305 before it leaves your browser." },
-              { icon: Image01Icon, color: "#c88caf", title: "Preview anything", desc: "Documents, images, PDFs — decrypted and rendered client-side. The server never handles your plaintext files." },
-              { icon: StarIcon, color: "#d4b450", title: "24-word recovery", desc: "Forget your password, not your files. A BIP39 recovery phrase lets you regain access. No server-side backdoor." },
-            ].map((f, i) => (
-              <FadeIn key={f.title} delay={i * 0.06}>
-                <div style={{ background: "white", borderRadius: 16, padding: 28, border: "1px solid rgba(0,0,0,0.06)", height: "100%" }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: `${f.color}12`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-                    <HugeiconsIcon icon={f.icon} size={20} color={f.color} />
-                  </div>
-                  <h3 style={{ fontSize: 16, fontWeight: 600, color: "#111", margin: "0 0 8px" }}>{f.title}</h3>
-                  <p style={{ fontSize: 14, color: "#888", lineHeight: 1.65, margin: 0 }}>{f.desc}</p>
-                </div>
-              </FadeIn>
-            ))}
-          </div>
         </div>
       </section>
 
-      {/* ─── SECURITY ─── dark strip with crypto standards ─── */}
-      <FadeIn>
-        <section style={{ background: "#111", padding: "56px 32px" }}>
-          <div style={{ maxWidth: 900, margin: "0 auto" }}>
-            <div style={{ textAlign: "center", marginBottom: 32 }}>
-              <span style={{ fontSize: 12, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", letterSpacing: 2, color: "rgba(255,255,255,0.3)" }}>Built on proven cryptography</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
-              {[
-                { name: "XSalsa20-Poly1305", role: "Encryption" },
-                { name: "Argon2id", role: "Key derivation" },
-                { name: "SRP-6a", role: "Authentication" },
-                { name: "BIP39", role: "Recovery" },
-                { name: "HKDF-SHA256", role: "Key separation" },
-              ].map((c) => (
-                <div key={c.name} style={{ padding: "12px 20px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", textAlign: "center" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "white", fontFamily: "var(--font-geist-mono), monospace" }}>{c.name}</div>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>{c.role}</div>
+      {/* Feature 2: Workspaces */}
+      <section style={{ background: "#111", padding: "120px 32px 0" }}>
+        <div style={{ maxWidth: 1060, margin: "0 auto", display: "flex", gap: 48, flexWrap: "wrap", alignItems: "center", flexDirection: "row-reverse" }}>
+          <FadeIn style={{ flex: "0 0 340px", maxWidth: 400 }}>
+            <span style={{ fontSize: 12, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", letterSpacing: 2, color: GREEN }}>Collaboration</span>
+            <h2 style={{ fontSize: "clamp(26px, 3.5vw, 38px)", fontWeight: 700, color: "white", margin: "12px 0 16px", letterSpacing: -0.5, lineHeight: 1.15 }}>
+              Workspaces with role-based access
+            </h2>
+            <p style={{ fontSize: 15, color: "rgba(255,255,255,0.45)", lineHeight: 1.7, margin: 0 }}>
+              Create shared workspaces and invite your team as admins, editors, or viewers. Share a folder and everyone inside gets access automatically — no per-file key distribution.
+            </p>
+          </FadeIn>
+          <FadeIn delay={0.1} style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ background: "#1a1a1a", borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+              {/* Header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <HugeiconsIcon icon={UserGroupIcon} size={16} color="#6aa4dc" />
                 </div>
-              ))}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "white" }}>Members</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>4 members</div>
+                </div>
+              </div>
+              {/* Search */}
+              <div style={{ padding: "10px 20px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: "rgba(255,255,255,0.04)" }}>
+                  <HugeiconsIcon icon={Search01Icon} size={14} color="rgba(255,255,255,0.25)" />
+                  <span style={{ fontSize: 13, color: "rgba(255,255,255,0.25)" }}>Search members</span>
+                </div>
+              </div>
+              {/* Members */}
+              <div style={{ padding: "0 20px 12px" }}>
+                <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                  {[
+                    { email: "evan@securewarp.com", role: "Admin", color: GREEN },
+                    { email: "alice@team.com", role: "Editor", color: "#6aa4dc" },
+                    { email: "bob@team.com", role: "Viewer", color: "#c88caf" },
+                    { email: "sarah@team.com", role: "Editor", color: "#e1886e" },
+                  ].map((m, i) => (
+                    <div key={m.email} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.04)" }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 6, background: m.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "white" }}>{m.email[0].toUpperCase()}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.8)" }}>{m.email}</div>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>{m.role}</div>
+                      </div>
+                      {m.role !== "Admin" && (
+                        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", padding: "2px 8px" }}>{m.role} ▾</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Footer */}
+              <div style={{ padding: "10px 20px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ padding: "6px 16px", borderRadius: 8, fontSize: 12, fontWeight: 500, color: "#1a1a1a", background: "white" }}>Done</div>
+              </div>
             </div>
-          </div>
-        </section>
-      </FadeIn>
+          </FadeIn>
+        </div>
+      </section>
 
-      {/* ─── CTA ─── green ─── */}
-      <FadeIn>
-        <section style={{ background: GREEN, padding: "80px 32px" }}>
-          <div style={{ maxWidth: 500, margin: "0 auto", textAlign: "center" }}>
-            <h2 style={{ fontSize: "clamp(24px, 3vw, 34px)", fontWeight: 600, color: "white", margin: "0 0 12px", letterSpacing: -0.5 }}>
+      {/* Feature 3: Link sharing */}
+      <section style={{ background: "#111", padding: "120px 32px 0" }}>
+        <div style={{ maxWidth: 1060, margin: "0 auto", display: "flex", gap: 48, flexWrap: "wrap", alignItems: "center" }}>
+          <FadeIn style={{ flex: "0 0 340px", maxWidth: 400 }}>
+            <span style={{ fontSize: 12, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", letterSpacing: 2, color: GREEN }}>Sharing</span>
+            <h2 style={{ fontSize: "clamp(26px, 3.5vw, 38px)", fontWeight: 700, color: "white", margin: "12px 0 16px", letterSpacing: -0.5, lineHeight: 1.15 }}>
+              Encrypted links that expire
+            </h2>
+            <p style={{ fontSize: 15, color: "rgba(255,255,255,0.45)", lineHeight: 1.7, margin: 0 }}>
+              Share files with anyone via a link. Add a password. Set an expiration date. The decryption key lives in the URL fragment — it never touches the server.
+            </p>
+          </FadeIn>
+          <FadeIn delay={0.1} style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ background: "#1a1a1a", borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+              {/* Header — matches real share-modal.tsx */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <HugeiconsIcon icon={UserAdd01Icon} size={16} color="#6aa4dc" />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "white" }}>Share file</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Q4 Report.pdf</div>
+                  </div>
+                </div>
+              </div>
+              {/* Email input */}
+              <div style={{ padding: "16px 20px 0" }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ flex: 1, padding: "9px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", fontSize: 13, color: "rgba(255,255,255,0.25)" }}>Recipient email</div>
+                  <div style={{ padding: "9px 16px", borderRadius: 10, fontSize: 12, fontWeight: 500, color: "#1a1a1a", background: "white" }}>Share</div>
+                </div>
+              </div>
+              {/* Collaborators */}
+              <div style={{ padding: "12px 20px" }}>
+                <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                  {[
+                    { email: "evan@securewarp.com", role: "Owner", color: GREEN },
+                    { email: "alice@team.com", role: "Can edit", color: "#6aa4dc" },
+                  ].map((c, i) => (
+                    <div key={c.email} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.04)" }}>
+                      <div style={{ width: 28, height: 28, borderRadius: 6, background: c.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "white" }}>{c.email[0].toUpperCase()}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.8)" }}>{c.email}</div>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>{c.role}</div>
+                      </div>
+                      {c.role !== "Owner" && <span style={{ fontSize: 10, color: "rgb(220,120,120)" }}>Revoke</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Public link section */}
+              <div style={{ padding: "0 20px 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <HugeiconsIcon icon={Link04Icon} size={14} color="rgba(255,255,255,0.35)" />
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "white" }}>Public link</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>No expiry ▾</span>
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>Password</span>
+                    <span style={{ fontSize: 11, color: GREEN }}>Create link</span>
+                  </div>
+                </div>
+                {/* Existing link */}
+                <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", color: "rgba(255,255,255,0.6)" }}>/share/a8f2c9d1...</div>
+                      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>Expires Dec 20</div>
+                    </div>
+                    <span style={{ fontSize: 11, color: "rgb(220,120,120)" }}>Revoke</span>
+                  </div>
+                </div>
+              </div>
+              {/* Footer */}
+              <div style={{ padding: "10px 20px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <HugeiconsIcon icon={LockIcon} size={11} color="rgba(255,255,255,0.25)" />
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>End-to-end encrypted</span>
+                </div>
+                <div style={{ padding: "6px 16px", borderRadius: 8, fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>Done</div>
+              </div>
+            </div>
+          </FadeIn>
+        </div>
+      </section>
+
+      {/* Feature 4: Recovery */}
+      <section style={{ background: "#111", padding: "120px 32px 0" }}>
+        <div style={{ maxWidth: 1060, margin: "0 auto", display: "flex", gap: 48, flexWrap: "wrap", alignItems: "center", flexDirection: "row-reverse" }}>
+          <FadeIn style={{ flex: "0 0 340px", maxWidth: 400 }}>
+            <span style={{ fontSize: 12, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", letterSpacing: 2, color: GREEN }}>Recovery</span>
+            <h2 style={{ fontSize: "clamp(26px, 3.5vw, 38px)", fontWeight: 700, color: "white", margin: "12px 0 16px", letterSpacing: -0.5, lineHeight: 1.15 }}>
+              Forget your password, not your files
+            </h2>
+            <p style={{ fontSize: 15, color: "rgba(255,255,255,0.45)", lineHeight: 1.7, margin: 0 }}>
+              A 24-word recovery phrase lets you regain full access. No reset emails. No server-side backdoor. Your keys, your recovery.
+            </p>
+          </FadeIn>
+          <FadeIn delay={0.1} style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ background: "#1a1a1a", borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+              {/* Header */}
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(210,180,80,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <HugeiconsIcon icon={StarIcon} size={16} color="rgb(210,180,80)" />
+                </div>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "white" }}>Recovery Key</span>
+              </div>
+              {/* Warning */}
+              <div style={{ margin: "16px 20px 0", padding: "12px 14px", borderRadius: 10, background: "rgba(210,180,80,0.06)", border: "1px solid rgba(210,180,80,0.12)", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span style={{ fontSize: 14, marginTop: 1 }}>⚠</span>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "rgb(210,180,80)" }}>Save this recovery phrase somewhere safe</div>
+                  <div style={{ fontSize: 11, color: "rgba(210,180,80,0.6)", marginTop: 2 }}>If you lose it and forget your password, your data is gone forever.</div>
+                </div>
+              </div>
+              {/* Phrase */}
+              <div style={{ padding: "16px 20px" }}>
+                <div style={{ position: "relative", borderRadius: 10, background: "rgba(255,255,255,0.03)", padding: 16, filter: "blur(3px)", userSelect: "none" }}>
+                  <div style={{ fontSize: 13, fontFamily: "var(--font-geist-mono), monospace", color: "rgba(255,255,255,0.5)", lineHeight: 2, wordSpacing: 4 }}>
+                    ocean harvest gentle mystery carbon silver ancient rhythm crystal meadow cipher velvet tunnel branch solar kingdom fossil gravity plasma beacon
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>24 words · BIP39</span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>Reveal</div>
+                    <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>Copy</div>
+                  </div>
+                </div>
+              </div>
+              {/* Actions */}
+              <div style={{ padding: "0 20px 16px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <div style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>Download backup</div>
+                <div style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 500, color: "#1a1a1a", background: "white" }}>I&apos;ve saved my key</div>
+              </div>
+            </div>
+          </FadeIn>
+        </div>
+      </section>
+
+      {/* Feature 5: Free storage — with visual */}
+      <section style={{ background: "#111", padding: "120px 32px" }}>
+        <div style={{ maxWidth: 1060, margin: "0 auto", display: "flex", gap: 48, flexWrap: "wrap", alignItems: "center" }}>
+          <FadeIn style={{ flex: "0 0 340px", maxWidth: 400 }}>
+            <span style={{ fontSize: 12, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", letterSpacing: 2, color: GREEN }}>Storage</span>
+            <h2 style={{ fontSize: "clamp(26px, 3.5vw, 38px)", fontWeight: 700, color: "white", margin: "12px 0 16px", letterSpacing: -0.5, lineHeight: 1.15 }}>
+              20 GB free. No strings.
+            </h2>
+            <p style={{ fontSize: 15, color: "rgba(255,255,255,0.45)", lineHeight: 1.7, margin: 0 }}>
+              No credit card. No trial period. No ads. No tracking. Every byte encrypted with XSalsa20-Poly1305 before it leaves your browser.
+            </p>
+          </FadeIn>
+          <FadeIn delay={0.1} style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ background: "#1a1a1a", borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)", padding: 24 }}>
+              {/* Storage bar */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+                <HugeiconsIcon icon={CloudServerIcon} size={16} color="rgba(255,255,255,0.35)" />
+                <span style={{ fontSize: 13, fontWeight: 500, color: "white" }}>Storage</span>
+              </div>
+              <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.06)", overflow: "hidden", marginBottom: 10 }}>
+                <div style={{ width: "12%", height: "100%", borderRadius: 3, background: GREEN }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>2.3 GB used</span>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>20 GB</span>
+              </div>
+              {/* Quick stats */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                {[
+                  { label: "Files", value: "142" },
+                  { label: "Folders", value: "23" },
+                  { label: "Shared", value: "8" },
+                ].map((s) => (
+                  <div key={s.label} style={{ padding: "14px 16px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.04)" }}>
+                    <div style={{ fontSize: 20, fontWeight: 600, color: "white", marginBottom: 2 }}>{s.value}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </FadeIn>
+        </div>
+      </section>
+
+      {/* ─── CTA + FOOTER ─── combined dark section ─── */}
+      <footer style={{ background: "#111", padding: "0 32px 0" }}>
+        {/* CTA */}
+        <FadeIn>
+          <div style={{ maxWidth: 600, margin: "0 auto", textAlign: "center", padding: "100px 0 80px" }}>
+            <h2 style={{ fontSize: "clamp(28px, 4vw, 44px)", fontWeight: 700, color: "white", margin: "0 0 16px", letterSpacing: -1 }}>
               Ready to own your data?
             </h2>
-            <p style={{ fontSize: 15, color: "rgba(255,255,255,0.7)", margin: "0 0 28px" }}>
-              20 GB encrypted storage. No credit card. No tracking.
+            <p style={{ fontSize: 16, color: "rgba(255,255,255,0.45)", margin: "0 0 32px", lineHeight: 1.6 }}>
+              Free forever. 20 GB encrypted storage. No credit card.
             </p>
-            <Link href="/register" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "14px 32px", fontSize: 15, fontWeight: 600, color: GREEN, background: "white", borderRadius: 12, textDecoration: "none" }}>
-              Get started free
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-            </Link>
+            <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
+              <Link href="/register" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "14px 32px", fontSize: 15, fontWeight: 600, color: "#111", background: "white", borderRadius: 12, textDecoration: "none" }}>
+                Get started free
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </Link>
+              <Link href="/login" style={{ display: "inline-flex", alignItems: "center", padding: "14px 24px", fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, textDecoration: "none" }}>
+                Sign in
+              </Link>
+            </div>
           </div>
-        </section>
-      </FadeIn>
+        </FadeIn>
 
-      {/* ─── FOOTER ─── dark ─── */}
-      <footer style={{ background: "#1a1a1a", padding: "40px 32px 24px" }}>
-        <div style={{ maxWidth: 1060, margin: "0 auto", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "32px 48px" }}>
+        {/* Divider */}
+        <div style={{ maxWidth: 1060, margin: "0 auto", borderTop: "1px solid rgba(255,255,255,0.06)" }} />
+
+        {/* Footer links */}
+        <div style={{ maxWidth: 1060, margin: "0 auto", padding: "40px 0 32px", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "32px 48px" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <div style={{ width: 28, height: 28, borderRadius: 8, background: GREEN, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -415,7 +675,7 @@ export default function Home() {
               </div>
               <span style={{ fontSize: 15, fontWeight: 600, color: "white" }}>SecureWarp</span>
             </div>
-            <p style={{ fontSize: 13, color: "#666", margin: 0 }}>&copy; 2026. All rights reserved.</p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", margin: 0 }}>&copy; 2026. All rights reserved.</p>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "32px 48px" }}>
             {[
@@ -425,10 +685,10 @@ export default function Home() {
               { title: "Legal", items: ["Privacy policy", "Terms of service"] },
             ].map((col) => (
               <div key={col.title}>
-                <div style={{ fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", color: "#666", marginBottom: 8 }}>{col.title}</div>
+                <div style={{ fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>{col.title}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {col.items.map((item) => (
-                    <Link key={item} href="#" style={{ fontSize: 14, color: "#aaa", textDecoration: "none" }}>{item}</Link>
+                    <Link key={item} href="#" style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", textDecoration: "none" }}>{item}</Link>
                   ))}
                 </div>
               </div>
