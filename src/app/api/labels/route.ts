@@ -41,6 +41,15 @@ export async function POST(request: Request) {
     const parsed = CreateSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: "Invalid data" }, { status: 400 });
 
+    // Limit to 10 labels
+    const { count } = await supabase
+      .from("labels")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", session.userId);
+    if ((count ?? 0) >= 10) {
+      return NextResponse.json({ error: "Maximum 10 labels reached" }, { status: 400 });
+    }
+
     const { data, error } = await supabase
       .from("labels")
       .insert({ user_id: session.userId, name: parsed.data.name, color: parsed.data.color })

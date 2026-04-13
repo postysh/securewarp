@@ -21,6 +21,8 @@ import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
 import PinIcon from "@hugeicons/core-free-icons/PinIcon";
 import Move01Icon from "@hugeicons/core-free-icons/Move01Icon";
 import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
+import GridViewIcon from "@hugeicons/core-free-icons/GridViewIcon";
+import LeftToRightListBulletIcon from "@hugeicons/core-free-icons/LeftToRightListBulletIcon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import { NotificationBell } from "./notifications";
@@ -39,6 +41,7 @@ import { ConfirmDialog } from "./confirm-dialog";
 import { WorkspaceSettings } from "./workspace-settings";
 import { WorkspaceInviteModal } from "./workspace-invite-modal";
 import { WorkspaceActivityPage } from "./workspace-activity-modal";
+import { FileDetailsModal } from "./file-details-modal";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
@@ -77,6 +80,52 @@ function formatDate(dateStr: string): string {
 }
 
 type SortField = "name" | "type" | "size" | "modified";
+
+// Thumbnail cache for grid view image previews
+const thumbnailCache = new Map<string, string>();
+
+function GridThumbnail({ fileId, kind, previewFile }: { fileId: string; kind: FileKind; previewFile: (id: string) => Promise<{ ok: true; blobUrl: string; name: string; type: string } | { ok: false; error: string }> }) {
+  const [src, setSrc] = useState<string | null>(() => thumbnailCache.get(fileId) ?? null);
+  const [failed, setFailed] = useState(false);
+  const attempted = useRef(false);
+  const imgRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (kind !== "image" || src || failed || attempted.current) return;
+    const el = imgRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      obs.disconnect();
+      attempted.current = true;
+      (async () => {
+        try {
+          const result = await previewFile(fileId);
+          if (result.ok) {
+            thumbnailCache.set(fileId, result.blobUrl);
+            setSrc(result.blobUrl);
+          } else {
+            setFailed(true);
+          }
+        } catch {
+          setFailed(true);
+        }
+      })();
+    }, { threshold: 0.1 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [fileId, kind, src, failed, previewFile]);
+
+  if (kind !== "image" || failed || !src) {
+    return <div ref={imgRef} className="flex items-center justify-center"><FileIcon type={kind} size={28} /></div>;
+  }
+
+  return (
+    <div ref={imgRef} className="w-full h-[60px] rounded-lg overflow-hidden bg-bg-overlay-tertiary mx-auto" style={{ maxWidth: "85%" }}>
+      <img src={src} alt="" className="w-full h-full object-cover" draggable={false} />
+    </div>
+  );
+}
 
 function roleLabel(c: FileCollaboratorPreview): string {
   if (c.isOwner) return "Owner";
@@ -154,8 +203,18 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const fileOps = useFilesContext();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [sortField, setSortField] = useState<SortField>("name");
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortField, setSortField] = useState<SortField>(() => {
+    if (typeof window === "undefined") return "name";
+    return (localStorage.getItem("securewarp_sort_field") as SortField) || "name";
+  });
+  const [sortAsc, setSortAsc] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("securewarp_sort_asc") !== "false";
+  });
+  const [layout, setLayout] = useState<"list" | "grid">(() => {
+    if (typeof window === "undefined") return "list";
+    return (localStorage.getItem("securewarp_layout") as "list" | "grid") || "list";
+  });
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [shareTarget, setShareTarget] = useState<DecryptedFile | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
@@ -163,13 +222,16 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [dragFileId, setDragFileId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; fileId: string; isFolder: boolean } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; fileId: string | null; isFolder: boolean } | null>(null);
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false);
   const [emptyTrashBusy, setEmptyTrashBusy] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState<DecryptedFile | null>(null);
   const [purgeBusy, setPurgeBusy] = useState(false);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const [moveTarget, setMoveTarget] = useState<DecryptedFile | null>(null);
+  // Rubber band drag selection
+  const [rubberBand, setRubberBand] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
+  const fileListRef = useRef<HTMLDivElement>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [userLabels, setUserLabels] = useState<{ id: string; name: string; color: string }[]>([]);
   const [filterLabel, setFilterLabel] = useState<{ id: string; name: string; color: string } | null>(null);
@@ -179,6 +241,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [workspaceMembers, setWorkspaceMembers] = useState<FacepileUser[]>([]);
   const [wsDefaultRole, setWsDefaultRole] = useState<"admin" | "editor" | "viewer">("editor");
   const [showActivity, setShowActivity] = useState(false);
+  const [detailsTarget, setDetailsTarget] = useState<DecryptedFile | null>(null);
   const [wsOwnerId, setWsOwnerId] = useState<string | undefined>(undefined);
   const [renameTarget, setRenameTarget] = useState<DecryptedFile | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -315,6 +378,21 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     };
   }, []);
 
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Track the focused file index for arrow key navigation
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+
+  // Reset focused index when files change
+  useEffect(() => { setFocusedIndex(-1); }, [fileOps.currentFolder, fileOps.viewMode]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -327,11 +405,17 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       }
       // Remaining shortcuts only fire outside form fields and modals
       if (inInput) return;
+
+      const files = displayFiles;
+
+      // Cmd+A — select all
       if ((e.metaKey || e.ctrlKey) && e.key === "a") {
         e.preventDefault();
         selectAll();
         return;
       }
+
+      // Delete/Backspace — trash selected
       if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0) {
         e.preventDefault();
         const ids = [...selected];
@@ -341,10 +425,101 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         })();
         return;
       }
+
+      // Escape — clear selection
+      if (e.key === "Escape") {
+        if (selected.size > 0) { selectNone(); setFocusedIndex(-1); return; }
+        return;
+      }
+
+      // Arrow down — move focus down (list) or right (grid)
+      if (e.key === "ArrowDown" || (layout === "grid" && e.key === "ArrowRight")) {
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next = Math.min(prev + 1, files.length - 1);
+          if (e.shiftKey) toggleSelect(files[next]?.id);
+          else { selectNone(); if (files[next]) setSelected(new Set([files[next].id])); }
+          return next;
+        });
+        return;
+      }
+
+      // Arrow up — move focus up (list) or left (grid)
+      if (e.key === "ArrowUp" || (layout === "grid" && e.key === "ArrowLeft")) {
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next = Math.max(prev - 1, 0);
+          if (e.shiftKey) toggleSelect(files[next]?.id);
+          else { selectNone(); if (files[next]) setSelected(new Set([files[next].id])); }
+          return next;
+        });
+        return;
+      }
+
+      // Enter — open focused file/folder
+      if (e.key === "Enter" && focusedIndex >= 0 && focusedIndex < files.length) {
+        e.preventDefault();
+        const file = files[focusedIndex];
+        if (file.isFolder && fileOps.viewMode !== "trash") {
+          fileOps.navigateToFolder(file.id, file.name);
+        } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
+          setPreviewFileId(file.id);
+        }
+        return;
+      }
+
+      // Backspace without selection — navigate up (like going back)
+      if (e.key === "Backspace" && selected.size === 0 && fileOps.breadcrumb.length > 1) {
+        e.preventDefault();
+        fileOps.navigateToBreadcrumb(fileOps.breadcrumb.length - 2);
+        return;
+      }
+
+      // Space — toggle select on focused item
+      if (e.key === " " && focusedIndex >= 0 && focusedIndex < files.length) {
+        e.preventDefault();
+        toggleSelect(files[focusedIndex].id);
+        return;
+      }
+
+      // D — download focused/selected
+      if (e.key === "d" && !e.metaKey && !e.ctrlKey) {
+        if (selected.size > 0) {
+          for (const id of selected) {
+            const f = fileOps.files.find((x) => x.id === id);
+            if (f && !f.isFolder) fileOps.downloadFile(id);
+          }
+        } else if (focusedIndex >= 0 && !files[focusedIndex]?.isFolder) {
+          fileOps.downloadFile(files[focusedIndex].id);
+        }
+        return;
+      }
+
+      // I — open details on focused/selected
+      if (e.key === "i" && !e.metaKey && !e.ctrlKey) {
+        const targetId = selected.size === 1 ? [...selected][0] : (focusedIndex >= 0 ? files[focusedIndex]?.id : null);
+        if (targetId) {
+          const full = fileOps.files.find((f) => f.id === targetId);
+          if (full) setDetailsTarget(full);
+        }
+        return;
+      }
+
+      // N — new folder
+      if (e.key === "n" && !e.metaKey && !e.ctrlKey && fileOps.callerPermission !== "viewer") {
+        setNewFolderOpen(true);
+        return;
+      }
+
+      // U — upload
+      if (e.key === "u" && !e.metaKey && !e.ctrlKey && fileOps.callerPermission !== "viewer") {
+        fileInputRef.current?.click();
+        return;
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [selected, selectAll, selectNone, fileOps]);
+  }, [selected, selectAll, selectNone, fileOps, displayFiles, focusedIndex, layout, toggleSelect]);
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -380,18 +555,19 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     }
   }, [fileOps]);
 
-  const toggleSelect = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  // toggleSelect moved above keyboard handler — see below
 
   const toggleSort = (field: SortField) => {
-    if (sortField === field) setSortAsc(!sortAsc);
-    else { setSortField(field); setSortAsc(true); }
+    if (sortField === field) {
+      const next = !sortAsc;
+      setSortAsc(next);
+      localStorage.setItem("securewarp_sort_asc", String(next));
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+      localStorage.setItem("securewarp_sort_field", field);
+      localStorage.setItem("securewarp_sort_asc", "true");
+    }
   };
 
   const SortArrow = ({ field }: { field: SortField }) => {
@@ -475,24 +651,62 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             const collapsed = crumbs.length > maxVisible;
             const visible = collapsed ? [crumbs[0], ...crumbs.slice(-2)] : crumbs;
 
-            return visible.map((crumb, i) => (
-              <span key={`${i}-${crumb.id ?? "root"}`} className="flex items-center gap-1.5">
-                {i > 0 && <span className="text-text-disabled">/</span>}
-                {i === 1 && collapsed && (
-                  <>
-                    <span className="text-text-disabled">...</span>
-                    <span className="text-text-disabled">/</span>
-                  </>
-                )}
-                {(i < visible.length - 1) ? (
-                  <button onClick={() => fileOps.navigateToBreadcrumb(collapsed && i > 0 ? crumbs.length - (visible.length - i) : i)} className="text-text-secondary hover:text-text-primary cursor-pointer transition-colors bg-transparent border-none p-0 text-[13px]">
-                    {crumb.name}
-                  </button>
-                ) : (
-                  <span className="text-text-primary font-medium">{crumb.name}</span>
-                )}
-              </span>
-            ));
+            return visible.map((crumb, i) => {
+              const isLast = i === visible.length - 1;
+              const realIndex = collapsed && i > 0 ? crumbs.length - (visible.length - i) : i;
+              return (
+                <span key={`${i}-${crumb.id ?? "root"}`} className="flex items-center gap-1.5">
+                  {i > 0 && <span className="text-text-disabled">/</span>}
+                  {i === 1 && collapsed && (
+                    <>
+                      <span className="text-text-disabled">...</span>
+                      <span className="text-text-disabled">/</span>
+                    </>
+                  )}
+                  {!isLast ? (
+                    <button
+                      onClick={() => fileOps.navigateToBreadcrumb(realIndex)}
+                      onDragOver={(e) => {
+                        if (!dragFileId) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        e.currentTarget.style.color = "var(--accent-green-primary)";
+                      }}
+                      onDragLeave={(e) => {
+                        e.currentTarget.style.color = "";
+                      }}
+                      onDrop={async (e) => {
+                        e.preventDefault();
+                        e.currentTarget.style.color = "";
+                        if (!dragFileId) return;
+                        const source = fileOps.files.find((f) => f.id === dragFileId);
+                        if (!source) return;
+                        setDragFileId(null);
+                        // Fetch destination folder's public hier key
+                        const destId = crumb.id;
+                        if (destId) {
+                          try {
+                            const res = await fetch(`/api/files/chunk-download?fileId=${destId}`);
+                            if (res.ok) {
+                              const data = await res.json();
+                              await fileOps.moveFile(source, destId, data.publicHierarchicalKey || null);
+                            }
+                          } catch { /* */ }
+                        } else {
+                          // Moving to root (null parent)
+                          await fileOps.moveFile(source, null, null);
+                        }
+                      }}
+                      className="text-text-secondary hover:text-text-primary cursor-pointer transition-colors bg-transparent border-none p-0 text-[13px] rounded px-1 -mx-1"
+                    >
+                      {crumb.name}
+                    </button>
+                  ) : (
+                    <span className="text-text-primary font-medium">{crumb.name}</span>
+                  )}
+                </span>
+              );
+            });
           })()}
           </div>
         </div>
@@ -551,6 +765,21 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               Empty trash
             </button>
           )}
+          {/* List/Grid toggle */}
+          <div className="hidden md:flex items-center h-[30px] rounded-[8px] border border-border-secondary overflow-hidden">
+            <button
+              onClick={() => { setLayout("list"); localStorage.setItem("securewarp_layout", "list"); }}
+              className={`flex items-center justify-center w-[30px] h-full transition-colors cursor-pointer ${layout === "list" ? "bg-bg-overlay-tertiary text-text-primary" : "text-text-disabled hover:text-text-tertiary"}`}
+            >
+              <HugeiconsIcon icon={LeftToRightListBulletIcon} size={14} />
+            </button>
+            <button
+              onClick={() => { setLayout("grid"); localStorage.setItem("securewarp_layout", "grid"); }}
+              className={`flex items-center justify-center w-[30px] h-full transition-colors cursor-pointer ${layout === "grid" ? "bg-bg-overlay-tertiary text-text-primary" : "text-text-disabled hover:text-text-tertiary"}`}
+            >
+              <HugeiconsIcon icon={GridViewIcon} size={14} />
+            </button>
+          </div>
           <NotificationBell />
         </div>
       </div>
@@ -578,17 +807,33 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       {!showActivity && selected.size > 0 && (
         <div className="hidden md:flex mx-5 mt-2 items-center gap-3 px-4 h-[36px] rounded-[8px] bg-bg-overlay-tertiary text-[12px] text-text-secondary animate-fade-in">
           <span className="font-medium text-text-primary">{selected.size} selected</span>
+          <span className="text-text-disabled">·</span>
+          <span className="text-text-disabled">{(() => {
+            let total = 0;
+            for (const id of selected) {
+              const f = fileOps.files.find((x) => x.id === id);
+              if (f && !f.isFolder) total += f.size;
+            }
+            if (total === 0) return "—";
+            const units = ["B", "KB", "MB", "GB"];
+            let i = 0; let s = total;
+            while (s >= 1024 && i < units.length - 1) { s /= 1024; i++; }
+            return `${s.toFixed(s < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+          })()}</span>
           <button onClick={selectNone} className="text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer">Clear</button>
           <button onClick={selectAll} className="text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer">Select all</button>
           <div className="ml-auto flex items-center gap-1">
             <button
               onClick={async () => {
-                for (const id of selected) {
+                const ids = [...selected].filter((id) => {
                   const f = fileOps.files.find((x) => x.id === id);
-                  if (f && !f.isFolder) await fileOps.downloadFile(id);
+                  return f && !f.isFolder;
+                });
+                for (const id of ids) {
+                  await fileOps.downloadFile(id);
                 }
               }}
-              title="Download"
+              title={`Download ${[...selected].filter(id => !fileOps.files.find(f => f.id === id)?.isFolder).length} files`}
               className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"
             >
               <HugeiconsIcon icon={Download04Icon} size={15} />
@@ -630,13 +875,25 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <HugeiconsIcon icon={Delete02Icon} size={15} />
               </button>
             )}
+            {selected.size === 1 && (
+              <button
+                onClick={() => {
+                  const first = fileOps.files.find((f) => selected.has(f.id));
+                  if (first) setDetailsTarget(first);
+                }}
+                title="Details"
+                className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-icon-secondary"
+              >
+                <HugeiconsIcon icon={InformationCircleIcon} size={15} />
+              </button>
+            )}
           </div>
         </div>
       )}
 
       {/* Table */}
       {/* Table header — sticky above scroll area */}
-      {!showActivity && displayFiles.length > 0 && (
+      {!showActivity && displayFiles.length > 0 && layout === "list" && (
         <div className="hidden md:flex items-center h-[40px] px-4 mx-3 md:mx-5 box-border select-none shrink-0">
           {/* Checkbox */}
           <button
@@ -682,7 +939,50 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
       {/* Scrollable file list */}
-      {!showActivity && <div className="flex-1 overflow-y-auto px-3 md:px-5 pt-1 pb-4 flex flex-col" onClick={() => setContextMenu(null)}>
+      {!showActivity && <div
+        ref={fileListRef}
+        className="flex-1 overflow-y-auto px-3 md:px-5 pt-1 pb-4 flex flex-col relative"
+        onClick={() => setContextMenu(null)}
+        onContextMenu={(e) => {
+          if ((e.target as HTMLElement).closest("[data-file-item]")) return;
+          e.preventDefault();
+          setContextMenu({ x: e.clientX, y: e.clientY, fileId: null, isFolder: false });
+        }}
+        onMouseDown={(e) => {
+          // Only start rubber band on left click on empty space
+          if (e.button !== 0) return;
+          if ((e.target as HTMLElement).closest("[data-file-item]")) return;
+          if ((e.target as HTMLElement).closest("button")) return;
+          const rect = fileListRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const x = e.clientX;
+          const y = e.clientY;
+          setRubberBand({ startX: x, startY: y, currentX: x, currentY: y });
+          if (!e.shiftKey) selectNone();
+        }}
+        onMouseMove={(e) => {
+          if (!rubberBand) return;
+          setRubberBand((prev) => prev ? { ...prev, currentX: e.clientX, currentY: e.clientY } : null);
+          // Check intersections with file items
+          const items = fileListRef.current?.querySelectorAll("[data-file-item]");
+          if (!items) return;
+          const newSelected = new Set<string>();
+          const bandLeft = Math.min(rubberBand.startX, e.clientX);
+          const bandRight = Math.max(rubberBand.startX, e.clientX);
+          const bandTop = Math.min(rubberBand.startY, e.clientY);
+          const bandBottom = Math.max(rubberBand.startY, e.clientY);
+          items.forEach((item) => {
+            const r = item.getBoundingClientRect();
+            if (r.left < bandRight && r.right > bandLeft && r.top < bandBottom && r.bottom > bandTop) {
+              const id = item.getAttribute("data-file-id");
+              if (id) newSelected.add(id);
+            }
+          });
+          setSelected(newSelected);
+        }}
+        onMouseUp={() => { setRubberBand(null); }}
+        onMouseLeave={() => { setRubberBand(null); }}
+      >
 
         {/* Empty state */}
         {!fileOps.loading && fileOps.initialized && displayFiles.length === 0 && (
@@ -834,10 +1134,129 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           </div>
         )}
 
-        {displayFiles.map((file) => {
-          const isSelected = selected.has(file.id);
+        {/* Rubber band selection overlay */}
+        {rubberBand && (() => {
+          const left = Math.min(rubberBand.startX, rubberBand.currentX);
+          const top = Math.min(rubberBand.startY, rubberBand.currentY);
+          const width = Math.abs(rubberBand.currentX - rubberBand.startX);
+          const height = Math.abs(rubberBand.currentY - rubberBand.startY);
+          if (width < 5 && height < 5) return null;
           return (
+            <div style={{ position: "fixed", left, top, width, height, border: "1px solid var(--accent-green-primary)", background: "rgba(110,210,170,0.08)", borderRadius: 4, pointerEvents: "none", zIndex: 50 }} />
+          );
+        })()}
+
+        <div className={layout === "grid" ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2" : ""}>
+        {displayFiles.map((file, fileIndex) => {
+          const isSelected = selected.has(file.id);
+          const isFocused = fileIndex === focusedIndex;
+          return layout === "grid" ? (
+            /* ─── GRID CARD ─── */
             <div
+              data-file-item
+              data-file-id={file.id}
+              key={file.id}
+              draggable={fileOps.viewMode === "own" && !file.uploading && fileOps.callerPermission !== "viewer"}
+              onDragStart={(e) => {
+                setDragFileId(file.id);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", file.id);
+              }}
+              onDragEnd={() => { setDragFileId(null); setDropTargetId(null); }}
+              onDragOver={(e) => {
+                if (!dragFileId || !file.isFolder || dragFileId === file.id) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setDropTargetId(file.id);
+              }}
+              onDragLeave={() => { if (dropTargetId === file.id) setDropTargetId(null); }}
+              onDrop={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDropTargetId(null);
+                if (!dragFileId || !file.isFolder || dragFileId === file.id) return;
+                const source = fileOps.files.find((f) => f.id === dragFileId);
+                const dest = fileOps.files.find((f) => f.id === file.id);
+                if (!source || !dest) return;
+                setDragFileId(null);
+                await fileOps.moveFile(source, dest.id, dest.publicHierarchicalKey);
+              }}
+              onMouseEnter={() => {
+                if (file.isFolder && fileOps.viewMode === "own") {
+                  prefetchTimerRef.current = setTimeout(() => fileOps.prefetchFolder(file.id), 200);
+                }
+              }}
+              onMouseLeave={() => {
+                if (prefetchTimerRef.current) { clearTimeout(prefetchTimerRef.current); prefetchTimerRef.current = null; }
+              }}
+              onClick={() => {
+                if (file.isFolder && fileOps.viewMode !== "trash") {
+                  fileOps.navigateToFolder(file.id, file.name);
+                } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
+                  setPreviewFileId(file.id);
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
+              }}
+              className={`group relative flex flex-col items-center justify-center rounded-xl border cursor-pointer transition-colors p-4 min-h-[130px] ${
+                dropTargetId === file.id
+                  ? "border-accent-green bg-accent-green/5"
+                  : dragFileId === file.id
+                    ? "opacity-40 border-border-tertiary"
+                    : isSelected
+                      ? "border-accent-green/20 bg-bg-overlay-tertiary"
+                      : isFocused
+                        ? "border-border-secondary bg-bg-overlay-tertiary"
+                        : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
+              }`}
+            >
+              {/* Checkbox — top left on hover */}
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleSelect(file.id); }}
+                className={`absolute top-2.5 left-2.5 w-[18px] h-[18px] rounded-[4px] border flex items-center justify-center cursor-pointer transition-all ${
+                  isSelected ? "border-accent-green bg-accent-green" : "border-border-primary opacity-0 group-hover:opacity-100"
+                }`}
+              >
+                {isSelected && <HugeiconsIcon icon={Tick01Icon} size={12} color="white" />}
+              </button>
+              {/* Context menu — top right on hover */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setContextMenu({ x: rect.right, y: rect.bottom, fileId: file.id, isFolder: !!file.isFolder });
+                }}
+                className="absolute top-2.5 right-2.5 p-1 rounded-md text-icon-tertiary hover:bg-cta-nav-hover transition-all cursor-pointer opacity-0 group-hover:opacity-100"
+              >
+                <HugeiconsIcon icon={MoreHorizontalIcon} size={14} />
+              </button>
+              {/* Icon / Thumbnail */}
+              <div className={file.type === "image" && !file.uploading ? "mb-2 w-full" : "mb-3"}>
+                {file.uploading ? (
+                  <div className="flex justify-center">
+                    <svg width="32" height="32" viewBox="0 0 28 28" style={{ animation: "spin 0.75s linear infinite" }}>
+                      <circle cx="14" cy="14" r="11" fill="none" stroke="var(--bg-overlay-tertiary)" strokeWidth="2" />
+                      <circle cx="14" cy="14" r="11" fill="none" stroke="var(--accent-green-primary)" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${2 * Math.PI * 11 * 0.3} ${2 * Math.PI * 11 * 0.7}`} style={{ transformOrigin: "center", transform: "rotate(-90deg)" }} />
+                    </svg>
+                  </div>
+                ) : (
+                  <GridThumbnail fileId={file.id} kind={file.type as FileKind} previewFile={fileOps.previewFile} />
+                )}
+              </div>
+              <span className={`text-[12px] text-center truncate w-full ${file.uploading ? "text-text-tertiary" : "text-text-primary"}`}>{file.name}</span>
+              {file.uploading ? (
+                <span className="text-[10px] text-accent-green mt-0.5">{fileOps.uploadStep || "Processing..."}</span>
+              ) : !file.isFolder ? (
+                <span className="text-[10px] text-text-disabled mt-0.5">{file.size}</span>
+              ) : null}
+            </div>
+          ) : (
+            /* ─── LIST ROW ─── */
+            <div
+              data-file-item
+              data-file-id={file.id}
               key={file.id}
               draggable={fileOps.viewMode === "own" && !file.uploading && fileOps.callerPermission !== "viewer"}
               onDragStart={(e) => {
@@ -895,7 +1314,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                     ? "opacity-40 border-border-tertiary"
                     : isSelected
                       ? "border-accent-green/20 bg-bg-overlay-tertiary"
-                      : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
+                      : isFocused
+                        ? "border-border-secondary bg-bg-overlay-tertiary"
+                        : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
               }`}
             >
               {/* Checkbox (hidden on mobile) */}
@@ -1036,6 +1457,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             </div>
           );
         })}
+        </div>
 
         {/* Load more button for paginated results */}
         {fileOps.nextCursor && (
@@ -1061,14 +1483,30 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             style={{
               top: undefined,
               ...(typeof window !== "undefined" && window.innerWidth >= 768
-                ? {
-                    position: "fixed" as const,
-                    top: Math.min(contextMenu.y, window.innerHeight - 300),
-                    left: Math.min(contextMenu.x, window.innerWidth - 200),
-                    bottom: "auto",
-                    width: 180,
-                    borderRadius: 8,
-                  }
+                ? (() => {
+                    const left = Math.min(contextMenu.x, window.innerWidth - 200);
+                    // If click is in the bottom half of the screen, anchor menu above the click
+                    if (contextMenu.y > window.innerHeight / 2) {
+                      return {
+                        position: "fixed" as const,
+                        bottom: window.innerHeight - contextMenu.y,
+                        left,
+                        width: 180,
+                        borderRadius: 8,
+                        maxHeight: contextMenu.y - 8,
+                        overflowY: "auto" as const,
+                      };
+                    }
+                    return {
+                      position: "fixed" as const,
+                      top: contextMenu.y,
+                      left,
+                      width: 180,
+                      borderRadius: 8,
+                      maxHeight: window.innerHeight - contextMenu.y - 8,
+                      overflowY: "auto" as const,
+                    };
+                  })()
                 : {}),
               boxShadow: "var(--shadow-l2)",
             }}
@@ -1077,12 +1515,40 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <div className="flex justify-center pb-2 md:hidden">
               <div className="w-10 h-1 rounded-full bg-border-secondary" />
             </div>
+          {/* Empty space context menu */}
+          {contextMenu.fileId === null ? (
+            <>
+              {fileOps.callerPermission !== "viewer" && (!fileOps.activeWorkspace || (fileOps.callerPermission && fileOps.callerPermission !== "viewer")) && (
+                <>
+                  <button
+                    onClick={() => { setNewFolderOpen(true); setContextMenu(null); }}
+                    className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                  >
+                    <HugeiconsIcon icon={FolderAddIcon} size={14} color="var(--icon-tertiary)" /> New folder
+                  </button>
+                  <button
+                    onClick={() => { fileInputRef.current?.click(); setContextMenu(null); }}
+                    className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                  >
+                    <HugeiconsIcon icon={Upload04Icon} size={14} color="var(--icon-tertiary)" /> Upload files
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => { selectAll(); setContextMenu(null); }}
+                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={Tick01Icon} size={14} color="var(--icon-tertiary)" /> Select all
+              </button>
+            </>
+          ) : (
+          <>
           {fileOps.viewMode !== "trash" && (
             <>
               <button
                 onClick={() => {
                   if (!contextMenu) return;
-                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
                   if (full?.isFolder) {
                     fileOps.navigateToFolder(full.id, full.name);
                   } else if (full) {
@@ -1098,7 +1564,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <button
                   onClick={() => {
                     if (!contextMenu) return;
-                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
                     if (full) {
                       setRenameTarget(full);
                       setRenameValue(full.name);
@@ -1115,7 +1581,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <button
                   onClick={() => {
                     if (!contextMenu) return;
-                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
                     if (full) fileOps.toggleStar(full.id, !full.isStarred);
                     setContextMenu(null);
                   }}
@@ -1132,28 +1598,28 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <button
                   onClick={async () => {
                     if (!contextMenu) return;
-                    const isPinned = pinnedIds.has(contextMenu.fileId);
-                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                    const isPinned = pinnedIds.has(contextMenu.fileId!);
+                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
                     await fetch("/api/pins", {
                       method: isPinned ? "DELETE" : "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ fileId: contextMenu.fileId }),
+                      body: JSON.stringify({ fileId: contextMenu.fileId! }),
                     });
                     setPinnedIds((prev) => {
                       const next = new Set(prev);
                       if (isPinned) {
-                        next.delete(contextMenu.fileId);
+                        next.delete(contextMenu.fileId!);
                         try {
                           const cache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}");
-                          delete cache[contextMenu.fileId];
+                          delete cache[contextMenu.fileId!];
                           localStorage.setItem("securewarp_pin_names", JSON.stringify(cache));
                         } catch { /* */ }
                       } else {
-                        next.add(contextMenu.fileId);
+                        next.add(contextMenu.fileId!);
                         if (full) {
                           try {
                             const cache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}");
-                            cache[contextMenu.fileId] = full.name;
+                            cache[contextMenu.fileId!] = full.name;
                             localStorage.setItem("securewarp_pin_names", JSON.stringify(cache));
                           } catch { /* */ }
                         }
@@ -1185,7 +1651,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                             await fetch("/api/labels/assign", {
                               method: "POST",
                               headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ fileId: contextMenu.fileId, labelId: label.id, action: isAssigned ? "remove" : "add" }),
+                              body: JSON.stringify({ fileId: contextMenu.fileId!, labelId: label.id, action: isAssigned ? "remove" : "add" }),
                             });
                             fileOps.invalidateCache();
                             await fileOps.fetchFiles(fileOps.currentFolder, fileOps.viewMode);
@@ -1209,7 +1675,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <button
               onClick={async () => {
                 if (!contextMenu) return;
-                const fileId = contextMenu.fileId;
+                const fileId = contextMenu.fileId!;
                 setContextMenu(null);
                 await fileOps.restoreItem(fileId);
               }}
@@ -1222,7 +1688,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <button
               onClick={() => {
                 if (contextMenu) {
-                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
                   if (full) setShareTarget(full);
                 }
                 setContextMenu(null);
@@ -1233,7 +1699,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             </button>
           )}
           {fileOps.viewMode !== "trash" && !contextMenu?.isFolder && (
-            <button onClick={() => { if (contextMenu) { fileOps.downloadFile(contextMenu.fileId); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+            <button onClick={() => { if (contextMenu) { fileOps.downloadFile(contextMenu.fileId!); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
               <HugeiconsIcon icon={Download04Icon} size={14} color="var(--icon-tertiary)" /> Download
             </button>
           )}
@@ -1243,7 +1709,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <button
                   onClick={() => {
                     if (!contextMenu) return;
-                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                    const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
                     if (full) setMoveTarget(full);
                     setContextMenu(null);
                   }}
@@ -1252,7 +1718,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   <HugeiconsIcon icon={Move01Icon} size={14} color="var(--icon-tertiary)" /> Move to
                 </button>
               )}
-              <button className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+              <button
+                onClick={() => {
+                  if (!contextMenu) return;
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
+                  if (full) setDetailsTarget(full);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
                 <HugeiconsIcon icon={InformationCircleIcon} size={14} color="var(--icon-tertiary)" /> Details
               </button>
             </>
@@ -1262,7 +1736,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <button
               onClick={() => {
                 if (!contextMenu) return;
-                const full = fileOps.files.find((f) => f.id === contextMenu.fileId);
+                const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
                 if (full) setPurgeTarget(full);
                 setContextMenu(null);
               }}
@@ -1274,7 +1748,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <button
               onClick={async () => {
                 if (!contextMenu) return;
-                const fileId = contextMenu.fileId;
+                const fileId = contextMenu.fileId!;
                 setContextMenu(null);
                 await fileOps.leaveShare(fileId);
               }}
@@ -1286,7 +1760,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <button
               onClick={() => {
                 if (contextMenu) {
-                  fileOps.deleteItem(contextMenu.fileId);
+                  fileOps.deleteItem(contextMenu.fileId!);
                   setContextMenu(null);
                 }
               }}
@@ -1295,6 +1769,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <HugeiconsIcon icon={Delete02Icon} size={14} /> Trash
             </button>
           ) : null}
+          </>
+          )}
         </div>
         </div>,
         document.body
@@ -1370,6 +1846,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       />
       <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
+      <FileDetailsModal file={detailsTarget} onClose={() => setDetailsTarget(null)} />
       <MembersModal
         open={membersOpen}
         onClose={() => setMembersOpen(false)}

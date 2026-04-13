@@ -46,6 +46,15 @@ export async function POST(request: Request) {
     const perm = await getEffectivePermission(parsed.data.fileId, session.userId);
     if (!perm) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
+    // Limit to 10 pins
+    const { count } = await supabase
+      .from("user_pins")
+      .select("file_id", { count: "exact", head: true })
+      .eq("user_id", session.userId);
+    if ((count ?? 0) >= 10) {
+      return NextResponse.json({ error: "Maximum 10 pins reached" }, { status: 400 });
+    }
+
     const { error } = await supabase
       .from("user_pins")
       .upsert({ user_id: session.userId, file_id: parsed.data.fileId }, { onConflict: "user_id,file_id" });

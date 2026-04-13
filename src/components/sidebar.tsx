@@ -380,8 +380,8 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
             {pins.length === 0 ? (
               <p className="px-2.5 text-[11px] text-text-disabled">No pinned items</p>
             ) : (
-              <div className="flex flex-col gap-[2px]">
-                {pins.map((pin) => (
+              <div className="flex flex-col gap-[2px] max-h-[240px] overflow-y-auto">
+                {pins.slice(0, 10).map((pin) => (
                   <button
                     key={pin.file_id}
                     onClick={() => {
@@ -417,12 +417,14 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           <div className="mt-3 pt-3 border-t border-border-tertiary">
             <div className="flex items-center justify-between px-2.5 mb-1">
               <span className="text-[11px] font-mono uppercase text-text-disabled">Labels</span>
-              <button
-                onClick={() => setShowNewLabel(!showNewLabel)}
-                className="p-0.5 rounded text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={PlusSignIcon} size={12} />
-              </button>
+              {labels.length < 10 && (
+                <button
+                  onClick={() => setShowNewLabel(!showNewLabel)}
+                  className="p-0.5 rounded text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={PlusSignIcon} size={12} />
+                </button>
+              )}
             </div>
             {showNewLabel && (
               <div className="px-2.5 mb-2 space-y-1.5 animate-fade-in">
@@ -464,8 +466,8 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
             {labels.length === 0 && !showNewLabel ? (
               <p className="px-2.5 text-[11px] text-text-disabled">No labels yet</p>
             ) : (
-              <div className="flex flex-col gap-[2px]">
-                {labels.map((tag) => (
+              <div className="flex flex-col gap-[2px] max-h-[240px] overflow-y-auto">
+                {labels.slice(0, 10).map((tag) => (
                   <div
                     key={tag.id}
                     className="group w-full flex items-center gap-3 px-2.5 h-[30px] rounded-[6px] text-[12px] text-text-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
