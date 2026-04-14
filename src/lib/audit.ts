@@ -52,6 +52,12 @@ export interface AuditInput {
  * defensive, not operational, so a failure to write it must never break
  * the primary request. Errors are routed through logError so they still
  * surface in structured logs.
+ *
+ * NOTE on runtime: on Cloudflare Workers, the handler's execution halts
+ * the moment its Response is returned, which can kill detached promises
+ * before they finish. For call sites where the write MUST land (cron
+ * heartbeats the admin UI reads), use `auditEventAwait()` and await it
+ * instead of this fire-and-forget helper.
  */
 export function auditEvent(input: AuditInput): void {
   void supabase
@@ -68,4 +74,23 @@ export function auditEvent(input: AuditInput): void {
     .then(({ error }) => {
       if (error) logError("audit.insert", { event: input.event, error: error.message });
     });
+}
+
+/**
+ * Same as `auditEvent` but awaits the write. Use from endpoints where
+ * the row's presence is load-bearing (e.g. cron heartbeats surfaced in
+ * the admin health strip). Small added latency, but guaranteed durable
+ * on Workers where detached promises get cut off.
+ */
+export async function auditEventAwait(input: AuditInput): Promise<void> {
+  const { error } = await supabase.from("security_audit").insert({
+    event_type: input.event,
+    actor_user_id: input.actorUserId ?? null,
+    target_user_id: input.targetUserId ?? null,
+    target_file_id: input.targetFileId ?? null,
+    target_link_id: input.targetLinkId ?? null,
+    source_hint: input.sourceHint ?? null,
+    detail: input.detail ?? null,
+  });
+  if (error) logError("audit.insert", { event: input.event, error: error.message });
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/db/supabase";
 import { deleteBlob } from "@/lib/db/r2";
-import { auditEvent } from "@/lib/audit";
+import { auditEventAwait } from "@/lib/audit";
 import { safeCompare, utf8ToBytes } from "@/lib/auth/safe-compare";
 import { logError } from "@/lib/log";
 
@@ -75,8 +75,9 @@ async function run(): Promise<NextResponse> {
       .delete({ count: "exact" })
       .lt("expires_at", new Date().toISOString());
 
-    // Heartbeat for the admin health strip.
-    auditEvent({
+    // Heartbeat for the admin health strip. Awaited — detached promises
+    // get killed when Workers returns the response.
+    await auditEventAwait({
       event: "cleanup.run",
       detail: `source=expire-trash purged=${fileIds.length} blobs=${storageKeys.length} rate_limits=${rlCount ?? 0} tokens=${rtCount ?? 0}`,
     });

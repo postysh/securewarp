@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { safeCompare, utf8ToBytes } from "@/lib/auth/safe-compare";
 import { supabase } from "@/lib/db/supabase";
 import { deleteBlob } from "@/lib/db/r2";
-import { auditEvent } from "@/lib/audit";
+import { auditEventAwait } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 // Delete incomplete uploads older than this many hours. 24h gives legitimate
@@ -86,10 +86,10 @@ async function runCleanup(): Promise<NextResponse> {
       .delete()
       .lt("expires_at", new Date().toISOString());
 
-    // Log a heartbeat so the admin dashboard's health strip can surface
-    // "last cleanup run" timestamps. Fire-and-forget; audit failures
-    // must not break the cron response.
-    auditEvent({
+    // Heartbeat for the admin health strip. Awaited — on Cloudflare
+    // Workers a detached promise dies the moment we return the response,
+    // so fire-and-forget would silently drop the row.
+    await auditEventAwait({
       event: "cleanup.run",
       detail: `source=stale-uploads files=${filesDeleted} blobs=${blobsDeleted}`,
     });
