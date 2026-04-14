@@ -62,16 +62,15 @@ export default function AdminAuditPage() {
   }, [source, q, load]);
 
   return (
-    <div className="max-w-[1100px] mx-auto px-8 py-8">
-      <header className="mb-6 flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-[22px] font-semibold text-text-primary">Audit log</h1>
-          <p className="text-[13px] text-text-tertiary mt-1">
-            Security events and admin actions.
-          </p>
+    <>
+      {/* Header bar */}
+      <div className="relative flex items-center justify-between px-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-[13px] text-text-primary font-medium">Audit log</span>
+          <span className="text-[12px] text-text-tertiary">Security events and admin actions</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-[8px] border border-border-secondary overflow-hidden h-[34px]">
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex rounded-[8px] border border-border-secondary overflow-hidden h-[32px]">
             {(["all", "security", "admin"] as const).map((s) => (
               <button
                 key={s}
@@ -97,13 +96,15 @@ export default function AdminAuditPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Filter…"
-              className="h-[34px] w-[200px] pl-8 pr-3 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none"
+              className="h-[32px] w-[200px] pl-8 pr-3 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none"
             />
           </div>
         </div>
-      </header>
+      </div>
 
-      {error && (
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-[1100px] mx-auto px-6 md:px-8 py-8">
+          {error && (
         <div className="mb-4 px-4 py-3 rounded-[8px] bg-accent-yellow-bg text-[13px] text-text-primary">
           {error}
         </div>
@@ -166,17 +167,19 @@ export default function AdminAuditPage() {
         )}
       </div>
 
-      {nextCursor && (
-        <div className="mt-4 flex justify-center">
-          <button
-            onClick={() => load(nextCursor, source, q, false)}
-            disabled={loading}
-            className="h-[34px] px-5 rounded-[8px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer disabled:opacity-50"
-          >
-            Load more
-          </button>
+          {nextCursor && (
+            <div className="mt-4 flex justify-center">
+              <button
+                onClick={() => load(nextCursor, source, q, false)}
+                disabled={loading}
+                className="h-[34px] px-5 rounded-[8px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Load more
+              </button>
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }
