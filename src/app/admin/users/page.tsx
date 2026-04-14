@@ -480,17 +480,20 @@ function ConfirmModal({
         {confirm.kind === "suspend" && (
           <div className="mb-4">
             <label className="block text-[11px] font-mono uppercase tracking-wider text-text-disabled mb-1.5">
-              Reason (optional, internal only)
+              Reason (shown to the user)
             </label>
             <input
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               maxLength={500}
-              placeholder="e.g. ToS violation — spam"
+              placeholder="e.g. Violation of our terms of service"
               className="w-full h-[34px] px-3 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none"
               autoFocus
             />
+            <p className="mt-1.5 text-[11px] text-text-tertiary">
+              This text appears on the user&apos;s login page if they try to sign in. Keep it clear and professional.
+            </p>
           </div>
         )}
 
