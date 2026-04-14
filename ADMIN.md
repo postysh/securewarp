@@ -50,8 +50,20 @@ session info) is fair game.
       (2/3), sticky Storage + Active sessions sidebar on the right.
       Admin notes (add / delete by author-or-owner), per-session jti
       revoke, per-user audit feed
+- [x] `/admin/announcements` — card grid with status (Draft / Live /
+      Expired), severity pill, inline edit / publish-toggle / delete.
+      Editor modal with title, body, severity, optional datetime-local
+      expiry. Save as draft or publish directly.
 - [x] `/admin/audit` — unified security + admin events, filterable by
       source + free-text, actor→target chips, kind stripe
+
+**Announcements banner (user side)**
+- [x] `announcements` + `announcement_dismissals` tables. Severity
+      info/warning/critical, optional expiry.
+- [x] `<AnnouncementBanner>` rendered at the top of the drive shell.
+      Severity-colored strip, dismiss ✕ persists server-side so it
+      doesn't reappear on other devices.
+- [x] `GET /api/announcements/active` + `POST /api/announcements/[id]/dismiss`
 
 **Per-row actions (users list + detail page)**
 - [x] Suspend (with user-facing reason, labeled "shown to the user")
@@ -86,10 +98,6 @@ session info) is fair game.
   - > 50 public links created in 24h (phishing campaign signal)
   - Failed-login rate > 20/hour on one email
   - Mass-delete operations (account compromise signal)
-- [ ] **Announcements banner.** `announcements` table + admin UI to
-      publish. Renders a dismissible strip at the top of `/drive` for
-      all logged-in users. "Scheduled maintenance tonight" / "New
-      feature" etc.
 - [ ] **Feature flags.** `app_settings` table with booleans like
       `signups_enabled`, `uploads_enabled`, `invite_only_mode`. Toggle
       from admin UI without a deploy. Critical for incident response.
