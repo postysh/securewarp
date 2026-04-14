@@ -72,11 +72,9 @@ function BannerRow({ item, onDismiss }: { item: Announcement; onDismiss: () => v
         color={styles.icon}
         className="mt-0.5 shrink-0"
       />
-      <div className="flex-1 min-w-0">
-        <div className="text-[13px] font-semibold text-text-primary">{item.title}</div>
-        <div className="text-[12px] text-text-secondary whitespace-pre-wrap break-words mt-0.5">
-          {item.body}
-        </div>
+      <div className="flex-1 min-w-0 text-[13px] leading-[1.5] whitespace-pre-wrap break-words">
+        <span className="font-semibold text-text-primary">{item.title}</span>
+        <span className="text-text-secondary"> — {item.body}</span>
       </div>
       <button
         onClick={onDismiss}
