@@ -261,7 +261,7 @@ export default function AdminUserDetailPage() {
 
       {detail && (
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-[1100px] mx-auto px-6 md:px-8 py-8 space-y-6">
+          <div className="px-6 md:px-8 py-8 space-y-6">
             {/* Profile card + action rail */}
             <section className="rounded-[12px] border border-border-secondary bg-bg-l2 p-5">
               <div className="flex items-start gap-4">
@@ -355,175 +355,184 @@ export default function AdminUserDetailPage() {
               </div>
             </section>
 
-            {/* Usage + Sessions row */}
-            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Usage */}
-              <div className="rounded-[12px] border border-border-secondary bg-bg-l2 p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <HugeiconsIcon icon={CloudServerIcon} size={14} className="text-text-tertiary" />
-                  <h2 className="text-[13px] font-semibold text-text-primary">Storage</h2>
-                </div>
-                <div className="grid grid-cols-2 gap-5">
-                  <div>
-                    <div className="text-[22px] font-semibold text-text-primary tabular-nums leading-none">
-                      {formatBytes(detail.usage.totalBytes)}
-                    </div>
-                    <div className="text-[11px] font-mono uppercase tracking-wider text-text-disabled mt-2">
-                      Active
-                    </div>
+            {/* Main grid: notes + audit on the left, storage + sessions
+                on the right. Wide-screen layout fills 2/3 + 1/3. Stacks
+                vertically on narrow windows. */}
+            <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left column: notes + audit */}
+              <div className="lg:col-span-2 space-y-6 min-w-0">
+                {/* Notes */}
+                <div className="rounded-[12px] border border-border-secondary bg-bg-l2 overflow-hidden">
+                  <div className="px-5 h-[44px] flex items-center border-b border-border-secondary">
+                    <h2 className="text-[13px] font-semibold text-text-primary">
+                      Admin notes ({detail.notes.length})
+                    </h2>
                   </div>
-                  <div>
-                    <div className="text-[22px] font-semibold text-text-primary tabular-nums leading-none">
-                      {detail.usage.fileCount.toLocaleString()}
-                    </div>
-                    <div className="text-[11px] font-mono uppercase tracking-wider text-text-disabled mt-2">
-                      Files
-                    </div>
-                  </div>
-                </div>
-                {(detail.usage.trashedBytes > 0 || detail.usage.trashedCount > 0) && (
-                  <div className="mt-4 pt-4 border-t border-border-tertiary flex items-center justify-between text-[12px] text-text-tertiary">
-                    <span>
-                      In trash: {detail.usage.trashedCount.toLocaleString()} file
-                      {detail.usage.trashedCount === 1 ? "" : "s"}
-                    </span>
-                    <span className="tabular-nums">{formatBytes(detail.usage.trashedBytes)}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Sessions */}
-              <div className="rounded-[12px] border border-border-secondary bg-bg-l2 overflow-hidden flex flex-col">
-                <div className="flex items-center gap-2 px-5 h-[44px] border-b border-border-secondary">
-                  <HugeiconsIcon icon={ComputerIcon} size={14} className="text-text-tertiary" />
-                  <h2 className="text-[13px] font-semibold text-text-primary">
-                    Active sessions ({detail.sessions.length})
-                  </h2>
-                </div>
-                {detail.sessions.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center py-8 text-[12px] text-text-tertiary">
-                    No active sessions.
-                  </div>
-                ) : (
-                  <ul>
-                    {detail.sessions.map((s) => (
-                      <li
-                        key={s.jti}
-                        className="flex items-center justify-between px-5 h-[44px] border-b border-border-tertiary last:border-b-0"
+                  <div className="p-4">
+                    <div className="flex gap-2">
+                      <textarea
+                        value={noteDraft}
+                        onChange={(e) => setNoteDraft(e.target.value)}
+                        placeholder="Add a note — visible to admins only."
+                        rows={2}
+                        maxLength={2000}
+                        className="flex-1 px-3 py-2 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none resize-none"
+                      />
+                      <button
+                        onClick={addNote}
+                        disabled={busy || !noteDraft.trim()}
+                        className="h-[36px] px-4 rounded-[8px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer disabled:opacity-50 self-start"
                       >
-                        <div className="min-w-0">
-                          <div className="text-[12px] font-mono text-text-primary truncate">
-                            {s.jti.slice(0, 8)}…
-                          </div>
-                          <div className="text-[11px] text-text-tertiary">
-                            Expires {formatRelative(s.expiresAt)}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => revokeSession(s.jti)}
-                          disabled={busy}
-                          className="flex items-center gap-1 h-[26px] px-2.5 rounded-[6px] text-[11px] font-medium text-text-tertiary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
-                        >
-                          Revoke
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </section>
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                  {detail.notes.length > 0 && (
+                    <ul className="border-t border-border-tertiary">
+                      {detail.notes.map((n) => {
+                        const canDelete = me?.userId === n.author_user_id || me?.role === "owner";
+                        return (
+                          <li key={n.id} className="group relative px-5 py-3 border-b border-border-tertiary last:border-b-0 flex gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[13px] text-text-primary whitespace-pre-wrap break-words">{n.body}</div>
+                              <div className="text-[11px] text-text-tertiary mt-1">
+                                {n.author_email ?? "unknown"} · {formatRelative(n.created_at)}
+                              </div>
+                            </div>
+                            {canDelete && (
+                              <button
+                                onClick={() => deleteNote(n.id)}
+                                disabled={busy}
+                                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-icon-tertiary hover:text-accent-red hover:bg-cta-nav-hover transition-all cursor-pointer disabled:opacity-50 self-start"
+                              >
+                                <HugeiconsIcon icon={Cancel01Icon} size={12} />
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
 
-            {/* Notes */}
-            <section className="rounded-[12px] border border-border-secondary bg-bg-l2 overflow-hidden">
-              <div className="px-5 h-[44px] flex items-center border-b border-border-secondary">
-                <h2 className="text-[13px] font-semibold text-text-primary">
-                  Admin notes ({detail.notes.length})
-                </h2>
-              </div>
-              <div className="p-4">
-                <div className="flex gap-2">
-                  <textarea
-                    value={noteDraft}
-                    onChange={(e) => setNoteDraft(e.target.value)}
-                    placeholder="Add a note — visible to admins only."
-                    rows={2}
-                    maxLength={2000}
-                    className="flex-1 px-3 py-2 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none resize-none"
-                  />
-                  <button
-                    onClick={addNote}
-                    disabled={busy || !noteDraft.trim()}
-                    className="h-[36px] px-4 rounded-[8px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer disabled:opacity-50 self-start"
-                  >
-                    Add
-                  </button>
+                {/* Recent activity (audit) */}
+                <div className="rounded-[12px] border border-border-secondary bg-bg-l2 overflow-hidden">
+                  <div className="px-5 h-[44px] flex items-center border-b border-border-secondary">
+                    <h2 className="text-[13px] font-semibold text-text-primary">
+                      Recent activity ({detail.audit.length})
+                    </h2>
+                  </div>
+                  {detail.audit.length === 0 ? (
+                    <div className="py-8 text-center text-[12px] text-text-tertiary">No events.</div>
+                  ) : (
+                    <ul>
+                      {detail.audit.map((e) => (
+                        <li
+                          key={e.id}
+                          className="flex items-start gap-4 px-5 py-3 border-b border-border-tertiary last:border-b-0"
+                        >
+                          <div className="w-[110px] text-[11px] text-text-tertiary tabular-nums shrink-0 pt-0.5">
+                            {formatRelative(e.occurred_at)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-mono text-[12px] text-text-primary">{e.event_type}</div>
+                            {e.detail && (
+                              <div className="text-[11px] text-text-tertiary mt-0.5 truncate" title={e.detail}>
+                                {e.detail}
+                              </div>
+                            )}
+                            {e.target_file_id && (
+                              <div className="flex items-center gap-1 text-[11px] text-text-disabled mt-0.5">
+                                <HugeiconsIcon icon={File01Icon} size={10} />
+                                <span className="font-mono">{e.target_file_id.slice(0, 8)}…</span>
+                              </div>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
-              {detail.notes.length > 0 && (
-                <ul className="border-t border-border-tertiary">
-                  {detail.notes.map((n) => {
-                    const canDelete = me?.userId === n.author_user_id || me?.role === "owner";
-                    return (
-                      <li key={n.id} className="group relative px-5 py-3 border-b border-border-tertiary last:border-b-0 flex gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[13px] text-text-primary whitespace-pre-wrap break-words">{n.body}</div>
-                          <div className="text-[11px] text-text-tertiary mt-1">
-                            {n.author_email ?? "unknown"} · {formatRelative(n.created_at)}
-                          </div>
-                        </div>
-                        {canDelete && (
-                          <button
-                            onClick={() => deleteNote(n.id)}
-                            disabled={busy}
-                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-icon-tertiary hover:text-accent-red hover:bg-cta-nav-hover transition-all cursor-pointer disabled:opacity-50 self-start"
-                          >
-                            <HugeiconsIcon icon={Cancel01Icon} size={12} />
-                          </button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
 
-            {/* Audit */}
-            <section className="rounded-[12px] border border-border-secondary bg-bg-l2 overflow-hidden">
-              <div className="px-5 h-[44px] flex items-center border-b border-border-secondary">
-                <h2 className="text-[13px] font-semibold text-text-primary">
-                  Recent activity ({detail.audit.length})
-                </h2>
-              </div>
-              {detail.audit.length === 0 ? (
-                <div className="py-8 text-center text-[12px] text-text-tertiary">No events.</div>
-              ) : (
-                <ul>
-                  {detail.audit.map((e) => (
-                    <li
-                      key={e.id}
-                      className="flex items-start gap-4 px-5 py-3 border-b border-border-tertiary last:border-b-0"
-                    >
-                      <div className="w-[110px] text-[11px] text-text-tertiary tabular-nums shrink-0 pt-0.5">
-                        {formatRelative(e.occurred_at)}
+              {/* Right column: storage + sessions. Sticky so it stays
+                  visible while the audit list scrolls. */}
+              <aside className="space-y-6 lg:sticky lg:top-0 lg:self-start min-w-0">
+                {/* Storage */}
+                <div className="rounded-[12px] border border-border-secondary bg-bg-l2 p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <HugeiconsIcon icon={CloudServerIcon} size={14} className="text-text-tertiary" />
+                    <h2 className="text-[13px] font-semibold text-text-primary">Storage</h2>
+                  </div>
+                  <div className="grid grid-cols-2 gap-5">
+                    <div>
+                      <div className="text-[22px] font-semibold text-text-primary tabular-nums leading-none">
+                        {formatBytes(detail.usage.totalBytes)}
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-mono text-[12px] text-text-primary">{e.event_type}</div>
-                        {e.detail && (
-                          <div className="text-[11px] text-text-tertiary mt-0.5 truncate" title={e.detail}>
-                            {e.detail}
-                          </div>
-                        )}
-                        {e.target_file_id && (
-                          <div className="flex items-center gap-1 text-[11px] text-text-disabled mt-0.5">
-                            <HugeiconsIcon icon={File01Icon} size={10} />
-                            <span className="font-mono">{e.target_file_id.slice(0, 8)}…</span>
-                          </div>
-                        )}
+                      <div className="text-[11px] font-mono uppercase tracking-wider text-text-disabled mt-2">
+                        Active
                       </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+                    </div>
+                    <div>
+                      <div className="text-[22px] font-semibold text-text-primary tabular-nums leading-none">
+                        {detail.usage.fileCount.toLocaleString()}
+                      </div>
+                      <div className="text-[11px] font-mono uppercase tracking-wider text-text-disabled mt-2">
+                        Files
+                      </div>
+                    </div>
+                  </div>
+                  {(detail.usage.trashedBytes > 0 || detail.usage.trashedCount > 0) && (
+                    <div className="mt-4 pt-4 border-t border-border-tertiary flex items-center justify-between text-[12px] text-text-tertiary">
+                      <span>
+                        In trash: {detail.usage.trashedCount.toLocaleString()} file
+                        {detail.usage.trashedCount === 1 ? "" : "s"}
+                      </span>
+                      <span className="tabular-nums">{formatBytes(detail.usage.trashedBytes)}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Sessions */}
+                <div className="rounded-[12px] border border-border-secondary bg-bg-l2 overflow-hidden flex flex-col">
+                  <div className="flex items-center gap-2 px-5 h-[44px] border-b border-border-secondary">
+                    <HugeiconsIcon icon={ComputerIcon} size={14} className="text-text-tertiary" />
+                    <h2 className="text-[13px] font-semibold text-text-primary">
+                      Active sessions ({detail.sessions.length})
+                    </h2>
+                  </div>
+                  {detail.sessions.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center py-8 text-[12px] text-text-tertiary">
+                      No active sessions.
+                    </div>
+                  ) : (
+                    <ul>
+                      {detail.sessions.map((s) => (
+                        <li
+                          key={s.jti}
+                          className="flex items-center justify-between px-5 h-[44px] border-b border-border-tertiary last:border-b-0"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-[12px] font-mono text-text-primary truncate">
+                              {s.jti.slice(0, 8)}…
+                            </div>
+                            <div className="text-[11px] text-text-tertiary">
+                              Expires {formatRelative(s.expiresAt)}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => revokeSession(s.jti)}
+                            disabled={busy}
+                            className="flex items-center gap-1 h-[26px] px-2.5 rounded-[6px] text-[11px] font-medium text-text-tertiary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Revoke
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </aside>
             </section>
           </div>
         </div>
