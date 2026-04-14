@@ -39,6 +39,21 @@ function formatDate(iso: string | null): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Deterministic color-for-email: same email always maps to the same hue.
+function colorForEmail(email: string): string {
+  let hash = 0;
+  for (let i = 0; i < email.length; i++) hash = (hash * 31 + email.charCodeAt(i)) & 0xffffffff;
+  const palette = [
+    "var(--accent-blue-primary)",
+    "var(--accent-green-primary)",
+    "var(--accent-pink-primary)",
+    "var(--accent-yellow-primary)",
+    "var(--accent-orange-primary)",
+    "var(--accent-dark-blue-primary)",
+  ];
+  return palette[Math.abs(hash) % palette.length];
+}
+
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -80,7 +95,6 @@ export default function AdminUsersPage() {
     fetch("/api/admin/me").then((r) => r.json()).then(setMe).catch(() => {});
   }, []);
 
-  // Debounce search — 300ms
   useEffect(() => {
     const t = setTimeout(() => {
       setCursor(0);
@@ -89,7 +103,7 @@ export default function AdminUsersPage() {
     return () => clearTimeout(t);
   }, [search, load]);
 
-  const performAction = async (fn: () => Promise<Response>, successMsg?: string) => {
+  const performAction = async (fn: () => Promise<Response>) => {
     setActioning(menuOpen);
     setError(null);
     try {
@@ -98,9 +112,7 @@ export default function AdminUsersPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `${res.status}`);
       }
-      // Refresh the current page of results
       await load(cursor ?? 0, search, true);
-      if (successMsg) console.log(successMsg);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Action failed");
     } finally {
@@ -150,7 +162,7 @@ export default function AdminUsersPage() {
 
   return (
     <>
-      {/* Header bar — matches drive shell */}
+      {/* Header bar */}
       <div className="relative flex items-center justify-between px-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <span className="text-[13px] text-text-primary font-medium">Users</span>
@@ -172,178 +184,230 @@ export default function AdminUsersPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-[1100px] mx-auto px-6 md:px-8 py-8">
-          {error && (
-        <div className="mb-4 px-4 py-3 rounded-[8px] bg-accent-yellow-bg text-[13px] text-text-primary">
+      {error && (
+        <div className="mx-5 mt-3 px-4 py-3 rounded-[8px] bg-accent-yellow-bg text-[13px] text-text-primary">
           {error}
         </div>
       )}
 
-      <div className="rounded-[12px] border border-border-secondary bg-bg-l2 overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="text-[11px] font-mono uppercase tracking-wider text-text-disabled border-b border-border-secondary">
-              <th className="text-left font-normal px-4 py-3">Email</th>
-              <th className="text-left font-normal px-4 py-3 w-[90px]">Role</th>
-              <th className="text-right font-normal px-4 py-3 w-[110px]">Storage</th>
-              <th className="text-right font-normal px-4 py-3 w-[80px]">Files</th>
-              <th className="text-left font-normal px-4 py-3 w-[110px]">Last login</th>
-              <th className="text-left font-normal px-4 py-3 w-[100px]">Created</th>
-              <th className="text-left font-normal px-4 py-3 w-[90px]">Status</th>
-              <th className="w-[40px] px-2 py-3"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.length === 0 && !loading && (
-              <tr>
-                <td colSpan={8} className="text-center py-12 text-[13px] text-text-tertiary">
-                  No users match.
-                </td>
-              </tr>
-            )}
-            {users.map((u) => (
-              <tr
-                key={u.id}
-                className="border-b border-border-tertiary last:border-b-0 text-[13px]"
-              >
-                <td className="px-4 py-3 text-text-primary truncate max-w-[280px]">{u.email}</td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`inline-block px-2 py-0.5 rounded-[6px] text-[11px] font-mono uppercase tracking-wider ${
-                      u.role === "owner"
-                        ? "bg-accent-green-bg text-accent-green"
-                        : u.role === "admin"
-                        ? "bg-accent-yellow-bg text-accent-yellow"
-                        : "bg-bg-overlay-tertiary text-text-tertiary"
-                    }`}
-                  >
-                    {u.role}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right text-text-secondary tabular-nums">
-                  {formatBytes(u.storageBytes)}
-                </td>
-                <td className="px-4 py-3 text-right text-text-secondary tabular-nums">
-                  {u.fileCount.toLocaleString()}
-                </td>
-                <td className="px-4 py-3 text-text-tertiary">{formatDate(u.lastLoginAt)}</td>
-                <td className="px-4 py-3 text-text-tertiary">{formatDate(u.createdAt)}</td>
-                <td className="px-4 py-3">
-                  {u.suspendedAt ? (
-                    <span
-                      className="inline-block px-2 py-0.5 rounded-[6px] text-[11px] font-mono uppercase tracking-wider bg-bg-overlay-tertiary text-accent-red"
-                      title={u.suspendedReason ?? ""}
-                    >
-                      suspended
-                    </span>
-                  ) : (
-                    <span className="text-text-disabled text-[12px]">active</span>
-                  )}
-                </td>
-                <td className="px-2 py-3 relative">
-                  {canActOn(u) && (
-                    <>
-                      <button
-                        onClick={() => setMenuOpen((o) => (o === u.id ? null : u.id))}
-                        className="w-[28px] h-[28px] rounded-[6px] flex items-center justify-center text-text-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
-                        disabled={actioning === u.id}
-                      >
-                        <HugeiconsIcon icon={MoreHorizontalIcon} size={14} />
-                      </button>
-                      {menuOpen === u.id && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-40"
-                            onClick={() => setMenuOpen(null)}
-                          />
-                          <div className="absolute right-2 top-full mt-1 w-[180px] rounded-[10px] border border-border-primary bg-bg-l3 shadow-lg z-50 py-1">
-                            {u.suspendedAt ? (
-                              <button
-                                onClick={() => unsuspend(u)}
-                                className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-cta-nav-hover cursor-pointer"
-                              >
-                                Unsuspend
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => setConfirm({ kind: "suspend", user: u })}
-                                className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-cta-nav-hover cursor-pointer"
-                              >
-                                Suspend…
-                              </button>
-                            )}
-                            {me?.role === "owner" && (
-                              <>
-                                <div className="h-px bg-border-secondary my-1" />
-                                {u.role !== "admin" && (
-                                  <button
-                                    onClick={() => setConfirm({ kind: "role", user: u, to: "admin" })}
-                                    className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-cta-nav-hover cursor-pointer"
-                                  >
-                                    Promote to admin
-                                  </button>
-                                )}
-                                {u.role !== "user" && (
-                                  <button
-                                    onClick={() => setConfirm({ kind: "role", user: u, to: "user" })}
-                                    className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-cta-nav-hover cursor-pointer"
-                                  >
-                                    Demote to user
-                                  </button>
-                                )}
-                                <div className="h-px bg-border-secondary my-1" />
-                                <button
-                                  onClick={() => setConfirm({ kind: "delete", user: u })}
-                                  className="w-full text-left px-3 py-2 text-[13px] text-accent-red hover:bg-cta-nav-hover cursor-pointer"
-                                >
-                                  Delete account…
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {loading && (
-          <div className="py-4 text-center text-[12px] text-text-tertiary">Loading…</div>
-        )}
-      </div>
-
-      {nextCursor != null && (
-        <div className="mt-4 flex justify-center">
-          <button
-            onClick={() => {
-              setCursor(nextCursor);
-              load(nextCursor, search, false);
-            }}
-            disabled={loading}
-            className="h-[34px] px-5 rounded-[8px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer disabled:opacity-50"
-          >
-            Load more
-          </button>
+      {/* Column header row — matches file-browser list layout */}
+      {users.length > 0 && (
+        <div className="hidden md:flex items-center h-[40px] px-4 mx-3 md:mx-5 box-border select-none shrink-0 border-b border-border-tertiary">
+          <div className="flex items-center flex-1 min-w-0 pr-4">
+            <span className="text-[11px] font-mono uppercase text-text-disabled">Email</span>
+          </div>
+          <div className="flex items-center gap-[46px]">
+            <div className="w-[80px] flex justify-end">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">Role</span>
+            </div>
+            <div className="w-[100px] flex justify-end">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">Storage</span>
+            </div>
+            <div className="w-[70px] flex justify-end">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">Files</span>
+            </div>
+            <div className="w-[100px] hidden md:flex justify-end">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">Last login</span>
+            </div>
+            <div className="w-[90px] hidden lg:flex justify-end">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">Joined</span>
+            </div>
+          </div>
+          <div className="w-[44px] shrink-0" />
         </div>
       )}
 
-          {confirm && (
-            <ConfirmModal
-              confirm={confirm}
-              onCancel={() => setConfirm(null)}
-              onSuspend={(reason) => suspend(confirm.user, reason)}
-              onRole={() => confirm.kind === "role" && changeRole(confirm.user, confirm.to)}
-              onDelete={(email, reason) => deleteUser(confirm.user, email, reason)}
-              busy={actioning !== null}
-            />
-          )}
-        </div>
+      {/* Scrollable row list */}
+      <div className="flex-1 overflow-y-auto px-3 md:px-5 pt-1 pb-4">
+        {users.length === 0 && !loading && (
+          <div className="flex flex-col items-center justify-center py-24">
+            <h3 className="text-[15px] font-medium text-text-primary mb-1">No users match</h3>
+            <p className="text-[12px] text-text-tertiary">Try a different search term.</p>
+          </div>
+        )}
+
+        {users.map((u) => {
+          const actionable = canActOn(u);
+          return (
+            <div
+              key={u.id}
+              className={`group relative flex items-center h-[52px] px-4 rounded-[8px] transition-colors ${
+                u.suspendedAt ? "opacity-70" : ""
+              } hover:bg-bg-cell-hover`}
+            >
+              {/* Avatar + email */}
+              <div className="flex items-center flex-1 min-w-0 pr-4 gap-3">
+                <div
+                  className="w-7 h-7 rounded-[6px] flex items-center justify-center text-[11px] font-bold text-white shrink-0"
+                  style={{ backgroundColor: colorForEmail(u.email) }}
+                >
+                  {u.email[0].toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[13px] text-text-primary truncate">{u.email}</span>
+                    {u.suspendedAt && (
+                      <span
+                        title={u.suspendedReason ?? "Suspended"}
+                        className="px-1.5 py-0.5 rounded-[4px] text-[9px] font-mono uppercase tracking-wider bg-bg-field text-accent-red shrink-0"
+                      >
+                        suspended
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Metadata columns */}
+              <div className="hidden md:flex items-center gap-[46px] relative">
+                <div className="w-[80px] flex justify-end">
+                  {u.role !== "user" ? (
+                    <span
+                      className={`flex h-5 items-center justify-center rounded bg-bg-field px-1.5 py-0.5 text-[11px] font-mono uppercase ${
+                        u.role === "owner" ? "text-accent-green" : "text-accent-yellow"
+                      }`}
+                    >
+                      {u.role}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-mono uppercase text-text-disabled">user</span>
+                  )}
+                </div>
+                <div className="w-[100px] flex justify-end">
+                  <span className="text-[12px] text-text-disabled tabular-nums">
+                    {formatBytes(u.storageBytes)}
+                  </span>
+                </div>
+                <div className="w-[70px] flex justify-end">
+                  <span className="text-[12px] text-text-disabled tabular-nums">
+                    {u.fileCount.toLocaleString()}
+                  </span>
+                </div>
+                <div
+                  className={`w-[100px] hidden md:flex justify-end transition-opacity ${
+                    menuOpen === u.id ? "opacity-0" : actionable ? "group-hover:opacity-0" : ""
+                  }`}
+                >
+                  <span className="text-[12px] text-text-disabled">{formatDate(u.lastLoginAt)}</span>
+                </div>
+                <div
+                  className={`w-[90px] hidden lg:flex justify-end transition-opacity ${
+                    menuOpen === u.id ? "opacity-0" : actionable ? "group-hover:opacity-0" : ""
+                  }`}
+                >
+                  <span className="text-[12px] text-text-disabled">{formatDate(u.createdAt)}</span>
+                </div>
+
+                {/* Hover actions */}
+                {actionable && (
+                  <div
+                    className={`absolute right-0 flex items-center transition-opacity ${
+                      menuOpen === u.id
+                        ? "opacity-100 pointer-events-auto"
+                        : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
+                    }`}
+                  >
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuOpen((o) => (o === u.id ? null : u.id));
+                      }}
+                      disabled={actioning === u.id}
+                      className="p-1.5 rounded-md text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+                    >
+                      <HugeiconsIcon icon={MoreHorizontalIcon} size={15} />
+                    </button>
+
+                    {menuOpen === u.id && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(null)} />
+                        <div
+                          className="absolute right-0 top-full mt-1 w-[180px] rounded-[10px] border border-border-primary bg-bg-l3 z-50 py-1"
+                          style={{ boxShadow: "var(--shadow-l2)" }}
+                        >
+                          {u.suspendedAt ? (
+                            <button
+                              onClick={() => unsuspend(u)}
+                              className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-cta-nav-hover cursor-pointer"
+                            >
+                              Unsuspend
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setConfirm({ kind: "suspend", user: u })}
+                              className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-cta-nav-hover cursor-pointer"
+                            >
+                              Suspend…
+                            </button>
+                          )}
+                          {me?.role === "owner" && (
+                            <>
+                              <div className="h-px bg-border-secondary my-1" />
+                              {u.role !== "admin" && (
+                                <button
+                                  onClick={() => setConfirm({ kind: "role", user: u, to: "admin" })}
+                                  className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-cta-nav-hover cursor-pointer"
+                                >
+                                  Promote to admin
+                                </button>
+                              )}
+                              {u.role !== "user" && (
+                                <button
+                                  onClick={() => setConfirm({ kind: "role", user: u, to: "user" })}
+                                  className="w-full text-left px-3 py-2 text-[13px] text-text-primary hover:bg-cta-nav-hover cursor-pointer"
+                                >
+                                  Demote to user
+                                </button>
+                              )}
+                              <div className="h-px bg-border-secondary my-1" />
+                              <button
+                                onClick={() => setConfirm({ kind: "delete", user: u })}
+                                className="w-full text-left px-3 py-2 text-[13px] text-accent-red hover:bg-cta-nav-hover cursor-pointer"
+                              >
+                                Delete account…
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {loading && users.length === 0 && (
+          <div className="py-8 text-center text-[12px] text-text-tertiary">Loading…</div>
+        )}
+
+        {nextCursor != null && (
+          <div className="mt-4 flex justify-center">
+            <button
+              onClick={() => {
+                setCursor(nextCursor);
+                load(nextCursor, search, false);
+              }}
+              disabled={loading}
+              className="h-[32px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Load more
+            </button>
+          </div>
+        )}
       </div>
+
+      {confirm && (
+        <ConfirmModal
+          confirm={confirm}
+          onCancel={() => setConfirm(null)}
+          onSuspend={(reason) => suspend(confirm.user, reason)}
+          onRole={() => confirm.kind === "role" && changeRole(confirm.user, confirm.to)}
+          onDelete={(email, reason) => deleteUser(confirm.user, email, reason)}
+          busy={actioning !== null}
+        />
+      )}
     </>
   );
 }
