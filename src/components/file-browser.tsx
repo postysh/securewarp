@@ -1049,7 +1049,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <>
                   <h3 className="text-[18px] font-semibold text-text-primary mb-2">No starred files</h3>
                   <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
-                    Star important files from the context menu to find them quickly here.
+                    Starred files will appear here.
                   </p>
                   <div className="flex items-center justify-center">
                     <button onClick={() => fileOps.setViewMode("own")} className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer flex items-center gap-2">
@@ -1073,7 +1073,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <>
                   <h3 className="text-[18px] font-semibold text-text-primary mb-2">Trash is empty</h3>
                   <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
-                    Deleted files land here. Right-click to restore.
+                    Deleted files land here. Right click to restore.
                   </p>
                   <div className="flex items-center justify-center">
                     <button
@@ -1103,14 +1103,14 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <>
                   <h3 className="text-[18px] font-semibold text-text-primary mb-2">No files yet</h3>
                   <p className="text-[13px] text-text-tertiary leading-relaxed">
-                    This workspace is empty. Files added by other members will appear here.
+                    Files added by other members will appear here.
                   </p>
                 </>
               ) : (
                 <>
                   <h3 className="text-[18px] font-semibold text-text-primary mb-2">Your vault is empty</h3>
                   <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
-                    Upload your first file or create a folder. Everything is end-to-end encrypted before it leaves your browser.
+                    Upload a file or create a folder to get started.
                   </p>
                   <div className="flex items-center justify-center gap-2.5">
                     <button

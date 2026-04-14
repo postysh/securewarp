@@ -461,7 +461,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
 
             {links.length === 0 && !freshLinkUrl && (
               <p className="text-[11px] text-text-disabled">
-                No active public links. Create one to share with anyone, no account needed.
+                No active public links.
               </p>
             )}
           </div>
