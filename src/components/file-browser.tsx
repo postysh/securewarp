@@ -803,8 +803,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
 
-      {/* Selection bar */}
-      {!showActivity && selected.size > 0 && (
+      {/* Selection bar — hidden during active rubber-band drag so the
+          layout doesn't shift mid-selection (which would push the file
+          list down and misalign the drag anchor). Reappears on mouseup. */}
+      {!showActivity && !rubberBand && selected.size > 0 && (
         <div className="hidden md:flex mx-5 mt-2 items-center gap-3 px-4 h-[36px] rounded-[8px] bg-bg-overlay-tertiary text-[12px] text-text-secondary animate-fade-in">
           <span className="font-medium text-text-primary">{selected.size} selected</span>
           <span className="text-text-disabled">·</span>
