@@ -405,6 +405,36 @@ CREATE TABLE admin_notes (
   body text NOT NULL CHECK (char_length(body) <= 2000)
 );
 CREATE INDEX admin_notes_user_idx ON admin_notes (user_id, created_at DESC);
+
+-- Announcements banner. Admin-authored strips shown at the top of the
+-- drive for all logged-in users. Drafts have `published_at IS NULL`;
+-- `expires_at` optionally auto-hides. Per-user dismissals live in
+-- announcement_dismissals so an `X` click persists across sessions.
+CREATE TABLE announcements (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_by_email text,
+  title text NOT NULL CHECK (char_length(title) BETWEEN 1 AND 120),
+  body text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 2000),
+  severity text NOT NULL DEFAULT 'info'
+    CHECK (severity IN ('info', 'warning', 'critical')),
+  published_at timestamptz,
+  expires_at timestamptz
+);
+CREATE INDEX announcements_active_idx
+  ON announcements (published_at DESC)
+  WHERE published_at IS NOT NULL;
+
+CREATE TABLE announcement_dismissals (
+  announcement_id uuid NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  dismissed_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (announcement_id, user_id)
+);
+CREATE INDEX announcement_dismissals_user_idx
+  ON announcement_dismissals (user_id);
 ```
 
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from

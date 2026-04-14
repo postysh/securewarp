@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/sidebar";
 import { FileBrowser } from "@/components/file-browser";
 import { AuthScreen } from "@/components/auth-screen";
 import { MobileNav } from "@/components/mobile-nav";
+import { AnnouncementBanner } from "@/components/announcement-banner";
 import { UserKeysContext, type UserKeys } from "@/hooks/use-user-keys";
 import { FilesContext, useFiles } from "@/hooks/use-files";
 
@@ -80,8 +81,11 @@ export default function DriveClient() {
             </div>
             {/* Mobile sidebar is replaced by MobileNav bottom bar */}
             <div className={`flex-1 p-2 ${sidebarOpen ? "md:pl-0" : ""} relative z-10 pb-[72px] md:pb-2`}>
-              <div className="h-full rounded-xl border border-border-secondary bg-bg-main overflow-hidden">
-                <FileBrowser sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
+              <div className="h-full rounded-xl border border-border-secondary bg-bg-main overflow-hidden flex flex-col">
+                <AnnouncementBanner />
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <FileBrowser sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
+                </div>
               </div>
             </div>
             <MobileNav onSearch={() => window.dispatchEvent(new Event("securewarp-open-search"))} />
