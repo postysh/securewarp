@@ -199,15 +199,9 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                 <h2 className="text-[22px] font-semibold text-text-primary tracking-[-0.02em] mb-2">
                   Account suspended
                 </h2>
-                {/* Intro held to a single line. Longer context (reason
-                    + support link) lives in the sections below so the
-                    layout stays tight regardless of message length. */}
-                <p className="text-text-secondary text-[13px] whitespace-nowrap mb-5">
-                  Your account is suspended.
-                </p>
                 <p className="text-text-secondary text-[13px] leading-relaxed mb-5">
-                  You can&apos;t sign in until an administrator lifts the suspension. Your files
-                  and keys are preserved in the meantime — nothing has been deleted.
+                  You can&apos;t sign in until suspension is lifted. Your files and keys are
+                  preserved in the meantime and nothing has been deleted.
                 </p>
                 {auth.suspended.reason && (
                   <div className="mb-5 p-3 rounded-lg bg-bg-field whitespace-pre-wrap break-words">
