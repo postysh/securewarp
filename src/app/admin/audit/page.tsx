@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import ArrowRight02Icon from "@hugeicons/core-free-icons/ArrowRight02Icon";
 
 type Entry = {
   kind: "security" | "admin";
@@ -26,7 +27,37 @@ function formatTime(iso: string): string {
   if (diff < 60_000) return "just now";
   if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3600_000)}h ago`;
-  return d.toISOString().slice(0, 16).replace("T", " ") + "Z";
+  return d.toISOString().slice(0, 10);
+}
+
+// Deterministic color-for-email — same hash used on the users page.
+function colorForEmail(email: string): string {
+  let hash = 0;
+  for (let i = 0; i < email.length; i++) hash = (hash * 31 + email.charCodeAt(i)) & 0xffffffff;
+  const palette = [
+    "var(--accent-blue-primary)",
+    "var(--accent-green-primary)",
+    "var(--accent-pink-primary)",
+    "var(--accent-yellow-primary)",
+    "var(--accent-orange-primary)",
+    "var(--accent-dark-blue-primary)",
+  ];
+  return palette[Math.abs(hash) % palette.length];
+}
+
+function UserChip({ email }: { email: string | null }) {
+  if (!email) return <span className="text-[12px] text-text-disabled">—</span>;
+  return (
+    <div className="flex items-center gap-2 min-w-0" title={email}>
+      <div
+        className="w-5 h-5 rounded-[5px] flex items-center justify-center text-[9px] font-bold text-white shrink-0"
+        style={{ backgroundColor: colorForEmail(email) }}
+      >
+        {email[0].toUpperCase()}
+      </div>
+      <span className="text-[12px] text-text-secondary truncate">{email}</span>
+    </div>
+  );
 }
 
 export default function AdminAuditPage() {
@@ -102,83 +133,112 @@ export default function AdminAuditPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-[1100px] mx-auto px-6 md:px-8 py-8">
-          {error && (
-        <div className="mb-4 px-4 py-3 rounded-[8px] bg-accent-yellow-bg text-[13px] text-text-primary">
+      {error && (
+        <div className="mx-5 mt-3 px-4 py-3 rounded-[8px] bg-accent-yellow-bg text-[13px] text-text-primary">
           {error}
         </div>
       )}
 
-      <div className="rounded-[12px] border border-border-secondary bg-bg-l2 overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="text-[11px] font-mono uppercase tracking-wider text-text-disabled border-b border-border-secondary">
-              <th className="text-left font-normal px-4 py-3 w-[110px]">When</th>
-              <th className="text-left font-normal px-4 py-3 w-[90px]">Type</th>
-              <th className="text-left font-normal px-4 py-3">Event</th>
-              <th className="text-left font-normal px-4 py-3">Actor</th>
-              <th className="text-left font-normal px-4 py-3">Target</th>
-              <th className="text-left font-normal px-4 py-3">Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.length === 0 && !loading && (
-              <tr>
-                <td colSpan={6} className="text-center py-12 text-[13px] text-text-tertiary">
-                  No events match.
-                </td>
-              </tr>
-            )}
-            {entries.map((e) => (
-              <tr
-                key={e.id}
-                className="border-b border-border-tertiary last:border-b-0 text-[13px]"
-              >
-                <td className="px-4 py-3 text-text-tertiary tabular-nums">{formatTime(e.occurredAt)}</td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`inline-block px-2 py-0.5 rounded-[6px] text-[11px] font-mono uppercase tracking-wider ${
-                      e.kind === "admin"
-                        ? "bg-accent-yellow-bg text-accent-yellow"
-                        : "bg-bg-overlay-tertiary text-text-tertiary"
-                    }`}
-                  >
-                    {e.kind}
-                  </span>
-                </td>
-                <td className="px-4 py-3 font-mono text-[12px] text-text-primary">{e.event}</td>
-                <td className="px-4 py-3 text-text-secondary truncate max-w-[180px]">
-                  {e.actorEmail ?? <span className="text-text-disabled">—</span>}
-                </td>
-                <td className="px-4 py-3 text-text-secondary truncate max-w-[180px]">
-                  {e.targetEmail ?? <span className="text-text-disabled">—</span>}
-                </td>
-                <td className="px-4 py-3 text-text-tertiary truncate max-w-[260px]" title={e.detail ?? ""}>
-                  {e.detail ?? <span className="text-text-disabled">—</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {loading && (
-          <div className="py-4 text-center text-[12px] text-text-tertiary">Loading…</div>
-        )}
-      </div>
-
-          {nextCursor && (
-            <div className="mt-4 flex justify-center">
-              <button
-                onClick={() => load(nextCursor, source, q, false)}
-                disabled={loading}
-                className="h-[34px] px-5 rounded-[8px] text-[13px] font-medium text-text-secondary border border-border-secondary hover:bg-cta-secondary-hover transition-colors cursor-pointer disabled:opacity-50"
-              >
-                Load more
-              </button>
+      {/* Column header row */}
+      {entries.length > 0 && (
+        <div className="hidden md:flex items-center h-[40px] px-4 mx-3 md:mx-5 box-border select-none shrink-0 border-b border-border-tertiary">
+          <div className="flex items-center flex-1 min-w-0 pr-4">
+            <span className="text-[11px] font-mono uppercase text-text-disabled">Event</span>
+          </div>
+          <div className="flex items-center gap-[46px]">
+            <div className="w-[70px] flex justify-end">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">Type</span>
             </div>
-          )}
+            <div className="w-[170px] hidden md:flex justify-start">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">Actor</span>
+            </div>
+            <div className="w-[170px] hidden lg:flex justify-start">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">Target</span>
+            </div>
+            <div className="w-[90px] flex justify-end">
+              <span className="text-[11px] font-mono uppercase text-text-disabled">When</span>
+            </div>
+          </div>
         </div>
+      )}
+
+      {/* Scrollable list */}
+      <div className="flex-1 overflow-y-auto px-3 md:px-5 pt-1 pb-4">
+        {entries.length === 0 && !loading && (
+          <div className="flex flex-col items-center justify-center py-24">
+            <h3 className="text-[15px] font-medium text-text-primary mb-1">No events match</h3>
+            <p className="text-[12px] text-text-tertiary">Try a different source or filter.</p>
+          </div>
+        )}
+
+        {entries.map((e) => (
+          <div
+            key={e.id}
+            className="group relative flex items-center h-[52px] px-4 rounded-[8px] transition-colors hover:bg-bg-cell-hover"
+          >
+            {/* Event identity — mono event name stacked with detail subtitle */}
+            <div className="flex items-center flex-1 min-w-0 pr-4 gap-3">
+              <div
+                className={`w-1 h-7 rounded-full shrink-0 ${
+                  e.kind === "admin" ? "bg-accent-yellow" : "bg-bg-overlay-tertiary"
+                }`}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="font-mono text-[12px] text-text-primary truncate">{e.event}</div>
+                {e.detail && (
+                  <div className="text-[11px] text-text-tertiary truncate mt-0.5" title={e.detail}>
+                    {e.detail}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Metadata columns */}
+            <div className="hidden md:flex items-center gap-[46px]">
+              <div className="w-[70px] flex justify-end">
+                <span
+                  className={`flex h-5 items-center justify-center rounded bg-bg-field px-1.5 py-0.5 text-[11px] font-mono uppercase ${
+                    e.kind === "admin" ? "text-accent-yellow" : "text-text-disabled"
+                  }`}
+                >
+                  {e.kind}
+                </span>
+              </div>
+              <div className="w-[170px] hidden md:flex justify-start min-w-0">
+                <UserChip email={e.actorEmail} />
+              </div>
+              <div className="w-[170px] hidden lg:flex items-center justify-start min-w-0 gap-1.5">
+                {e.targetEmail ? (
+                  <>
+                    <HugeiconsIcon icon={ArrowRight02Icon} size={11} className="text-text-disabled shrink-0" />
+                    <UserChip email={e.targetEmail} />
+                  </>
+                ) : (
+                  <span className="text-[12px] text-text-disabled">—</span>
+                )}
+              </div>
+              <div className="w-[90px] flex justify-end">
+                <span className="text-[12px] text-text-disabled tabular-nums">{formatTime(e.occurredAt)}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {loading && entries.length === 0 && (
+          <div className="py-8 text-center text-[12px] text-text-tertiary">Loading…</div>
+        )}
+
+        {nextCursor && (
+          <div className="mt-4 flex justify-center">
+            <button
+              onClick={() => load(nextCursor, source, q, false)}
+              disabled={loading}
+              className="h-[32px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Load more
+            </button>
+          </div>
+        )}
       </div>
     </>
   );
