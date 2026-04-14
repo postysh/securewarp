@@ -1073,7 +1073,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <>
                   <h3 className="text-[18px] font-semibold text-text-primary mb-2">Trash is empty</h3>
                   <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
-                    Files and folders you delete land here. Restore them from the context menu, or empty the trash to free up space.
+                    Deleted files land here. Right-click to restore.
                   </p>
                   <div className="flex items-center justify-center">
                     <button
@@ -1086,10 +1086,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 </>
               ) : fileOps.viewMode === "shared" ? (
                 <>
-                  <h3 className="text-[18px] font-semibold text-text-primary mb-2">Nothing shared with you yet</h3>
+                  <h3 className="text-[18px] font-semibold text-text-primary mb-2">Nothing shared yet</h3>
                   <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
-                    When someone shares a file with your email, it shows up here, decrypted in your
-                    browser using your private key. Ask a collaborator to send you something.
+                    Files shared with you will appear here.
                   </p>
                   <div className="flex items-center justify-center">
                     <button
