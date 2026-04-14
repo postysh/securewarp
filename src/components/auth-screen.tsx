@@ -217,7 +217,7 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                   Signups unavailable
                 </h2>
                 <p className="text-text-secondary text-[13px] leading-relaxed mb-6">
-                  New accounts are temporarily disabled. Check back later — existing users
+                  New accounts are temporarily disabled. Check back later, but existing users
                   can still sign in.
                 </p>
                 <button
