@@ -152,84 +152,141 @@ export default function AdminAnnouncementsPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {items.map((a) => {
-              const status = statusOf(a);
-              const sev = severityStyle[a.severity];
-              return (
-                <div
-                  key={a.id}
-                  className="rounded-[12px] border border-border-secondary bg-bg-l2 p-5 flex flex-col"
-                >
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2">
+          <>
+            {/* Column header */}
+            <div className="hidden md:flex items-center h-[40px] px-4 box-border select-none shrink-0 border-b border-border-tertiary">
+              <div className="w-[90px] shrink-0">
+                <span className="text-[11px] font-mono uppercase text-text-disabled">Severity</span>
+              </div>
+              <div className="flex-1 min-w-0 pr-4">
+                <span className="text-[11px] font-mono uppercase text-text-disabled">Title</span>
+              </div>
+              <div className="flex items-center gap-[46px]">
+                <div className="w-[80px] flex justify-end">
+                  <span className="text-[11px] font-mono uppercase text-text-disabled">Status</span>
+                </div>
+                <div className="w-[110px] hidden md:flex justify-end">
+                  <span className="text-[11px] font-mono uppercase text-text-disabled">Expires</span>
+                </div>
+                <div className="w-[110px] hidden lg:flex justify-end">
+                  <span className="text-[11px] font-mono uppercase text-text-disabled">Created</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Row list */}
+            <div className="py-1">
+              {items.map((a) => {
+                const status = statusOf(a);
+                const sev = severityStyle[a.severity];
+                return (
+                  <div
+                    key={a.id}
+                    className="group relative flex items-center h-[52px] px-4 rounded-[8px] transition-colors hover:bg-bg-cell-hover"
+                  >
+                    {/* Click-through Link on whole row */}
+                    <button
+                      onClick={() => setEditor({ mode: "edit", item: a })}
+                      className="absolute inset-0 rounded-[8px] focus:outline-none focus:ring-2 focus:ring-accent-green/50 cursor-pointer"
+                      aria-label={`Edit ${a.title}`}
+                    />
+
+                    {/* Severity */}
+                    <div className="w-[90px] shrink-0 flex items-center gap-2 relative pointer-events-none">
                       <span
-                        className="w-[7px] h-[7px] rounded-full"
+                        className="w-[7px] h-[7px] rounded-full shrink-0"
                         style={{ background: sev.dot }}
                       />
                       <span
-                        className={`inline-block px-2 py-0.5 rounded-[4px] text-[10px] font-mono uppercase tracking-wider ${sev.bg} ${sev.text}`}
+                        className={`inline-block px-1.5 py-0.5 rounded-[4px] text-[10px] font-mono uppercase tracking-wider ${sev.bg} ${sev.text}`}
                       >
                         {a.severity}
                       </span>
-                      <span
-                        className="text-[10px] font-mono uppercase tracking-wider"
-                        style={{ color: status.color }}
-                      >
-                        {status.label}
-                      </span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => setEditor({ mode: "edit", item: a })}
-                        disabled={busy}
-                        className="p-1.5 rounded-md text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer disabled:opacity-50"
-                        title="Edit"
+
+                    {/* Title + body snippet */}
+                    <div className="flex-1 min-w-0 pr-4 relative pointer-events-none">
+                      <div className="text-[13px] text-text-primary font-medium truncate">
+                        {a.title}
+                      </div>
+                      <div className="text-[11px] text-text-tertiary truncate" title={a.body}>
+                        {a.body}
+                      </div>
+                    </div>
+
+                    {/* Right-side columns */}
+                    <div className="hidden md:flex items-center gap-[46px] relative pointer-events-none">
+                      <div className="w-[80px] flex justify-end">
+                        <span
+                          className="text-[11px] font-mono uppercase tracking-wider"
+                          style={{ color: status.color }}
+                        >
+                          {status.label}
+                        </span>
+                      </div>
+                      <div
+                        className={`w-[110px] hidden md:flex justify-end transition-opacity group-hover:opacity-0`}
                       >
-                        <HugeiconsIcon icon={PencilEdit01Icon} size={13} />
-                      </button>
-                      <button
-                        onClick={() => togglePublish(a)}
-                        disabled={busy}
-                        className="p-1.5 rounded-md text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer disabled:opacity-50"
-                        title={a.published_at ? "Unpublish" : "Publish"}
+                        <span className="text-[12px] text-text-disabled">
+                          {a.expires_at ? formatRelative(a.expires_at) : "—"}
+                        </span>
+                      </div>
+                      <div
+                        className={`w-[110px] hidden lg:flex justify-end transition-opacity group-hover:opacity-0`}
                       >
-                        <HugeiconsIcon
-                          icon={a.published_at ? StopCircleIcon : PlayCircleIcon}
-                          size={14}
-                        />
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm("Delete this announcement?")) remove(a.id);
-                        }}
-                        disabled={busy}
-                        className="p-1.5 rounded-md text-icon-tertiary hover:text-accent-red hover:bg-cta-nav-hover transition-colors cursor-pointer disabled:opacity-50"
-                        title="Delete"
+                        <span className="text-[12px] text-text-disabled">
+                          {formatRelative(a.published_at ?? a.created_at)}
+                        </span>
+                      </div>
+
+                      {/* Hover actions */}
+                      <div
+                        className="absolute right-0 flex items-center transition-opacity opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <HugeiconsIcon icon={Delete02Icon} size={13} />
-                      </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditor({ mode: "edit", item: a });
+                          }}
+                          disabled={busy}
+                          className="p-1.5 rounded-md text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer disabled:opacity-50"
+                          title="Edit"
+                        >
+                          <HugeiconsIcon icon={PencilEdit01Icon} size={13} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePublish(a);
+                          }}
+                          disabled={busy}
+                          className="p-1.5 rounded-md text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer disabled:opacity-50"
+                          title={a.published_at ? "Unpublish" : "Publish"}
+                        >
+                          <HugeiconsIcon
+                            icon={a.published_at ? StopCircleIcon : PlayCircleIcon}
+                            size={14}
+                          />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm("Delete this announcement?")) remove(a.id);
+                          }}
+                          disabled={busy}
+                          className="p-1.5 rounded-md text-icon-tertiary hover:text-accent-red hover:bg-cta-nav-hover transition-colors cursor-pointer disabled:opacity-50"
+                          title="Delete"
+                        >
+                          <HugeiconsIcon icon={Delete02Icon} size={13} />
+                        </button>
+                      </div>
                     </div>
                   </div>
-
-                  <h3 className="text-[14px] font-semibold text-text-primary mb-1">{a.title}</h3>
-                  <p className="text-[13px] text-text-secondary whitespace-pre-wrap break-words mb-4 flex-1">
-                    {a.body}
-                  </p>
-
-                  <div className="text-[11px] text-text-tertiary flex flex-wrap gap-x-4 gap-y-1 pt-3 border-t border-border-tertiary">
-                    {a.published_at ? (
-                      <span>Published {formatRelative(a.published_at)}</span>
-                    ) : (
-                      <span>Created {formatRelative(a.created_at)}</span>
-                    )}
-                    {a.expires_at && <span>Expires {formatRelative(a.expires_at)}</span>}
-                    {a.created_by_email && <span>by {a.created_by_email}</span>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 
