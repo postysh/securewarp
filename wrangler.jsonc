@@ -16,6 +16,13 @@
   "compatibility_date": "2025-03-25",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 
+  // Disable the *.workers.dev preview URL. Traffic should only reach
+  // this Worker through the custom domain (securewarp.com). Leaving the
+  // workers.dev subdomain enabled is both a backup URL users might
+  // accidentally share and an extra origin to keep in CORS/Turnstile.
+  "workers_dev": false,
+  "preview_urls": false,
+
   // Static assets emitted by OpenNext build (public/ + Next.js static files).
   "assets": {
     "binding": "ASSETS",
