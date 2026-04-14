@@ -953,33 +953,44 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           if (e.button !== 0) return;
           if ((e.target as HTMLElement).closest("[data-file-item]")) return;
           if ((e.target as HTMLElement).closest("button")) return;
-          const rect = fileListRef.current?.getBoundingClientRect();
-          if (!rect) return;
-          // Stop the browser from starting a native text-selection drag
-          // on empty space. Without this, dragging over filename labels
-          // highlights the text instead of (or in addition to) rubber-
-          // banding the file cards. preventDefault on mousedown is the
-          // standard fix; the `select-none` class above is belt-and-braces.
+          const container = fileListRef.current;
+          if (!container) return;
+          // preventDefault stops native text-selection drag on empty space.
           e.preventDefault();
-          const x = e.clientX;
-          const y = e.clientY;
+          // Store coords in CONTENT space, not viewport. If the list scrolls
+          // during the drag (auto-scroll, wheel, trackpad), viewport-anchored
+          // coords go stale and selection drifts — items near the top of
+          // the list get picked up even when the user is dragging lower
+          // down. Content coords stay correct regardless of scroll.
+          const rect = container.getBoundingClientRect();
+          const x = e.clientX - rect.left + container.scrollLeft;
+          const y = e.clientY - rect.top + container.scrollTop;
           setRubberBand({ startX: x, startY: y, currentX: x, currentY: y });
           if (!e.shiftKey) selectNone();
         }}
         onMouseMove={(e) => {
           if (!rubberBand) return;
-          setRubberBand((prev) => prev ? { ...prev, currentX: e.clientX, currentY: e.clientY } : null);
-          // Check intersections with file items
-          const items = fileListRef.current?.querySelectorAll("[data-file-item]");
-          if (!items) return;
+          const container = fileListRef.current;
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+          const curX = e.clientX - rect.left + container.scrollLeft;
+          const curY = e.clientY - rect.top + container.scrollTop;
+          setRubberBand((prev) => prev ? { ...prev, currentX: curX, currentY: curY } : null);
+          // Check intersections with file items using content-space coords
+          // for both the band and the item rects.
+          const items = container.querySelectorAll("[data-file-item]");
           const newSelected = new Set<string>();
-          const bandLeft = Math.min(rubberBand.startX, e.clientX);
-          const bandRight = Math.max(rubberBand.startX, e.clientX);
-          const bandTop = Math.min(rubberBand.startY, e.clientY);
-          const bandBottom = Math.max(rubberBand.startY, e.clientY);
+          const bandLeft = Math.min(rubberBand.startX, curX);
+          const bandRight = Math.max(rubberBand.startX, curX);
+          const bandTop = Math.min(rubberBand.startY, curY);
+          const bandBottom = Math.max(rubberBand.startY, curY);
           items.forEach((item) => {
-            const r = item.getBoundingClientRect();
-            if (r.left < bandRight && r.right > bandLeft && r.top < bandBottom && r.bottom > bandTop) {
+            const ir = item.getBoundingClientRect();
+            const itemLeft = ir.left - rect.left + container.scrollLeft;
+            const itemTop = ir.top - rect.top + container.scrollTop;
+            const itemRight = itemLeft + ir.width;
+            const itemBottom = itemTop + ir.height;
+            if (itemLeft < bandRight && itemRight > bandLeft && itemTop < bandBottom && itemBottom > bandTop) {
               const id = item.getAttribute("data-file-id");
               if (id) newSelected.add(id);
             }
@@ -1140,7 +1151,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           </div>
         )}
 
-        {/* Rubber band selection overlay */}
+        {/* Rubber band selection overlay — positioned in content space
+            (absolute inside the scrolling container) so it scrolls with
+            the list and stays aligned with the selection math. */}
         {rubberBand && (() => {
           const left = Math.min(rubberBand.startX, rubberBand.currentX);
           const top = Math.min(rubberBand.startY, rubberBand.currentY);
@@ -1148,7 +1161,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           const height = Math.abs(rubberBand.currentY - rubberBand.startY);
           if (width < 5 && height < 5) return null;
           return (
-            <div style={{ position: "fixed", left, top, width, height, border: "1px solid var(--accent-green-primary)", background: "rgba(110,210,170,0.08)", borderRadius: 4, pointerEvents: "none", zIndex: 50 }} />
+            <div style={{ position: "absolute", left, top, width, height, border: "1px solid var(--accent-green-primary)", background: "rgba(110,210,170,0.08)", borderRadius: 4, pointerEvents: "none", zIndex: 50 }} />
           );
         })()}
 
