@@ -66,6 +66,26 @@ export async function POST(request: Request) {
     // Delete the one-time SRP session
     await deleteSrpSession(srpSessionId);
 
+    // Suspension check — deliberately AFTER the SRP proof verifies so we
+    // don't expose account-state to unauthenticated callers (no email
+    // enumeration). A caller who reaches this point already proved they
+    // know the password, so revealing "suspended" is fine.
+    if (user.suspended_at) {
+      auditEvent({
+        event: "auth.login.fail",
+        actorUserId: user.id,
+        detail: "suspended",
+      });
+      return NextResponse.json(
+        {
+          error: "Account suspended",
+          suspended: true,
+          reason: user.suspended_reason ?? null,
+        },
+        { status: 403 }
+      );
+    }
+
     // Create JWT session
     await createSession({ userId: user.id, email: user.email });
     auditEvent({ event: "auth.login.success", actorUserId: user.id });

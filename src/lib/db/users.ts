@@ -13,6 +13,12 @@ export interface UserRow {
   recovery_key_hash: string | null;
   recovery_encrypted_data: string | null;
   created_at: string;
+  // Admin fields (phase 7). Set by the admin panel; read by auth paths
+  // to block suspended users on login + recovery.
+  role?: "user" | "admin" | "owner";
+  suspended_at?: string | null;
+  suspended_reason?: string | null;
+  last_login_at?: string | null;
 }
 
 export async function createUser(data: {

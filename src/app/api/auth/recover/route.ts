@@ -129,6 +129,33 @@ export async function POST(request: Request) {
       const userId = tokenPayload.userId as string;
       const email = tokenPayload.email as string;
 
+      // Suspension check — blocks suspended users from bypassing the
+      // ban by resetting their password. Otherwise "admin suspends user"
+      // would be trivially defeated by "user clicks forgot-password".
+      // Checked after the recovery token is consumed so the token is
+      // still single-use and the attacker can't retry.
+      const { supabase } = await import("@/lib/db/supabase");
+      const { data: suspendCheck } = await supabase
+        .from("users")
+        .select("suspended_at, suspended_reason")
+        .eq("id", userId)
+        .single();
+      if (suspendCheck?.suspended_at) {
+        auditEvent({
+          event: "auth.recovery.verify.fail",
+          actorUserId: userId,
+          detail: "suspended",
+        });
+        return NextResponse.json(
+          {
+            error: "Account suspended",
+            suspended: true,
+            reason: suspendCheck.suspended_reason ?? null,
+          },
+          { status: 403 }
+        );
+      }
+
       // Update user credentials
       await updateUserAuth(userId, {
         srpSalt: data.newSrpSalt,

@@ -186,6 +186,51 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
               <span className="font-semibold text-[14px] text-text-primary">SecureWarp</span>
             </div>
 
+            {auth.suspended ? (
+              /* Suspension notice — replaces the login form entirely so
+                 the user can't keep trying to get in. Zero-knowledge
+                 means we never reveal WHY in the password response, but
+                 once the server tells us they're suspended, the UI
+                 surfaces it plainly. */
+              <>
+                <div className="w-12 h-12 rounded-[12px] bg-accent-red/12 flex items-center justify-center mb-5">
+                  <HugeiconsIcon icon={Shield01Icon} size={22} color="var(--accent-red-primary)" />
+                </div>
+                <h2 className="text-[22px] font-semibold text-text-primary tracking-[-0.02em] mb-2">
+                  Account suspended
+                </h2>
+                {/* Intro held to a single line. Longer context (reason
+                    + support link) lives in the sections below so the
+                    layout stays tight regardless of message length. */}
+                <p className="text-text-secondary text-[13px] whitespace-nowrap mb-5">
+                  Your account is suspended.
+                </p>
+                <p className="text-text-secondary text-[13px] leading-relaxed mb-5">
+                  You can&apos;t sign in until an administrator lifts the suspension. Your files
+                  and keys are preserved in the meantime — nothing has been deleted.
+                </p>
+                {auth.suspended.reason && (
+                  <div className="mb-5 p-3 rounded-lg bg-bg-field whitespace-pre-wrap break-words">
+                    <span className="block text-[10px] font-mono uppercase tracking-wider text-text-disabled mb-1">Reason</span>
+                    <span className="text-[12px] text-text-primary">{auth.suspended.reason}</span>
+                  </div>
+                )}
+                <p className="text-text-tertiary text-[12px] leading-relaxed mb-6">
+                  If you believe this is a mistake, reply to your last email from us or contact{" "}
+                  <a href="mailto:support@securewarp.com" className="text-text-link hover:underline">
+                    support@securewarp.com
+                  </a>
+                  .
+                </p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="w-full h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                  Back to sign in
+                </button>
+              </>
+            ) : (
+              <>
             <h2 className="text-[22px] font-semibold text-text-primary tracking-[-0.02em] mb-1">
               {lockCache ? "Unlock your vault" : mode === "login" ? "Welcome back" : "Create account"}
             </h2>
@@ -362,6 +407,8 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                     </button>
                   </p>
                 )}
+              </>
+            )}
               </>
             )}
           </div>

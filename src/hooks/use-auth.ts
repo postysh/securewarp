@@ -36,6 +36,9 @@ interface AuthState {
   step: string | null;
   recoveryKey: string | null;
   userKeys: UserKeys | null;
+  // Set when the server returns 403 with suspended=true. AuthScreen
+  // swaps to a dedicated "account suspended" view when present.
+  suspended: { reason: string | null } | null;
 }
 
 export function useAuth() {
@@ -46,13 +49,16 @@ export function useAuth() {
     step: null,
     recoveryKey: null,
     userKeys: null,
+    suspended: null,
   });
 
   const setStep = (step: string) => setState((s) => ({ ...s, step, error: null }));
   const setError = (error: string) => setState((s) => ({ ...s, error, loading: false, step: null }));
+  const setSuspended = (reason: string | null) =>
+    setState((s) => ({ ...s, suspended: { reason }, loading: false, step: null, error: null }));
 
   async function signup(email: string, password: string, turnstileToken?: string) {
-    setState({ loading: true, error: null, step: "Generating encryption keys...", recoveryKey: null, userKeys: null });
+    setState({ loading: true, error: null, step: "Generating encryption keys...", recoveryKey: null, userKeys: null, suspended: null });
 
     try {
       // 1. Generate Argon2 salt and derive master key
@@ -131,7 +137,7 @@ export function useAuth() {
       // Success — store keys and recovery key for display
       setState({
         loading: false, error: null, step: null, recoveryKey,
-        userKeys: keys,
+        userKeys: keys, suspended: null,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Signup failed";
@@ -140,7 +146,7 @@ export function useAuth() {
   }
 
   async function login(email: string, password: string, turnstileToken?: string) {
-    setState({ loading: true, error: null, step: "Initializing...", recoveryKey: null, userKeys: null });
+    setState({ loading: true, error: null, step: "Initializing...", recoveryKey: null, userKeys: null, suspended: null });
 
     try {
       // 1. Generate client ephemeral
@@ -191,6 +197,13 @@ export function useAuth() {
 
       const verifyData = await verifyRes.json();
       if (!verifyRes.ok) {
+        if (verifyRes.status === 403 && verifyData.suspended) {
+          // Server rejected the login because the account is suspended.
+          // Surface a dedicated state so AuthScreen can render the
+          // suspension notice instead of a generic error banner.
+          setSuspended(verifyData.reason ?? null);
+          return;
+        }
         setError(verifyData.error || "Authentication failed");
         return;
       }
@@ -241,7 +254,7 @@ export function useAuth() {
       unlockCacheKey.fill(0);
 
       // Success — navigate to drive
-      setState({ loading: false, error: null, step: null, recoveryKey: null, userKeys: keys });
+      setState({ loading: false, error: null, step: null, recoveryKey: null, userKeys: keys, suspended: null });
       router.push("/drive");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Login failed";
@@ -250,7 +263,7 @@ export function useAuth() {
   }
 
   async function recover(email: string, recoveryWordsRaw: string, newPassword: string, turnstileToken?: string) {
-    setState({ loading: true, error: null, step: "Verifying recovery key...", recoveryKey: null, userKeys: null });
+    setState({ loading: true, error: null, step: "Verifying recovery key...", recoveryKey: null, userKeys: null, suspended: null });
 
     try {
       // Clean the recovery input — strip numbers, punctuation, extra whitespace, newlines
@@ -335,6 +348,10 @@ export function useAuth() {
 
       const updateResult = await updateRes.json();
       if (!updateRes.ok) {
+        if (updateRes.status === 403 && updateResult.suspended) {
+          setSuspended(updateResult.reason ?? null);
+          return;
+        }
         setError(updateResult.error || "Recovery update failed");
         return;
       }
@@ -369,7 +386,7 @@ export function useAuth() {
       newUnlockCacheKey.fill(0);
 
       // Success — show new recovery key
-      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: recoveredKeys });
+      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: recoveredKeys, suspended: null });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Recovery failed";
       setError(message);
@@ -377,7 +394,7 @@ export function useAuth() {
   }
 
   async function changePassword(oldPassword: string, newPassword: string, email: string) {
-    setState({ loading: true, error: null, step: "Verifying old password...", recoveryKey: null, userKeys: state.userKeys });
+    setState({ loading: true, error: null, step: "Verifying old password...", recoveryKey: null, userKeys: state.userKeys, suspended: null });
 
     try {
       // Get current argon2 salt from session storage keys
@@ -453,7 +470,7 @@ export function useAuth() {
       });
       newUnlockCacheKey.fill(0);
 
-      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: { ...keypairs, email } });
+      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: { ...keypairs, email }, suspended: null });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Password change failed";
       setError(message);
@@ -478,6 +495,7 @@ export function useAuth() {
       step: "Unlocking…",
       recoveryKey: null,
       userKeys: null,
+      suspended: null,
     });
 
     try {
@@ -555,6 +573,7 @@ export function useAuth() {
         step: null,
         recoveryKey: null,
         userKeys: keys,
+        suspended: null,
       });
       router.push("/drive");
     } catch (err: unknown) {
