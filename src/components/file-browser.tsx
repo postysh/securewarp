@@ -941,7 +941,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       {/* Scrollable file list */}
       {!showActivity && <div
         ref={fileListRef}
-        className="flex-1 overflow-y-auto px-3 md:px-5 pt-1 pb-4 flex flex-col relative"
+        className={`flex-1 overflow-y-auto px-3 md:px-5 pt-1 pb-4 flex flex-col relative${rubberBand ? " select-none" : ""}`}
         onClick={() => setContextMenu(null)}
         onContextMenu={(e) => {
           if ((e.target as HTMLElement).closest("[data-file-item]")) return;
@@ -955,6 +955,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           if ((e.target as HTMLElement).closest("button")) return;
           const rect = fileListRef.current?.getBoundingClientRect();
           if (!rect) return;
+          // Stop the browser from starting a native text-selection drag
+          // on empty space. Without this, dragging over filename labels
+          // highlights the text instead of (or in addition to) rubber-
+          // banding the file cards. preventDefault on mousedown is the
+          // standard fix; the `select-none` class above is belt-and-braces.
+          e.preventDefault();
           const x = e.clientX;
           const y = e.clientY;
           setRubberBand({ startX: x, startY: y, currentX: x, currentY: y });
