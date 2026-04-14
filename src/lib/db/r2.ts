@@ -4,22 +4,34 @@ import { AwsClient } from "aws4fetch";
 // Cloudflare Workers-compatible R2 client using aws4fetch (lightweight,
 // Web-standard fetch-based signing). Replaces @aws-sdk/client-s3 which
 // pulls in ~2MB of Node-only code and doesn't run on Workers.
+//
+// Lazy singleton — same reasoning as src/lib/db/supabase.ts:
+// Cloudflare Workers Builds runs `next build` without runtime secrets,
+// and Next's "collect page data" phase imports every route module. If
+// we instantiate AwsClient at module load, the build fails because the
+// AwsClient constructor validates that accessKeyId is present. Deferring
+// to first use sidesteps that entirely.
 
-const r2 = new AwsClient({
-  accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-  service: "s3",
-  region: "auto",
-});
+let _client: AwsClient | null = null;
 
-const BUCKET = process.env.R2_BUCKET!;
-const ENDPOINT = process.env.R2_ENDPOINT!;
+function getClient(): AwsClient {
+  if (_client) return _client;
+  _client = new AwsClient({
+    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    service: "s3",
+    region: "auto",
+  });
+  return _client;
+}
 
 function buildUrl(storageKey: string): string {
+  const endpoint = process.env.R2_ENDPOINT!;
+  const bucket = process.env.R2_BUCKET!;
   // R2 endpoint is typically https://<account>.r2.cloudflarestorage.com
   // The bucket is a path segment, key is the rest of the path.
-  const base = ENDPOINT.endsWith("/") ? ENDPOINT.slice(0, -1) : ENDPOINT;
-  return `${base}/${BUCKET}/${encodeURIComponent(storageKey)}`;
+  const base = endpoint.endsWith("/") ? endpoint.slice(0, -1) : endpoint;
+  return `${base}/${bucket}/${encodeURIComponent(storageKey)}`;
 }
 
 /**
@@ -29,7 +41,7 @@ function buildUrl(storageKey: string): string {
 export async function getUploadUrl(storageKey: string): Promise<string> {
   const url = new URL(buildUrl(storageKey));
   // aws4fetch presigns by signing a URL with X-Amz-* query params.
-  const signed = await r2.sign(
+  const signed = await getClient().sign(
     new Request(url.toString(), { method: "PUT" }),
     { aws: { signQuery: true } }
   );
@@ -45,7 +57,7 @@ export async function getUploadUrl(storageKey: string): Promise<string> {
  */
 export async function getDownloadUrl(storageKey: string): Promise<string> {
   const url = new URL(buildUrl(storageKey));
-  const signed = await r2.sign(
+  const signed = await getClient().sign(
     new Request(url.toString(), { method: "GET" }),
     { aws: { signQuery: true } }
   );
@@ -59,7 +71,7 @@ export async function getDownloadUrl(storageKey: string): Promise<string> {
  */
 export async function deleteBlob(storageKey: string): Promise<void> {
   const url = buildUrl(storageKey);
-  const res = await r2.fetch(url, { method: "DELETE" });
+  const res = await getClient().fetch(url, { method: "DELETE" });
   if (!res.ok && res.status !== 404) {
     throw new Error(`R2 delete failed: ${res.status} ${res.statusText}`);
   }
