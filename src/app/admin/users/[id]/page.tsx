@@ -12,6 +12,7 @@ import PlayCircleIcon from "@hugeicons/core-free-icons/PlayCircleIcon";
 import CloudServerIcon from "@hugeicons/core-free-icons/CloudServerIcon";
 import File01Icon from "@hugeicons/core-free-icons/File01Icon";
 import ComputerIcon from "@hugeicons/core-free-icons/ComputerIcon";
+import { AdminSidebarToggle } from "../../layout";
 
 type Role = "user" | "admin" | "owner";
 type Me = { userId: string; role: Role };
@@ -226,15 +227,16 @@ export default function AdminUserDetailPage() {
   return (
     <>
       {/* Header bar */}
-      <div className="relative flex items-center justify-between px-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="relative flex items-center justify-between pl-3 pr-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <AdminSidebarToggle />
           <Link
             href="/admin/users"
-            className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+            className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer ml-1"
           >
             <HugeiconsIcon icon={ArrowLeft02Icon} size={16} />
           </Link>
-          <span className="text-[13px] text-text-primary font-medium truncate">
+          <span className="text-[13px] text-text-primary font-medium truncate ml-1">
             {detail?.user.email ?? "Loading…"}
           </span>
           {detail?.user.suspendedAt && (

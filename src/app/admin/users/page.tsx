@@ -5,6 +5,7 @@ import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import MoreHorizontalIcon from "@hugeicons/core-free-icons/MoreHorizontalIcon";
+import { AdminSidebarToggle } from "../layout";
 
 type Role = "user" | "admin" | "owner";
 
@@ -174,9 +175,10 @@ export default function AdminUsersPage() {
   return (
     <>
       {/* Header bar */}
-      <div className="relative flex items-center justify-between px-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-[13px] text-text-primary font-medium">Users</span>
+      <div className="relative flex items-center justify-between pl-3 pr-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <AdminSidebarToggle />
+          <span className="text-[13px] text-text-primary font-medium ml-1">Users</span>
           <span className="text-[12px] text-text-tertiary">{total.toLocaleString()} total</span>
         </div>
         <div className="relative shrink-0">

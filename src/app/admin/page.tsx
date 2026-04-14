@@ -14,6 +14,7 @@ import SecurityLockIcon from "@hugeicons/core-free-icons/SecurityLockIcon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import ArrowRight02Icon from "@hugeicons/core-free-icons/ArrowRight02Icon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import { AdminSidebarToggle } from "./layout";
 
 type Stats = {
   totalUsers: number;
@@ -99,9 +100,10 @@ export default function AdminOverviewPage() {
   return (
     <>
       {/* Header bar */}
-      <div className="relative flex items-center justify-between px-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
-        <div className="flex items-center min-w-0">
-          <span className="text-[13px] text-text-primary font-medium">Overview</span>
+      <div className="relative flex items-center justify-between pl-3 pr-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
+        <div className="flex items-center min-w-0 gap-1.5">
+          <AdminSidebarToggle />
+          <span className="text-[13px] text-text-primary font-medium ml-1">Overview</span>
           <span className="ml-3 text-[12px] text-text-tertiary">
             {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
           </span>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -13,16 +13,32 @@ import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import Logout01Icon from "@hugeicons/core-free-icons/Logout01Icon";
 import Sun01Icon from "@hugeicons/core-free-icons/Sun01Icon";
 import Moon02Icon from "@hugeicons/core-free-icons/Moon02Icon";
+import SidebarLeft01Icon from "@hugeicons/core-free-icons/SidebarLeft01Icon";
 import { createPortal } from "react-dom";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
+import { Tooltip } from "@/components/tooltip";
 
 type Me = { userId: string; email: string; role: "admin" | "owner" };
 
 /**
+ * Sidebar open/toggle shared with every page so their in-card header
+ * bar can render the toggle button. Matches the drive's pattern of
+ * putting the toggle next to the breadcrumb.
+ */
+const AdminSidebarContext = createContext<{ open: boolean; toggle: () => void } | null>(null);
+
+export function useAdminSidebar() {
+  const ctx = useContext(AdminSidebarContext);
+  if (!ctx) throw new Error("useAdminSidebar outside AdminSidebarContext");
+  return ctx;
+}
+
+/**
  * Admin app shell. Mirrors the drive shell layout: bg-bg-side outer, a
- * fixed-width sidebar, and main content rendered inside a rounded
- * floating card. Client-side role gate for UX; the real security
- * boundary is the per-route requireAdmin() check server-side.
+ * collapsible sidebar (195px expanded / 52px collapsed), and main
+ * content rendered inside a rounded floating card. Client-side role
+ * gate for UX; the real security boundary is the per-route
+ * requireAdmin() check server-side.
  */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -36,6 +52,22 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  // Persist under a separate key from the drive's `sidebar_open` so the
+  // admin panel remembers its own collapse state independently.
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("admin_sidebar_open") !== "false";
+    }
+    return true;
+  });
+
+  const toggleSidebar = () => {
+    setSidebarOpen((prev) => {
+      const next = !prev;
+      try { localStorage.setItem("admin_sidebar_open", String(next)); } catch { /* */ }
+      return next;
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -67,19 +99,38 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   if (!me) return null;
 
   return (
-    <div className="flex h-full bg-bg-side">
-      {/* Sidebar — inline */}
-      <div className="relative z-20 h-full hidden md:block">
-        <AdminSidebar me={me} />
-      </div>
+    <AdminSidebarContext.Provider value={{ open: sidebarOpen, toggle: toggleSidebar }}>
+      <div className="flex h-full bg-bg-side">
+        {/* Sidebar — inline, hidden on mobile. Admin is desktop-first. */}
+        <div className="relative z-20 h-full hidden md:block">
+          <AdminSidebar me={me} collapsed={!sidebarOpen} />
+        </div>
 
-      {/* Main content card */}
-      <div className="flex-1 p-2 md:pl-0 relative z-10">
-        <div className="h-full rounded-xl border border-border-secondary bg-bg-main overflow-hidden flex flex-col">
-          {children}
+        {/* Main content card */}
+        <div className={`flex-1 p-2 relative z-10 ${sidebarOpen ? "md:pl-0" : ""}`}>
+          <div className="h-full rounded-xl border border-border-secondary bg-bg-main overflow-hidden flex flex-col">
+            {children}
+          </div>
         </div>
       </div>
-    </div>
+    </AdminSidebarContext.Provider>
+  );
+}
+
+/**
+ * Toggle button for the sidebar. Render this inside a page's header bar
+ * so it sits in the same spot the drive puts its sidebar toggle.
+ */
+export function AdminSidebarToggle() {
+  const { toggle } = useAdminSidebar();
+  return (
+    <button
+      onClick={toggle}
+      className="hidden md:block p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+      aria-label="Toggle sidebar"
+    >
+      <HugeiconsIcon icon={SidebarLeft01Icon} size={16} />
+    </button>
   );
 }
 
@@ -89,71 +140,91 @@ const navItems = [
   { icon: SecurityLockIcon, label: "Audit log", href: "/admin/audit", exact: false },
 ];
 
-function AdminSidebar({ me }: { me: Me }) {
+function AdminSidebar({ me, collapsed }: { me: Me; collapsed: boolean }) {
   const pathname = usePathname();
   const isActive = (href: string, exact: boolean) =>
     exact ? pathname === href : pathname === href || pathname.startsWith(href + "/");
 
   return (
     <aside
-      className="h-full flex flex-col shrink-0 bg-bg-side select-none overflow-visible"
-      style={{ width: 195, minWidth: 195 }}
+      className="h-full flex flex-col shrink-0 bg-bg-side select-none overflow-visible transition-all duration-200 ease-in-out"
+      style={{ width: collapsed ? 52 : 195, minWidth: collapsed ? 52 : 195 }}
     >
       {/* Brand / admin label */}
-      <div className="shrink-0 px-3 py-3">
-        <div className="flex items-center gap-2.5 px-2.5 h-[36px]">
+      <div className={`shrink-0 transition-all duration-200 ${collapsed ? "flex justify-center py-3" : "px-3 py-3"}`}>
+        <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2.5 px-2.5"} h-[36px]`}>
           <div className="w-6 h-6 rounded-[6px] bg-bg-overlay-tertiary flex items-center justify-center shrink-0">
             <HugeiconsIcon icon={Shield01Icon} size={14} color="var(--accent-green-primary)" />
           </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-[12px] font-semibold text-text-primary">SecureWarp</span>
-            <span className="text-[10px] font-mono uppercase tracking-wider text-text-disabled mt-0.5">Admin</span>
-          </div>
+          {!collapsed && (
+            <div className="flex flex-col leading-none">
+              <span className="text-[12px] font-semibold text-text-primary">SecureWarp</span>
+              <span className="text-[10px] font-mono uppercase tracking-wider text-text-disabled mt-0.5">Admin</span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 py-1 px-2 overflow-y-auto overflow-x-hidden">
-        <div className="flex flex-col gap-[2px]">
+      <nav className={`flex-1 py-1 overflow-y-auto overflow-x-hidden transition-all duration-200 ${collapsed ? "px-[10px]" : "px-2"}`}>
+        <div className={`flex flex-col gap-[2px] ${collapsed ? "items-center" : ""}`}>
           {navItems.map((item) => {
             const active = isActive(item.href, item.exact);
-            return (
+            const link = (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center rounded-[6px] transition-colors cursor-pointer w-full gap-3 px-2.5 h-[32px] text-[13px] ${
+                className={`flex items-center rounded-[6px] transition-colors cursor-pointer ${
+                  collapsed
+                    ? "w-8 h-8 justify-center"
+                    : "w-full gap-3 px-2.5 h-[32px] text-[13px]"
+                } ${
                   active
                     ? "bg-cta-nav-active text-text-primary font-medium"
                     : "text-text-secondary hover:bg-cta-nav-hover"
                 }`}
               >
                 <HugeiconsIcon icon={item.icon} size={18} />
-                <span className="whitespace-nowrap">{item.label}</span>
+                {!collapsed && <span className="whitespace-nowrap">{item.label}</span>}
               </Link>
+            );
+            return collapsed ? (
+              <Tooltip key={item.href} label={item.label}>{link}</Tooltip>
+            ) : (
+              link
             );
           })}
         </div>
 
-        <div className="mt-3 pt-3 border-t border-border-tertiary">
-          <Link
-            href="/drive"
-            className="flex items-center rounded-[6px] transition-colors cursor-pointer w-full gap-3 px-2.5 h-[32px] text-[13px] text-text-secondary hover:bg-cta-nav-hover"
-          >
-            <HugeiconsIcon icon={ArrowLeft02Icon} size={18} />
-            <span className="whitespace-nowrap">Back to drive</span>
-          </Link>
+        <div className={`mt-3 pt-3 border-t border-border-tertiary ${collapsed ? "flex flex-col items-center" : ""}`}>
+          {(() => {
+            const backLink = (
+              <Link
+                href="/drive"
+                className={`flex items-center rounded-[6px] transition-colors cursor-pointer ${
+                  collapsed
+                    ? "w-8 h-8 justify-center"
+                    : "w-full gap-3 px-2.5 h-[32px] text-[13px]"
+                } text-text-secondary hover:bg-cta-nav-hover`}
+              >
+                <HugeiconsIcon icon={ArrowLeft02Icon} size={18} />
+                {!collapsed && <span className="whitespace-nowrap">Back to drive</span>}
+              </Link>
+            );
+            return collapsed ? <Tooltip label="Back to drive">{backLink}</Tooltip> : backLink;
+          })()}
         </div>
       </nav>
 
       {/* User */}
-      <div className="py-2 px-2">
-        <AdminUserMenu me={me} />
+      <div className={`py-2 transition-all duration-200 ${collapsed ? "px-[10px]" : "px-2"}`}>
+        <AdminUserMenu me={me} collapsed={collapsed} />
       </div>
     </aside>
   );
 }
 
-function AdminUserMenu({ me }: { me: Me }) {
+function AdminUserMenu({ me, collapsed }: { me: Me; collapsed: boolean }) {
   const { theme, toggle } = useTheme();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -162,27 +233,41 @@ function AdminUserMenu({ me }: { me: Me }) {
   useEffect(() => {
     if (!open || !btnEl) return;
     const rect = btnEl.getBoundingClientRect();
-    setPos({ top: rect.top - 140, left: rect.left });
+    if (collapsed) {
+      setPos({ top: rect.bottom - 140, left: rect.right + 8 });
+    } else {
+      setPos({ top: rect.top - 140, left: rect.left });
+    }
     const handler = (e: MouseEvent) => {
       if (btnEl && !btnEl.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open, btnEl]);
+  }, [open, btnEl, collapsed]);
 
-  return (
-    <div>
-      <button
-        ref={setBtnEl}
-        onClick={() => setOpen((o) => !o)}
-        className="w-full gap-3 px-2.5 h-[36px] rounded-[6px] transition-colors cursor-pointer flex items-center text-[13px] text-text-secondary hover:bg-cta-nav-hover"
-      >
-        <HugeiconsIcon icon={UserCircleIcon} size={18} />
+  const button = (
+    <button
+      ref={setBtnEl}
+      onClick={() => setOpen((o) => !o)}
+      className={`rounded-[6px] transition-colors cursor-pointer flex items-center ${
+        collapsed
+          ? "w-8 h-8 justify-center text-icon-tertiary hover:bg-cta-nav-hover"
+          : "w-full gap-3 px-2.5 h-[36px] text-[13px] text-text-secondary hover:bg-cta-nav-hover"
+      }`}
+    >
+      <HugeiconsIcon icon={UserCircleIcon} size={18} />
+      {!collapsed && (
         <div className="flex flex-col leading-none items-start min-w-0">
           <span className="text-[12px] font-medium text-text-primary truncate max-w-[120px]">{me.email}</span>
           <span className="text-[10px] font-mono uppercase tracking-wider text-text-disabled mt-0.5">{me.role}</span>
         </div>
-      </button>
+      )}
+    </button>
+  );
+
+  return (
+    <div className={collapsed ? "flex justify-center" : ""}>
+      {collapsed ? <Tooltip label={me.email}>{button}</Tooltip> : button}
       {open && typeof window !== "undefined" && createPortal(
         <div
           className="fixed z-[9999] w-[180px] rounded-[8px] bg-bg-l3 border border-border-primary overflow-hidden"

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import ArrowRight02Icon from "@hugeicons/core-free-icons/ArrowRight02Icon";
+import { AdminSidebarToggle } from "../layout";
 
 type Entry = {
   kind: "security" | "admin";
@@ -95,9 +96,10 @@ export default function AdminAuditPage() {
   return (
     <>
       {/* Header bar */}
-      <div className="relative flex items-center justify-between px-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-[13px] text-text-primary font-medium">Audit log</span>
+      <div className="relative flex items-center justify-between pl-3 pr-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <AdminSidebarToggle />
+          <span className="text-[13px] text-text-primary font-medium ml-1">Audit log</span>
           <span className="text-[12px] text-text-tertiary">Security events and admin actions</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
