@@ -39,6 +39,16 @@ function formatDate(iso: string | null): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Calendar date used for stable joined-on timestamps. "Apr 14, 2026".
+function formatFullDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 // Deterministic color-for-email: same email always maps to the same hue.
 function colorForEmail(email: string): string {
   let hash = 0;
@@ -209,11 +219,10 @@ export default function AdminUsersPage() {
             <div className="w-[100px] hidden md:flex justify-end">
               <span className="text-[11px] font-mono uppercase text-text-disabled">Last login</span>
             </div>
-            <div className="w-[90px] hidden lg:flex justify-end">
+            <div className="w-[110px] hidden lg:flex justify-end">
               <span className="text-[11px] font-mono uppercase text-text-disabled">Joined</span>
             </div>
           </div>
-          <div className="w-[44px] shrink-0" />
         </div>
       )}
 
@@ -291,11 +300,11 @@ export default function AdminUsersPage() {
                   <span className="text-[12px] text-text-disabled">{formatDate(u.lastLoginAt)}</span>
                 </div>
                 <div
-                  className={`w-[90px] hidden lg:flex justify-end transition-opacity ${
+                  className={`w-[110px] hidden lg:flex justify-end transition-opacity ${
                     menuOpen === u.id ? "opacity-0" : actionable ? "group-hover:opacity-0" : ""
                   }`}
                 >
-                  <span className="text-[12px] text-text-disabled">{formatDate(u.createdAt)}</span>
+                  <span className="text-[12px] text-text-disabled">{formatFullDate(u.createdAt)}</span>
                 </div>
 
                 {/* Hover actions */}
