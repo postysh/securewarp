@@ -55,11 +55,14 @@ export async function GET(request: Request) {
       events = data || [];
     }
 
-    // Also fetch workspace-specific events (transfers, etc.)
+    // Also fetch workspace-specific events (transfers, role changes, etc.)
+    // Use exact containment check — the workspace ID is a UUID validated by Zod,
+    // so no pattern injection risk, but we escape wildcards defensively.
+    const escapedId = parsed.data.workspaceId.replace(/[%_]/g, "\\$&");
     const { data: wsEvents } = await supabase
       .from("security_audit")
       .select("id, event_type, actor_user_id, target_user_id, target_file_id, detail, occurred_at")
-      .like("detail", `%${parsed.data.workspaceId}%`)
+      .like("detail", `%${escapedId}%`)
       .order("occurred_at", { ascending: false })
       .limit(20);
 

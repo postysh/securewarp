@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { timingSafeEqual } from "crypto";
+import { safeCompare, utf8ToBytes } from "@/lib/auth/safe-compare";
 import { supabase } from "@/lib/db/supabase";
 import { deleteBlob } from "@/lib/db/r2";
 import { logError } from "@/lib/log";
@@ -20,11 +20,11 @@ function authorized(request: Request): boolean {
   const auth = request.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) return false;
-  const a = Buffer.from(token);
+  const a = utf8ToBytes(token);
 
   for (const expected of candidates) {
-    const b = Buffer.from(expected);
-    if (a.length === b.length && timingSafeEqual(a, b)) return true;
+    const b = utf8ToBytes(expected);
+    if (safeCompare(a, b)) return true;
   }
   return false;
 }

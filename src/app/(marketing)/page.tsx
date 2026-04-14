@@ -76,7 +76,7 @@ export default function Home() {
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "flex-end", padding: "24px 32px 0", position: "relative", zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <Link href="/login" style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Login</Link>
-            <Link href="/register" style={{ fontSize: 13, fontWeight: 500, color: GREEN, background: "white", padding: "6px 16px", borderRadius: 8, textDecoration: "none" }}>Get Started</Link>
+            <Link href="/signup" style={{ fontSize: 13, fontWeight: 500, color: GREEN, background: "white", padding: "6px 16px", borderRadius: 8, textDecoration: "none" }}>Get Started</Link>
           </div>
         </div>
 
@@ -93,7 +93,7 @@ export default function Home() {
           <p style={{ fontSize: 16, color: "rgba(255,255,255,0.6)", lineHeight: 1.6, margin: "0 0 28px", maxWidth: 460 }}>
             End-to-end encrypted cloud storage where only you hold the keys. Not us. Not anyone.
           </p>
-          <Link href="/register" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: GREEN, background: "white", borderRadius: 10, textDecoration: "none" }}>
+          <Link href="/signup" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: GREEN, background: "white", borderRadius: 10, textDecoration: "none" }}>
             Start for free
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
           </Link>
@@ -652,7 +652,7 @@ export default function Home() {
               Free forever. 20 GB encrypted storage. No credit card.
             </p>
             <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
-              <Link href="/register" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "14px 32px", fontSize: 15, fontWeight: 600, color: "#111", background: "white", borderRadius: 12, textDecoration: "none" }}>
+              <Link href="/signup" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "14px 32px", fontSize: 15, fontWeight: 600, color: "#111", background: "white", borderRadius: 12, textDecoration: "none" }}>
                 Get started free
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
               </Link>

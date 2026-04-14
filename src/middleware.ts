@@ -7,7 +7,7 @@ const SESSION_COOKIE = "securewarp_session";
 const protectedRoutes = ["/drive"];
 const authRoutes = ["/login", "/signup"];
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get(SESSION_COOKIE)?.value;
 
@@ -37,6 +37,11 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
+// Using the `middleware.ts` convention (edge runtime) rather than Next 16's
+// `proxy.ts` (Node runtime only). @opennextjs/cloudflare requires edge
+// middleware, and `jose` + `jwtVerify` work fine on edge since they rely on
+// Web Crypto. The `middleware` convention is deprecated-but-supported in
+// Next 16; revisit if a future OpenNext version supports Node proxy.
 export const config = {
   matcher: ["/drive/:path*", "/login", "/signup"],
 };

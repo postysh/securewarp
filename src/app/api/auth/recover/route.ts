@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { SignJWT, jwtVerify } from "jose";
-import { timingSafeEqual } from "crypto";
+import { safeCompare, base64ToBytes } from "@/lib/auth/safe-compare";
 import { getUserByEmail, updateUserAuth } from "@/lib/db/users";
 import { createSession } from "@/lib/auth/session";
 import { checkRateLimit, resetRateLimit } from "@/lib/auth/rate-limit";
@@ -74,9 +74,9 @@ export async function POST(request: Request) {
       }
 
       // Timing-safe comparison to prevent side-channel attacks
-      const storedHash = Buffer.from(user.recovery_key_hash, "base64");
-      const providedHash = Buffer.from(recoveryKeyHash, "base64");
-      if (storedHash.length !== providedHash.length || !timingSafeEqual(storedHash, providedHash)) {
+      const storedHash = base64ToBytes(user.recovery_key_hash);
+      const providedHash = base64ToBytes(recoveryKeyHash);
+      if (!safeCompare(storedHash, providedHash)) {
         auditEvent({
           event: "auth.recovery.verify.fail",
           actorUserId: user.id,

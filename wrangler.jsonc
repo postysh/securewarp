@@ -1,0 +1,53 @@
+/**
+ * Cloudflare Workers deployment config for SecureWarp.
+ *
+ * Built via `@opennextjs/cloudflare` — `npm run deploy` runs
+ * `opennextjs-cloudflare build && opennextjs-cloudflare deploy`, which
+ * emits `.open-next/worker.js` and uploads it using this config.
+ *
+ * Secrets (SESSION_SECRET, SUPABASE_*, R2_*, TURNSTILE_*, SENTRY_*,
+ * CLEANUP_SECRET, CRON_SECRET) are set via `wrangler secret put <NAME>`,
+ * NOT here — this file is committed to git.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "securewarp",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-03-25",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  // Static assets emitted by OpenNext build (public/ + Next.js static files).
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".open-next/assets"
+  },
+
+  // Observability — logs visible via `wrangler tail` and in the Cloudflare
+  // dashboard. Sampled at 100% for now; dial down if log volume blows up.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  // R2 bucket binding for encrypted file blobs. The bucket already exists
+  // in the Cloudflare account under the name "securewarp". We still use
+  // presigned URLs (via aws4fetch in src/lib/db/r2.ts) so direct browser
+  // uploads keep working — the binding is wired up for future server-side
+  // R2 access if we ever need it.
+  "r2_buckets": [
+    {
+      "binding": "R2_BUCKET_BINDING",
+      "bucket_name": "securewarp"
+    }
+  ]
+
+  // NOTE on scheduled cleanup: Cloudflare Cron Triggers invoke a Worker's
+  // `scheduled()` handler, not an HTTP route, and OpenNext doesn't wire
+  // Next.js API routes into that handler. To keep `/api/admin/cleanup-stale`
+  // running, either:
+  //   (a) hit it from an external scheduler (e.g. another tiny Worker or
+  //       cron-job.org) sending `Authorization: Bearer <CLEANUP_SECRET>`; or
+  //   (b) add a companion Worker that runs scheduled() and fetches the URL.
+  // Not wiring `triggers.crons` here because the default would 404 — the
+  // route is at `/api/admin/cleanup-stale`, not at `scheduled()`.
+}
