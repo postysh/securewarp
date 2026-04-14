@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { TurnstileChallenge, isTurnstileEnabled } from "./turnstile-challenge";
 import {
@@ -220,12 +221,12 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
                   New accounts are temporarily disabled. Check back later, but existing users
                   can still sign in.
                 </p>
-                <button
-                  onClick={() => router.push("/login")}
-                  className="w-full h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer"
+                <Link
+                  href="/login"
+                  className="block w-full h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer flex items-center justify-center"
                 >
                   Back to sign in
-                </button>
+                </Link>
               </>
             ) : auth.suspended ? (
               /* Suspension notice — replaces the login form entirely so
@@ -429,9 +430,9 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
               <>
                 <p className="mt-5 text-center text-[13px] text-text-tertiary">
                   {mode === "login" ? (
-                    <>No account? <button onClick={() => router.push("/signup")} className="text-text-link hover:underline font-medium cursor-pointer">Sign up</button></>
+                    <>No account? <Link href="/signup" className="text-text-link hover:underline font-medium cursor-pointer">Sign up</Link></>
                   ) : (
-                    <>Have an account? <button onClick={() => router.push("/login")} className="text-text-link hover:underline font-medium cursor-pointer">Sign in</button></>
+                    <>Have an account? <Link href="/login" className="text-text-link hover:underline font-medium cursor-pointer">Sign in</Link></>
                   )}
                 </p>
 
