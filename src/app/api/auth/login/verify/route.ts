@@ -70,6 +70,16 @@ export async function POST(request: Request) {
     await createSession({ userId: user.id, email: user.email });
     auditEvent({ event: "auth.login.success", actorUserId: user.id });
 
+    // Stamp last_login_at for the admin dashboard's "active users" metric.
+    // Fire-and-forget: a failed stamp must never break the login flow — the
+    // auth was already successful, this is just telemetry. Import inline to
+    // avoid pulling supabase into any client-side code paths that transitively
+    // import this route for type-checking.
+    void (async () => {
+      const { supabase } = await import("@/lib/db/supabase");
+      await supabase.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", user.id);
+    })();
+
     // Successful login — clear the rate limit bucket so genuine
     // users can come back an hour from now without waiting. An
     // attacker who's mid-spray never hits this path because their

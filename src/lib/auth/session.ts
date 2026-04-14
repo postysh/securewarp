@@ -59,19 +59,23 @@ export async function getSession(): Promise<SessionPayload | null> {
   try {
     const { payload } = await jwtVerify(token, getSecret());
     const jti = payload.jti as string | undefined;
+    const userId = payload.userId as string;
 
-    // Verify the session hasn't been revoked
+    // Verify the session hasn't been revoked AND the user isn't suspended.
+    // Suspending a user doesn't immediately delete their sessions — this
+    // check makes the ban effective on the next request regardless of how
+    // many active JWTs they hold.
     if (jti) {
-      const { data } = await supabase
-        .from("sessions")
-        .select("jti")
-        .eq("jti", jti)
-        .single();
-      if (!data) return null; // Session was revoked
+      const [{ data: sess }, { data: user }] = await Promise.all([
+        supabase.from("sessions").select("jti").eq("jti", jti).single(),
+        supabase.from("users").select("suspended_at").eq("id", userId).single(),
+      ]);
+      if (!sess) return null; // Session was revoked
+      if (user?.suspended_at) return null; // User is suspended
     }
 
     return {
-      userId: payload.userId as string,
+      userId,
       email: payload.email as string,
     };
   } catch {

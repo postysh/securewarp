@@ -360,6 +360,39 @@ BEGIN
   UNION ALL
   SELECT fc.file_id, fc.storage_key FROM file_chunks fc INNER JOIN subtree s ON fc.file_id = s.id;
 END $$;
+
+-- Phase 7: admin panel. `role` gates access to /admin routes; `owner` can
+-- do everything, `admin` can suspend/view, `user` is the default. Suspended
+-- users are blocked at session check — their JWT is valid but the session
+-- helper returns null, effectively logging them out everywhere. `last_login_at`
+-- populates the admin users table and powers "active users" metrics.
+ALTER TABLE users
+  ADD COLUMN role text NOT NULL DEFAULT 'user'
+    CHECK (role IN ('user', 'admin', 'owner')),
+  ADD COLUMN suspended_at timestamptz,
+  ADD COLUMN suspended_reason text,
+  ADD COLUMN last_login_at timestamptz;
+
+CREATE INDEX users_role_idx ON users (role) WHERE role <> 'user';
+CREATE INDEX users_suspended_idx ON users (suspended_at) WHERE suspended_at IS NOT NULL;
+
+-- Seed yourself as owner (replace with your email, run once after migrating).
+-- UPDATE users SET role = 'owner' WHERE email = 'you@example.com';
+
+-- Admin audit log — separate from `security_audit` so admin actions can't
+-- be fabricated alongside user actions, and so admin forensics survive even
+-- if security_audit is ever pruned. Append-only; never delete rows here.
+CREATE TABLE admin_audit (
+  id bigserial PRIMARY KEY,
+  occurred_at timestamptz NOT NULL DEFAULT now(),
+  actor_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  actor_role text NOT NULL,
+  action text NOT NULL,
+  target_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  detail text
+);
+CREATE INDEX admin_audit_occurred_at_idx ON admin_audit (occurred_at DESC);
+CREATE INDEX admin_audit_target_user_idx ON admin_audit (target_user_id, occurred_at DESC);
 ```
 
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from
