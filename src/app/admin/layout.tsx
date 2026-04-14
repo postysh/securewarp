@@ -195,29 +195,26 @@ function AdminSidebar({ me, collapsed }: { me: Me; collapsed: boolean }) {
             );
           })}
         </div>
-
-        <div className={`mt-3 pt-3 border-t border-border-tertiary ${collapsed ? "flex flex-col items-center" : ""}`}>
-          {(() => {
-            const backLink = (
-              <Link
-                href="/drive"
-                className={`flex items-center rounded-[6px] transition-colors cursor-pointer ${
-                  collapsed
-                    ? "w-8 h-8 justify-center"
-                    : "w-full gap-3 px-2.5 h-[32px] text-[13px]"
-                } text-text-secondary hover:bg-cta-nav-hover`}
-              >
-                <HugeiconsIcon icon={ArrowLeft02Icon} size={18} />
-                {!collapsed && <span className="whitespace-nowrap">Back to drive</span>}
-              </Link>
-            );
-            return collapsed ? <Tooltip label="Back to drive">{backLink}</Tooltip> : backLink;
-          })()}
-        </div>
       </nav>
 
-      {/* User */}
+      {/* Footer: back-to-drive + user menu */}
       <div className={`py-2 transition-all duration-200 ${collapsed ? "px-[10px]" : "px-2"}`}>
+        {(() => {
+          const backLink = (
+            <Link
+              href="/drive"
+              className={`flex items-center rounded-[6px] transition-colors cursor-pointer ${
+                collapsed
+                  ? "w-8 h-8 justify-center"
+                  : "w-full gap-3 px-2.5 h-[32px] text-[13px]"
+              } text-text-secondary hover:bg-cta-nav-hover mb-1`}
+            >
+              <HugeiconsIcon icon={ArrowLeft02Icon} size={18} />
+              {!collapsed && <span className="whitespace-nowrap">Back to drive</span>}
+            </Link>
+          );
+          return collapsed ? <Tooltip label="Back to drive">{backLink}</Tooltip> : backLink;
+        })()}
         <AdminUserMenu me={me} collapsed={collapsed} />
       </div>
     </aside>
