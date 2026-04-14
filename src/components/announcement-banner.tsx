@@ -5,6 +5,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
 import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
+import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 
 type Severity = "info" | "warning" | "critical";
 
@@ -16,17 +18,17 @@ type Announcement = {
 };
 
 /**
- * Dismissible strip rendered at the top of the drive. Shows every
- * published, not-yet-expired, not-yet-dismissed announcement for the
- * current user. Click the ✕ to persist a dismissal; the server remembers
- * it so the announcement won't reappear on other devices either.
+ * Dismissible strip at the top of the drive.
  *
- * If there's more than one live announcement, they stack — most
- * recent at the top (the active endpoint already sorts by published_at
- * desc).
+ * Shows one announcement at a time as a carousel. Server caps the list
+ * at 3 (newest-first). Left/right arrows and a position indicator
+ * appear when there's more than one active announcement. Dismissing
+ * the visible one persists a server-side dismissal and auto-advances
+ * (or hides the strip if it was the last).
  */
 export function AnnouncementBanner() {
   const [items, setItems] = useState<Announcement[] | null>(null);
+  const [index, setIndex] = useState(0);
 
   useEffect(() => {
     fetch("/api/announcements/active")
@@ -35,54 +37,84 @@ export function AnnouncementBanner() {
       .catch(() => setItems([]));
   }, []);
 
-  const dismiss = async (id: string) => {
-    // Optimistic — hide immediately even if the POST is slow. If the
-    // request fails, we re-show on next page load (no corrupt state
-    // because the server is the source of truth).
-    setItems((curr) => (curr ? curr.filter((a) => a.id !== id) : curr));
+  const current = items && items.length > 0 ? items[Math.min(index, items.length - 1)] : null;
+
+  const dismiss = async () => {
+    if (!current) return;
+    // Optimistic: drop it locally immediately. Server is source of truth
+    // so a failed POST just means the banner re-appears next page load.
+    const id = current.id;
+    setItems((curr) => {
+      if (!curr) return curr;
+      const next = curr.filter((a) => a.id !== id);
+      // Keep the displayed index valid: if we dismissed the last item
+      // in the list, step back one so the previous one becomes visible.
+      setIndex((i) => Math.min(i, Math.max(next.length - 1, 0)));
+      return next;
+    });
     try {
       await fetch(`/api/announcements/${id}/dismiss`, { method: "POST" });
     } catch {
-      /* swallow — see above */
+      /* swallow */
     }
   };
 
-  if (!items || items.length === 0) return null;
+  if (!items || items.length === 0 || !current) return null;
+
+  const styles = severityStyle(current.severity);
+  const total = items.length;
+  const hasMultiple = total > 1;
 
   return (
-    <div className="shrink-0 flex flex-col gap-1 p-1.5 border-b border-border-secondary bg-bg-main">
-      {items.map((a) => (
-        <BannerRow key={a.id} item={a} onDismiss={() => dismiss(a.id)} />
-      ))}
-    </div>
-  );
-}
-
-function BannerRow({ item, onDismiss }: { item: Announcement; onDismiss: () => void }) {
-  const styles = severityStyle(item.severity);
-
-  return (
-    <div
-      className="flex items-start gap-3 px-4 py-2.5 rounded-[10px]"
-      style={{ background: styles.bg, border: `1px solid ${styles.border}` }}
-    >
-      <HugeiconsIcon
-        icon={item.severity === "info" ? InformationCircleIcon : Alert02Icon}
-        size={16}
-        color={styles.icon}
-        className="mt-0.5 shrink-0"
-      />
-      <div className="flex-1 min-w-0 text-[13px] leading-[1.5] whitespace-pre-wrap break-words">
-        <span className="font-semibold text-text-primary">{item.title}</span>
-        <span className="text-text-secondary"> — {item.body}</span>
-      </div>
-      <button
-        onClick={onDismiss}
-        aria-label="Dismiss"
-        className="shrink-0 p-1 rounded-md text-icon-tertiary hover:text-text-primary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+    <div className="shrink-0 p-1.5 border-b border-border-secondary bg-bg-main">
+      <div
+        className="flex items-center gap-3 px-4 py-2.5 rounded-[10px]"
+        style={{ background: styles.bg, border: `1px solid ${styles.border}` }}
       >
-        <HugeiconsIcon icon={Cancel01Icon} size={13} />
-      </button>
+        <HugeiconsIcon
+          icon={current.severity === "info" ? InformationCircleIcon : Alert02Icon}
+          size={16}
+          color={styles.icon}
+          className="shrink-0"
+        />
+        <div className="flex-1 min-w-0 text-[13px] leading-[1.5] whitespace-pre-wrap break-words">
+          <span className="font-semibold text-text-primary">{current.title}</span>
+          <span className="text-text-secondary"> — {current.body}</span>
+        </div>
+
+        {/* Carousel controls — only render when there's something to
+            navigate through. Position indicator sits between arrows
+            so the user always knows where they are in the queue. */}
+        {hasMultiple && (
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => setIndex((i) => (i - 1 + total) % total)}
+              aria-label="Previous announcement"
+              className="p-1 rounded-md text-icon-tertiary hover:text-text-primary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={ArrowLeft01Icon} size={13} />
+            </button>
+            <span className="text-[11px] font-mono text-text-tertiary tabular-nums min-w-[28px] text-center">
+              {index + 1}/{total}
+            </span>
+            <button
+              onClick={() => setIndex((i) => (i + 1) % total)}
+              aria-label="Next announcement"
+              className="p-1 rounded-md text-icon-tertiary hover:text-text-primary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={ArrowRight01Icon} size={13} />
+            </button>
+          </div>
+        )}
+
+        <button
+          onClick={dismiss}
+          aria-label="Dismiss"
+          className="shrink-0 p-1 rounded-md text-icon-tertiary hover:text-text-primary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+        >
+          <HugeiconsIcon icon={Cancel01Icon} size={13} />
+        </button>
+      </div>
     </div>
   );
 }

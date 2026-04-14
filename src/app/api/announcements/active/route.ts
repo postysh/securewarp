@@ -43,12 +43,17 @@ export async function GET() {
       if (!prev || prev < d.dismissed_at) dismissedAt.set(d.announcement_id, d.dismissed_at);
     }
 
-    const active = (liveQ.data ?? []).filter((a) => {
-      if (a.expires_at && a.expires_at < nowIso) return false;
-      const dAt = dismissedAt.get(a.id);
-      if (dAt && a.published_at && dAt >= a.published_at) return false;
-      return true;
-    });
+    const active = (liveQ.data ?? [])
+      .filter((a) => {
+        if (a.expires_at && a.expires_at < nowIso) return false;
+        const dAt = dismissedAt.get(a.id);
+        if (dAt && a.published_at && dAt >= a.published_at) return false;
+        return true;
+      })
+      // Cap at 3 so no matter how much the admin publishes, the user
+      // never loses their whole screen to stacked banners. Newest-first
+      // ordering is already applied by the query above.
+      .slice(0, 3);
 
     return NextResponse.json({ announcements: active });
   } catch (err) {
