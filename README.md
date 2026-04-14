@@ -435,6 +435,23 @@ CREATE TABLE announcement_dismissals (
 );
 CREATE INDEX announcement_dismissals_user_idx
   ON announcement_dismissals (user_id);
+
+-- Feature flags / app settings. Key/value so new flags don't need a
+-- migration. Known keys live in src/lib/flags.ts with fallback
+-- defaults; the admin UI at /admin/flags surfaces the DB rows.
+CREATE TABLE app_settings (
+  key text PRIMARY KEY,
+  value text NOT NULL,
+  description text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  updated_by_email text
+);
+INSERT INTO app_settings (key, value, description) VALUES
+  ('signups_enabled', 'true',
+   'When off, /api/auth/register returns 503. Useful to block signups during an abuse wave while keeping existing users logged in.'),
+  ('uploads_enabled', 'true',
+   'When off, /api/files/chunk-upload returns 503 so users can still log in and browse but can''t create new files. Use during R2 outages.');
 ```
 
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from

@@ -61,9 +61,22 @@ session info) is fair game.
 - [x] `announcements` + `announcement_dismissals` tables. Severity
       info/warning/critical, optional expiry.
 - [x] `<AnnouncementBanner>` rendered at the top of the drive shell.
-      Severity-colored strip, dismiss ✕ persists server-side so it
-      doesn't reappear on other devices.
+      Severity-colored strip, carousel navigation (cap 3 visible),
+      dismiss ✕ persists server-side so it doesn't reappear on other
+      devices. Republish re-shows for previously dismissed users
+      (dismissed_at < published_at logic).
 - [x] `GET /api/announcements/active` + `POST /api/announcements/[id]/dismiss`
+
+**Feature flags**
+- [x] `app_settings` (key/value text table, seeded with
+      `signups_enabled` and `uploads_enabled` defaults)
+- [x] Catalog in `src/lib/flags.ts` with `getBoolFlag()` helper; defaults
+      live in code so a missing DB row gracefully falls back
+- [x] `/admin/flags` page with toggle switches, "overridden" badge when
+      value differs from catalog default, last-updated trail
+- [x] `signups_enabled` gates `/api/auth/register` (503 when off)
+- [x] `uploads_enabled` gates `/api/files/chunk-upload` init step
+      (in-flight chunks continue so users don't end up with orphans)
 
 **Per-row actions (users list + detail page)**
 - [x] Suspend (with user-facing reason, labeled "shown to the user")
@@ -98,9 +111,6 @@ session info) is fair game.
   - > 50 public links created in 24h (phishing campaign signal)
   - Failed-login rate > 20/hour on one email
   - Mass-delete operations (account compromise signal)
-- [ ] **Feature flags.** `app_settings` table with booleans like
-      `signups_enabled`, `uploads_enabled`, `invite_only_mode`. Toggle
-      from admin UI without a deploy. Critical for incident response.
 - [ ] **Per-user quota overrides.** `users.storage_quota_bytes` column,
       nullable. Admin can bump a specific user's quota without changing
       their plan.

@@ -5,6 +5,7 @@ import { createFile, createFileKey, getEffectivePermission } from "@/lib/db/file
 import { getUploadUrl } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
 import { assertWithinQuota } from "@/lib/db/quota";
+import { getBoolFlag } from "@/lib/flags";
 import { logError } from "@/lib/log";
 
 // Step 1: Initialize chunked upload — creates file record, returns presigned URLs for all chunks
@@ -60,6 +61,17 @@ export async function POST(request: Request) {
 
     // ─── INIT ───
     if (body.action === "init") {
+      // Feature-flag gate. Admin can freeze new uploads (e.g. during an
+      // R2 outage) without redeploying. We only gate `init` — in-flight
+      // chunks for an already-initialized file keep working, so users
+      // don't end up with half-uploaded orphans during a toggle.
+      if (!(await getBoolFlag("uploads_enabled"))) {
+        return NextResponse.json(
+          { error: "Uploads are temporarily disabled. Please try again later." },
+          { status: 503 }
+        );
+      }
+
       const parsed = InitSchema.safeParse(body);
       if (!parsed.success) {
         return NextResponse.json({ error: "Invalid data" }, { status: 400 });

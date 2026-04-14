@@ -8,6 +8,7 @@ import DashboardCircleIcon from "@hugeicons/core-free-icons/DashboardCircleIcon"
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import SecurityLockIcon from "@hugeicons/core-free-icons/SecurityLockIcon";
 import MegaphoneIcon01 from "@hugeicons/core-free-icons/Megaphone01Icon";
+import Flag03Icon from "@hugeicons/core-free-icons/Flag03Icon";
 import ArrowLeft02Icon from "@hugeicons/core-free-icons/ArrowLeft02Icon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
@@ -139,6 +140,7 @@ const navItems = [
   { icon: DashboardCircleIcon, label: "Overview", href: "/admin", exact: true },
   { icon: UserGroupIcon, label: "Users", href: "/admin/users", exact: false },
   { icon: MegaphoneIcon01, label: "Announcements", href: "/admin/announcements", exact: false },
+  { icon: Flag03Icon, label: "Feature flags", href: "/admin/flags", exact: false },
   { icon: SecurityLockIcon, label: "Audit log", href: "/admin/audit", exact: false },
 ];
 

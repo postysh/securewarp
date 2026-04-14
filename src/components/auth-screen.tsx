@@ -57,6 +57,18 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
   // normal login/signup form.
   const [lockCache, setLockCache] = useState<LockCacheMeta | null>(null);
   const [unlockPassword, setUnlockPassword] = useState("");
+
+  // Public feature-flag snapshot. `null` = still loading (don't render
+  // the signup form yet or we'd briefly show it just to replace it
+  // with a disabled notice). `true`/`false` = known state.
+  const [signupsEnabled, setSignupsEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (mode !== "signup") { setSignupsEnabled(true); return; }
+    fetch("/api/config")
+      .then((r) => (r.ok ? r.json() : { signupsEnabled: true }))
+      .then((d) => setSignupsEnabled(Boolean(d.signupsEnabled)))
+      .catch(() => setSignupsEnabled(true));
+  }, [mode]);
   useEffect(() => {
     // Only in login mode — the /signup route explicitly wants a fresh
     // account flow even if a cache happens to exist (e.g. a user
@@ -186,7 +198,29 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
               <span className="font-semibold text-[14px] text-text-primary">SecureWarp</span>
             </div>
 
-            {auth.suspended ? (
+            {mode === "signup" && signupsEnabled === false ? (
+              /* Signups disabled via feature flag. Render a clean
+                 "come back later" notice instead of the form so users
+                 don't fill in fields that would 503 on submit. */
+              <>
+                <div className="w-12 h-12 rounded-[12px] bg-accent-yellow-bg flex items-center justify-center mb-5">
+                  <HugeiconsIcon icon={Shield01Icon} size={22} color="var(--accent-yellow-primary)" />
+                </div>
+                <h2 className="text-[22px] font-semibold text-text-primary tracking-[-0.02em] mb-2">
+                  Signups unavailable
+                </h2>
+                <p className="text-text-secondary text-[13px] leading-relaxed mb-6">
+                  New accounts are temporarily disabled. Check back later — existing users
+                  can still sign in.
+                </p>
+                <button
+                  onClick={() => router.push("/login")}
+                  className="w-full h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                  Back to sign in
+                </button>
+              </>
+            ) : auth.suspended ? (
               /* Suspension notice — replaces the login form entirely so
                  the user can't keep trying to get in. Zero-knowledge
                  means we never reveal WHY in the password response, but

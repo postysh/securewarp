@@ -5,11 +5,22 @@ import { createSession } from "@/lib/auth/session";
 import { normalizeEmail } from "@/lib/auth/email";
 import { verifyTurnstile } from "@/lib/auth/turnstile";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { getBoolFlag } from "@/lib/flags";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
   try {
+    // Feature-flag gate. Admin can pause signups during an abuse wave
+    // without a redeploy. Check before doing any other work so we don't
+    // burn a rate-limit bucket or spend Turnstile quota.
+    if (!(await getBoolFlag("signups_enabled"))) {
+      return NextResponse.json(
+        { error: "Signups are temporarily disabled. Please try again later." },
+        { status: 503 }
+      );
+    }
+
     const body = await request.json();
     const parsed = RegisterSchema.safeParse(body);
 
