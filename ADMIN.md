@@ -16,40 +16,66 @@ session info) is fair game.
 
 ## ✅ Already shipped
 
+**Foundation**
 - [x] `users.role` column (`user` | `admin` | `owner`) gating `/admin/*`
 - [x] `users.suspended_at` with instant session revocation on suspend
 - [x] `users.last_login_at` stamped on successful login
 - [x] `admin_audit` table — separate append-only trail for admin actions
+- [x] `admin_notes` table — per-user admin-only notes, 2k-char cap
 - [x] `requireAdmin()` helper + per-route server-side role check
-- [x] `/admin` — Overview with users, active-7d, new, suspended, files,
-      storage + 14-day signup histogram + recent signups / admin actions
-- [x] `/admin/users` — paginated, searchable list with file-browser row
-      layout (colored avatar, role pill, storage, files, last login,
-      joined calendar date, hover actions)
-- [x] `/admin/audit` — unified security + admin events with actor→target
-      chips and kind stripe
-- [x] Per-row actions: Suspend (with reason), Unsuspend, Promote/Demote
-      (owner-only), Delete account (owner-only, email-confirm)
-- [x] `/api/admin/stats`, `/overview`, `/users`, `/users/[id]/{suspend,unsuspend,role,delete}`, `/audit`, `/me`
+- [x] Suspension block at login + recovery (returns 403 with reason;
+      client renders a dedicated suspension notice replacing the login
+      form; recovery bypass closed)
+- [x] Cron heartbeats via awaited `auditEventAwait` (durable on Workers)
 
----
+**Shell**
+- [x] Admin layout mirrors drive shell — `bg-bg-side` outer, rounded
+      floating card, collapsible 195/52px sidebar with persist
+- [x] Sidebar: Overview / Users / Audit log + back-to-drive next to user
+      menu; theme toggle + sign-out in user menu
+- [x] Sidebar toggle button in each page's header bar
+- [x] Full-width layouts (no centered rails) on all admin pages
 
-## 🎯 Now — before 50 users (building this cut)
+**Pages**
+- [x] `/admin` — Overview. Stat row (6 cards: Total / Active-7d /
+      New-30d / Suspended / Files / Storage), 14-day signup histogram
+      with 7d+30d totals, recent signups panel, recent admin actions
+      panel, user lookup typeahead, system health strip (Supabase,
+      R2, cleanup cron, trash cron with 36h freshness)
+- [x] `/admin/users` — paginated, searchable, file-browser row layout
+      (colored avatar, role pill, storage, files, last login, joined
+      calendar date, hover action menu, whole row Link-to-detail)
+- [x] `/admin/users/[id]` — full-width user detail. Profile header with
+      inline actions, 3-col grid: Notes + Recent activity on the left
+      (2/3), sticky Storage + Active sessions sidebar on the right.
+      Admin notes (add / delete by author-or-owner), per-session jti
+      revoke, per-user audit feed
+- [x] `/admin/audit` — unified security + admin events, filterable by
+      source + free-text, actor→target chips, kind stripe
 
-- [ ] **User detail page** (`/admin/users/[id]`). Click any user from the
-      list → drill into a single-user view: profile header, active
-      sessions (with IP/UA) + revoke, per-user audit trail, storage
-      breakdown, admin notes. Replaces most of the "let me run SQL"
-      support loop.
-- [ ] **Per-user admin notes** (`admin_notes` table). Owner/admin can
-      leave context for each user: "spoke w/ user re: X on date". Notes
-      are admin-visible only, never surfaced to the user.
-- [ ] **System health strip on Overview.** Status pills for Supabase,
-      R2, last cleanup-cron success, last trash-expire-cron success,
-      recent error count. One glance to see "is anything broken?"
-- [ ] **User lookup from Overview.** Search box at the top of Overview
-      that jumps to `/admin/users/[id]` directly for the matched user.
-      (Bonus on top of the existing `/admin/users` search.)
+**Per-row actions (users list + detail page)**
+- [x] Suspend (with user-facing reason, labeled "shown to the user")
+- [x] Unsuspend
+- [x] Promote / Demote role (owner-only)
+- [x] Delete account (owner-only, email-typing confirmation, wipes R2)
+- [x] Revoke individual session (detail page)
+
+**API surface**
+- [x] `/api/admin/me` — role check for layout gate
+- [x] `/api/admin/stats` — Overview aggregate counters
+- [x] `/api/admin/overview` — latest signups, latest admin actions,
+      14-day signup histogram
+- [x] `/api/admin/health` — Supabase ping, R2 config check, last cron
+      heartbeat timestamps
+- [x] `/api/admin/users` — paginated + searchable list
+- [x] `/api/admin/users/[id]` — profile + usage + sessions + audit +
+      notes in one response
+- [x] `/api/admin/users/[id]/{suspend,unsuspend,role,delete}`
+- [x] `/api/admin/users/[id]/notes` (GET/POST) +
+      `/notes/[noteId]` (DELETE)
+- [x] `/api/admin/users/[id]/sessions/[jti]` (DELETE)
+- [x] `/api/admin/audit` — merged security + admin events with actor +
+      target email hydration
 
 ---
 
@@ -72,12 +98,16 @@ session info) is fair game.
       their plan.
 - [ ] **Orphan-upload view.** Count of stale incomplete uploads awaiting
       the cleanup cron. Useful for "is R2 broken?" diagnosis.
-- [ ] **Per-user session list + revoke.** In user detail, list all
-      active `sessions` rows with timestamps. One-click revoke for "user
-      had their laptop stolen" scenarios.
 - [ ] **Link analytics per user.** Count of active public links per
       user, with a cap warning. (Spot single users abusing the link
       feature.)
+- [ ] **Admin audit subtab on detail page.** Right now the per-user
+      "Recent activity" view shows security_audit only. Consider adding
+      an admin_audit lane so you can see "admins took these actions on
+      this user" in the same timeline.
+- [ ] **Session IP/UA.** `sessions` table currently only stores jti +
+      expires_at. Populate on login with request IP + User-Agent so the
+      revoke UI can say *which* device it's revoking.
 
 ---
 
