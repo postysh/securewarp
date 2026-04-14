@@ -29,13 +29,29 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Invalid body", details: parsed.error.flatten() }, { status: 400 });
     }
 
+    // Read current publish state so we only re-stamp `published_at` when
+    // transitioning from draft → live. Editing the title/body of an
+    // already-live announcement shouldn't re-broadcast; explicit
+    // unpublish → publish does (that updates published_at, which the
+    // active endpoint compares against dismissed_at to decide whether
+    // a prior dismissal still counts).
+    const { data: current } = await supabase
+      .from("announcements")
+      .select("published_at")
+      .eq("id", id)
+      .single();
+
     const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (parsed.data.title !== undefined) update.title = parsed.data.title;
     if (parsed.data.body !== undefined) update.body = parsed.data.body;
     if (parsed.data.severity !== undefined) update.severity = parsed.data.severity;
     if (parsed.data.expiresAt !== undefined) update.expires_at = parsed.data.expiresAt;
-    if (parsed.data.publish === true) update.published_at = new Date().toISOString();
-    if (parsed.data.publish === false) update.published_at = null;
+
+    if (parsed.data.publish === true && !current?.published_at) {
+      update.published_at = new Date().toISOString();
+    } else if (parsed.data.publish === false) {
+      update.published_at = null;
+    }
 
     const { data, error } = await supabase
       .from("announcements")

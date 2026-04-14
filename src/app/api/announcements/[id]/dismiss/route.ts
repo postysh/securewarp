@@ -14,10 +14,15 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   try {
     const { id } = await params;
+    // Explicitly set dismissed_at so a second dismiss (after the admin
+    // republishes) refreshes the timestamp to "now". The active-
+    // announcements filter compares dismissed_at >= published_at to
+    // decide whether a dismissal still counts, so we want the latest
+    // timestamp, not the original one from a prior publication.
     const { error } = await supabase
       .from("announcement_dismissals")
       .upsert(
-        { announcement_id: id, user_id: session.userId },
+        { announcement_id: id, user_id: session.userId, dismissed_at: new Date().toISOString() },
         { onConflict: "announcement_id,user_id" }
       );
     if (error) throw error;

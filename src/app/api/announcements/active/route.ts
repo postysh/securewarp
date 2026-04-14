@@ -26,16 +26,27 @@ export async function GET() {
         .order("published_at", { ascending: false }),
       supabase
         .from("announcement_dismissals")
-        .select("announcement_id")
+        .select("announcement_id, dismissed_at")
         .eq("user_id", session.userId),
     ]);
     if (liveQ.error) throw liveQ.error;
     if (dismissedQ.error) throw dismissedQ.error;
 
-    const dismissed = new Set((dismissedQ.data ?? []).map((r) => r.announcement_id));
+    // Map each announcement id → latest dismissed_at. A dismissal only
+    // counts against a live announcement if the user dismissed it
+    // AFTER the announcement's current published_at. If the admin
+    // republishes (published_at updates), prior dismissals are stale
+    // and the user sees the announcement again.
+    const dismissedAt = new Map<string, string>();
+    for (const d of dismissedQ.data ?? []) {
+      const prev = dismissedAt.get(d.announcement_id);
+      if (!prev || prev < d.dismissed_at) dismissedAt.set(d.announcement_id, d.dismissed_at);
+    }
+
     const active = (liveQ.data ?? []).filter((a) => {
-      if (dismissed.has(a.id)) return false;
       if (a.expires_at && a.expires_at < nowIso) return false;
+      const dAt = dismissedAt.get(a.id);
+      if (dAt && a.published_at && dAt >= a.published_at) return false;
       return true;
     });
 
