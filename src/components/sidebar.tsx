@@ -220,7 +220,8 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           : fileOps.breadcrumb[0]?.name === "Shared with me"
             ? "shared"
             : "drive";
-  // Pins + labels — fetched once on mount
+  // Pins + labels — IDs fetched once on mount; names resolved reactively.
+  const [rawPins, setRawPins] = useState<{ file_id: string; is_folder: boolean }[]>([]);
   const [pins, setPins] = useState<{ file_id: string; name?: string; isFolder?: boolean }[]>([]);
   const [labels, setLabels] = useState<{ id: string; name: string; color: string }[]>([]);
   const [newLabelName, setNewLabelName] = useState("");
@@ -238,29 +239,35 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
 
   useEffect(() => {
     fetch("/api/pins").then((r) => r.json()).then((d) => {
-      if (d.pins) {
-        // Read cached pin names from localStorage (saved at pin time)
-        let nameCache: Record<string, string> = {};
-        try { nameCache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}"); } catch { /* */ }
-
-        const resolved = d.pins.map((p: { file_id: string; is_folder: boolean }) => {
-          // Priority: current file list > localStorage cache > fallback
-          const f = fileOps.files.find((x) => x.id === p.file_id);
-          const name = f?.name ?? nameCache[p.file_id] ?? (p.is_folder ? "Folder" : "File");
-          // Update cache if we got a fresh name
-          if (f?.name && f.name !== nameCache[p.file_id]) {
-            nameCache[p.file_id] = f.name;
-          }
-          return { file_id: p.file_id, name, isFolder: p.is_folder };
-        });
-        try { localStorage.setItem("securewarp_pin_names", JSON.stringify(nameCache)); } catch { /* */ }
-        setPins(resolved);
-      }
+      if (d.pins) setRawPins(d.pins);
     }).catch(() => {});
     fetch("/api/labels").then((r) => r.json()).then((d) => {
       if (d.labels) setLabels(d.labels);
     }).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-resolve pin names whenever the file list arrives or changes, so a pin
+  // that was unresolvable at sidebar mount (empty fileOps.files, no cache
+  // entry — e.g. pinned on another device) fills in as soon as data loads.
+  useEffect(() => {
+    if (rawPins.length === 0) { setPins([]); return; }
+    let nameCache: Record<string, string> = {};
+    try { nameCache = JSON.parse(localStorage.getItem("securewarp_pin_names") || "{}"); } catch { /* */ }
+    let cacheChanged = false;
+    const resolved = rawPins.map((p) => {
+      const f = fileOps.files.find((x) => x.id === p.file_id);
+      if (f?.name && f.name !== nameCache[p.file_id]) {
+        nameCache[p.file_id] = f.name;
+        cacheChanged = true;
+      }
+      const name = f?.name ?? nameCache[p.file_id] ?? (p.is_folder ? "Folder" : "File");
+      return { file_id: p.file_id, name, isFolder: p.is_folder };
+    });
+    if (cacheChanged) {
+      try { localStorage.setItem("securewarp_pin_names", JSON.stringify(nameCache)); } catch { /* */ }
+    }
+    setPins(resolved);
+  }, [rawPins, fileOps.files]);
 
   const storage = useStorageUsage();
   const usedPct = storage.maxBytes > 0 ? Math.min((storage.usedBytes / storage.maxBytes) * 100, 100) : 0;
