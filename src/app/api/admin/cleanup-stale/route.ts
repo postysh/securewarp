@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { safeCompare, utf8ToBytes } from "@/lib/auth/safe-compare";
 import { supabase } from "@/lib/db/supabase";
 import { deleteBlob } from "@/lib/db/r2";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 // Delete incomplete uploads older than this many hours. 24h gives legitimate
@@ -84,6 +85,14 @@ async function runCleanup(): Promise<NextResponse> {
       .from("used_recovery_tokens")
       .delete()
       .lt("expires_at", new Date().toISOString());
+
+    // Log a heartbeat so the admin dashboard's health strip can surface
+    // "last cleanup run" timestamps. Fire-and-forget; audit failures
+    // must not break the cron response.
+    auditEvent({
+      event: "cleanup.run",
+      detail: `source=stale-uploads files=${filesDeleted} blobs=${blobsDeleted}`,
+    });
 
     return NextResponse.json({ filesDeleted, blobsDeleted });
   } catch (err) {

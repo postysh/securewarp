@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import UserCheck01Icon from "@hugeicons/core-free-icons/UserCheck01Icon";
@@ -12,6 +13,7 @@ import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
 import SecurityLockIcon from "@hugeicons/core-free-icons/SecurityLockIcon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import ArrowRight02Icon from "@hugeicons/core-free-icons/ArrowRight02Icon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 
 type Stats = {
   totalUsers: number;
@@ -42,6 +44,15 @@ type Overview = {
   signupsByDay: Array<{ day: string; count: number }>;
 };
 
+type Health = {
+  supabase: { ok: boolean; latencyMs: number | null };
+  r2: { ok: boolean };
+  crons: {
+    cleanupStale: { lastRunAt: string | null; fresh: boolean };
+    expireTrash: { lastRunAt: string | null; fresh: boolean };
+  };
+};
+
 function formatBytes(bytes: number): string {
   if (!bytes) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -64,16 +75,19 @@ function formatRelative(iso: string): string {
 export default function AdminOverviewPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
       fetch("/api/admin/stats").then((r) => (r.ok ? r.json() : Promise.reject(r))),
       fetch("/api/admin/overview").then((r) => (r.ok ? r.json() : Promise.reject(r))),
+      fetch("/api/admin/health").then((r) => (r.ok ? r.json() : Promise.reject(r))),
     ])
-      .then(([s, o]) => {
+      .then(([s, o, h]) => {
         setStats(s);
         setOverview(o);
+        setHealth(h);
       })
       .catch(() => setError("Failed to load dashboard"));
   }, []);
@@ -85,11 +99,14 @@ export default function AdminOverviewPage() {
   return (
     <>
       {/* Header bar */}
-      <div className="relative flex items-center px-5 h-[52px] shrink-0 border-b border-border-secondary">
-        <span className="text-[13px] text-text-primary font-medium">Overview</span>
-        <span className="ml-3 text-[12px] text-text-tertiary">
-          {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
-        </span>
+      <div className="relative flex items-center justify-between px-5 h-[52px] shrink-0 border-b border-border-secondary gap-3">
+        <div className="flex items-center min-w-0">
+          <span className="text-[13px] text-text-primary font-medium">Overview</span>
+          <span className="ml-3 text-[12px] text-text-tertiary">
+            {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+          </span>
+        </div>
+        {health && <HealthStrip health={health} />}
       </div>
 
       {/* Scrollable content */}
@@ -100,6 +117,10 @@ export default function AdminOverviewPage() {
               {error}
             </div>
           )}
+
+          {/* User lookup */}
+          <UserLookup />
+
 
           {/* Primary stat row */}
           <section className="mb-8">
@@ -374,6 +395,176 @@ function EmptyRow({ text }: { text: string }) {
     <div className="flex items-center justify-center py-16 text-[12px] text-text-tertiary">
       <HugeiconsIcon icon={Clock01Icon} size={14} className="mr-2" />
       {text}
+    </div>
+  );
+}
+
+function UserLookup() {
+  // Debounced typeahead. Hits /api/admin/users?search=... which already
+  // supports ILIKE matching. Results drop straight into a floating menu
+  // with Enter-to-jump to /admin/users/[id].
+  const router = useRouter();
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Array<{ id: string; email: string }>>([]);
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const search = useCallback(async (term: string) => {
+    if (!term.trim()) {
+      setResults([]);
+      return;
+    }
+    try {
+      const params = new URLSearchParams({ search: term });
+      const res = await fetch(`/api/admin/users?${params}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setResults(
+        (data.users ?? []).slice(0, 6).map((u: { id: string; email: string }) => ({
+          id: u.id,
+          email: u.email,
+        }))
+      );
+      setHi(0);
+    } catch {
+      /* swallow */
+    }
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => search(q), 200);
+    return () => clearTimeout(t);
+  }, [q, search]);
+
+  const jump = (id: string) => {
+    setOpen(false);
+    setQ("");
+    router.push(`/admin/users/${id}`);
+  };
+
+  return (
+    <div className="relative mb-8">
+      <HugeiconsIcon
+        icon={Search01Icon}
+        size={14}
+        className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none"
+      />
+      <input
+        ref={inputRef}
+        type="search"
+        value={q}
+        onChange={(e) => {
+          setQ(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 100)}
+        onKeyDown={(e) => {
+          if (!results.length) return;
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHi((i) => Math.min(i + 1, results.length - 1));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHi((i) => Math.max(i - 1, 0));
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            jump(results[hi].id);
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        placeholder="Find a user by email…"
+        className="w-full h-[38px] pl-9 pr-3 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none"
+      />
+      {open && q.trim() && results.length > 0 && (
+        <div className="absolute left-0 right-0 top-full mt-1 rounded-[10px] border border-border-primary bg-bg-l3 z-40 overflow-hidden"
+          style={{ boxShadow: "var(--shadow-l2)" }}
+        >
+          {results.map((r, i) => (
+            <button
+              key={r.id}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                jump(r.id);
+              }}
+              onMouseEnter={() => setHi(i)}
+              className={`w-full text-left px-3 h-[34px] flex items-center gap-2 text-[13px] transition-colors cursor-pointer ${
+                i === hi ? "bg-cta-nav-active text-text-primary" : "text-text-secondary hover:bg-cta-nav-hover"
+              }`}
+            >
+              <HugeiconsIcon icon={UserGroupIcon} size={13} className="text-text-tertiary shrink-0" />
+              <span className="truncate">{r.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HealthStrip({ health }: { health: Health }) {
+  // Each pill: colored dot + tiny label. Green = healthy, yellow = stale
+  // (cron hasn't fired in >36h), red = down. Clicking does nothing for
+  // now — we can later drill into a /admin/health page.
+  const pills: Array<{ label: string; state: "ok" | "warn" | "down"; tip: string }> = [
+    {
+      label: "Supabase",
+      state: health.supabase.ok ? "ok" : "down",
+      tip: health.supabase.ok
+        ? `Reachable (${health.supabase.latencyMs ?? "?"} ms)`
+        : "Supabase unreachable",
+    },
+    {
+      label: "R2",
+      state: health.r2.ok ? "ok" : "down",
+      tip: health.r2.ok ? "Credentials present" : "R2 env vars missing",
+    },
+    {
+      label: "Cleanup cron",
+      state: health.crons.cleanupStale.fresh
+        ? "ok"
+        : health.crons.cleanupStale.lastRunAt
+        ? "warn"
+        : "down",
+      tip: health.crons.cleanupStale.lastRunAt
+        ? `Last run ${new Date(health.crons.cleanupStale.lastRunAt).toISOString()}`
+        : "Has never run",
+    },
+    {
+      label: "Trash cron",
+      state: health.crons.expireTrash.fresh
+        ? "ok"
+        : health.crons.expireTrash.lastRunAt
+        ? "warn"
+        : "down",
+      tip: health.crons.expireTrash.lastRunAt
+        ? `Last run ${new Date(health.crons.expireTrash.lastRunAt).toISOString()}`
+        : "Has never run",
+    },
+  ];
+
+  const dotColor = (state: "ok" | "warn" | "down") =>
+    state === "ok"
+      ? "var(--accent-green-primary)"
+      : state === "warn"
+      ? "var(--accent-yellow-primary)"
+      : "var(--accent-red-primary)";
+
+  return (
+    <div className="hidden md:flex items-center gap-3 shrink-0">
+      {pills.map((p) => (
+        <div key={p.label} title={p.tip} className="flex items-center gap-1.5">
+          <span
+            className="w-[7px] h-[7px] rounded-full shrink-0"
+            style={{ background: dotColor(p.state) }}
+          />
+          <span className="text-[11px] font-mono uppercase tracking-wider text-text-disabled">
+            {p.label}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

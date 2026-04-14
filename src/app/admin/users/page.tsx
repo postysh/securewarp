@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import MoreHorizontalIcon from "@hugeicons/core-free-icons/MoreHorizontalIcon";
@@ -244,8 +245,13 @@ export default function AdminUsersPage() {
                 u.suspendedAt ? "opacity-70" : ""
               } hover:bg-bg-cell-hover`}
             >
+              <Link
+                href={`/admin/users/${u.id}`}
+                className="absolute inset-0 rounded-[8px] focus:outline-none focus:ring-2 focus:ring-accent-green/50"
+                aria-label={`Open ${u.email}`}
+              />
               {/* Avatar + email */}
-              <div className="flex items-center flex-1 min-w-0 pr-4 gap-3">
+              <div className="flex items-center flex-1 min-w-0 pr-4 gap-3 relative pointer-events-none">
                 <div
                   className="w-7 h-7 rounded-[6px] flex items-center justify-center text-[11px] font-bold text-white shrink-0"
                   style={{ backgroundColor: colorForEmail(u.email) }}
@@ -268,7 +274,7 @@ export default function AdminUsersPage() {
               </div>
 
               {/* Metadata columns */}
-              <div className="hidden md:flex items-center gap-[46px] relative">
+              <div className="hidden md:flex items-center gap-[46px] relative pointer-events-none">
                 <div className="w-[80px] flex justify-end">
                   {u.role !== "user" ? (
                     <span
@@ -307,7 +313,8 @@ export default function AdminUsersPage() {
                   <span className="text-[12px] text-text-disabled">{formatFullDate(u.createdAt)}</span>
                 </div>
 
-                {/* Hover actions */}
+                {/* Hover actions — pointer-events-auto so they take
+                    precedence over the full-row Link behind them. */}
                 {actionable && (
                   <div
                     className={`absolute right-0 flex items-center transition-opacity ${
@@ -315,6 +322,7 @@ export default function AdminUsersPage() {
                         ? "opacity-100 pointer-events-auto"
                         : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
                     }`}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <button
                       onClick={(e) => {

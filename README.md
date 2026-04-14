@@ -393,6 +393,18 @@ CREATE TABLE admin_audit (
 );
 CREATE INDEX admin_audit_occurred_at_idx ON admin_audit (occurred_at DESC);
 CREATE INDEX admin_audit_target_user_idx ON admin_audit (target_user_id, occurred_at DESC);
+
+-- Per-user admin-only notes. Internal support/operator context,
+-- never exposed to the user themselves. Body capped at 2k chars.
+CREATE TABLE admin_notes (
+  id bigserial PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  author_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  author_email text,
+  body text NOT NULL CHECK (char_length(body) <= 2000)
+);
+CREATE INDEX admin_notes_user_idx ON admin_notes (user_id, created_at DESC);
 ```
 
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from
