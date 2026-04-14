@@ -46,17 +46,16 @@ function buildUrl(storageKey: string): string {
  * Client uploads directly to R2 — the server never touches the ciphertext.
  */
 export async function getUploadUrl(storageKey: string): Promise<string> {
+  // Pre-set X-Amz-Expires BEFORE signing. It's part of the canonical
+  // query string, so mutating it after sign() invalidates the signature.
+  // aws4fetch defaults to 3600s if we don't specify.
   const url = new URL(buildUrl(storageKey));
-  // aws4fetch presigns by signing a URL with X-Amz-* query params.
+  url.searchParams.set("X-Amz-Expires", "600");
   const signed = await getClient().sign(
     new Request(url.toString(), { method: "PUT" }),
     { aws: { signQuery: true } }
   );
-  // Override expires by setting X-Amz-Expires. aws4fetch default is 3600s;
-  // we want 600s (10 min) to match the previous behavior.
-  const u = new URL(signed.url);
-  u.searchParams.set("X-Amz-Expires", "600");
-  return u.toString();
+  return signed.url;
 }
 
 /**
@@ -64,13 +63,12 @@ export async function getUploadUrl(storageKey: string): Promise<string> {
  */
 export async function getDownloadUrl(storageKey: string): Promise<string> {
   const url = new URL(buildUrl(storageKey));
+  url.searchParams.set("X-Amz-Expires", "600");
   const signed = await getClient().sign(
     new Request(url.toString(), { method: "GET" }),
     { aws: { signQuery: true } }
   );
-  const u = new URL(signed.url);
-  u.searchParams.set("X-Amz-Expires", "600");
-  return u.toString();
+  return signed.url;
 }
 
 /**
