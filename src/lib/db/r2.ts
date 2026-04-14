@@ -31,7 +31,14 @@ function buildUrl(storageKey: string): string {
   // R2 endpoint is typically https://<account>.r2.cloudflarestorage.com
   // The bucket is a path segment, key is the rest of the path.
   const base = endpoint.endsWith("/") ? endpoint.slice(0, -1) : endpoint;
-  return `${base}/${bucket}/${encodeURIComponent(storageKey)}`;
+  // Encode each path segment individually so literal slashes between
+  // segments are preserved (AWS SigV4 + S3/R2 require real `/` in the
+  // object path — encoding the whole key with encodeURIComponent would
+  // turn `user/file/chunk` into `user%2Ffile%2Fchunk`, which doesn't
+  // match the key R2 actually stored and also breaks signature parity
+  // with clients that uploaded via the AWS SDK).
+  const encodedKey = storageKey.split("/").map(encodeURIComponent).join("/");
+  return `${base}/${bucket}/${encodedKey}`;
 }
 
 /**
