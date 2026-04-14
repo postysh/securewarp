@@ -111,9 +111,10 @@ export default function AdminOverviewPage() {
         {health && <HealthStrip health={health} />}
       </div>
 
-      {/* Scrollable content */}
+      {/* Scrollable content — uses full card width so the dashboard fills
+          the viewport on wide monitors. */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-[960px] mx-auto px-6 md:px-8 py-8">
+        <div className="px-6 md:px-8 py-8">
           {error && (
             <div className="mb-6 px-4 py-3 rounded-[8px] bg-accent-yellow-bg text-[13px] text-text-primary">
               {error}
@@ -124,9 +125,11 @@ export default function AdminOverviewPage() {
           <UserLookup />
 
 
-          {/* Primary stat row */}
-          <section className="mb-8">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* Primary stat row — 2 cols on mobile, 3 on tablet, 6 on wide
+              desktop so the row fills full width without stretching each
+              card into a billboard. */}
+          <section className="mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
               <StatCard
                 icon={UserGroupIcon}
                 accent="var(--accent-blue-primary)"
@@ -146,6 +149,18 @@ export default function AdminOverviewPage() {
                 }
               />
               <StatCard
+                icon={UserAdd01Icon}
+                accent="var(--accent-dark-blue-primary)"
+                label="New · 30d"
+                value={stats ? stats.newUsers30d.toLocaleString() : null}
+              />
+              <StatCard
+                icon={UserMinus01Icon}
+                accent="var(--accent-red-primary)"
+                label="Suspended"
+                value={stats ? stats.suspendedUsers.toLocaleString() : null}
+              />
+              <StatCard
                 icon={File01Icon}
                 accent="var(--accent-pink-primary)"
                 label="Files"
@@ -160,48 +175,41 @@ export default function AdminOverviewPage() {
             </div>
           </section>
 
-          {/* Growth section */}
-          <section className="mb-8">
-            <SectionHeader title="Growth" subtitle="Signups over the last 14 days" />
+          {/* Growth histogram — dedicated full-width section. Number
+              breakdowns moved into the top stat row above. */}
+          <section className="mb-6">
             <div className="rounded-[12px] border border-border-secondary bg-bg-l2 p-5">
-              <div className="flex items-end gap-3 mb-4">
+              <div className="flex items-center justify-between mb-5">
                 <div>
-                  <div className="text-[24px] font-semibold text-text-primary leading-none">
-                    {stats ? stats.newUsers30d.toLocaleString() : "—"}
-                  </div>
-                  <div className="text-[11px] font-mono uppercase tracking-wider text-text-disabled mt-1.5">
-                    Signups · 30d
-                  </div>
+                  <h2 className="text-[13px] font-semibold text-text-primary">Signups</h2>
+                  <p className="text-[12px] text-text-tertiary mt-0.5">Last 14 days</p>
                 </div>
-                <div className="w-px h-10 bg-border-tertiary mx-1" />
-                <div>
-                  <div className="text-[24px] font-semibold text-text-primary leading-none">
-                    {stats ? stats.newUsers7d.toLocaleString() : "—"}
+                <div className="flex items-end gap-6">
+                  <div className="text-right">
+                    <div className="text-[11px] font-mono uppercase tracking-wider text-text-disabled">7d</div>
+                    <div className="text-[20px] font-semibold text-text-primary tabular-nums leading-none mt-1">
+                      {stats ? stats.newUsers7d.toLocaleString() : "—"}
+                    </div>
                   </div>
-                  <div className="text-[11px] font-mono uppercase tracking-wider text-text-disabled mt-1.5">
-                    Signups · 7d
-                  </div>
-                </div>
-                <div className="w-px h-10 bg-border-tertiary mx-1" />
-                <div>
-                  <div className="text-[24px] font-semibold text-accent-red leading-none">
-                    {stats ? stats.suspendedUsers.toLocaleString() : "—"}
-                  </div>
-                  <div className="text-[11px] font-mono uppercase tracking-wider text-text-disabled mt-1.5">
-                    Suspended
+                  <div className="text-right">
+                    <div className="text-[11px] font-mono uppercase tracking-wider text-text-disabled">30d</div>
+                    <div className="text-[20px] font-semibold text-text-primary tabular-nums leading-none mt-1">
+                      {stats ? stats.newUsers30d.toLocaleString() : "—"}
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* 14-day histogram */}
-              <div className="flex items-end gap-[3px] h-[60px] mt-4">
+              {/* Full-width histogram — taller bars to make the shape
+                  readable on wide screens. */}
+              <div className="flex items-end gap-[4px] h-[96px]">
                 {(overview?.signupsByDay ?? Array.from({ length: 14 }).map(() => ({ day: "", count: 0 }))).map((d, i) => {
-                  const h = overview ? Math.max((d.count / maxSignupCount) * 56, d.count > 0 ? 6 : 2) : 2;
+                  const h = overview ? Math.max((d.count / maxSignupCount) * 90, d.count > 0 ? 8 : 3) : 3;
                   return (
                     <div
                       key={i}
                       title={overview ? `${d.day}: ${d.count} signup${d.count === 1 ? "" : "s"}` : ""}
-                      className="flex-1 rounded-[3px] transition-all"
+                      className="flex-1 rounded-[4px] transition-all min-w-0"
                       style={{
                         height: `${h}px`,
                         background: overview && d.count > 0
@@ -213,15 +221,16 @@ export default function AdminOverviewPage() {
                   );
                 })}
               </div>
-              <div className="flex justify-between mt-2 text-[10px] font-mono uppercase tracking-wider text-text-disabled">
+              <div className="flex justify-between mt-3 text-[10px] font-mono uppercase tracking-wider text-text-disabled">
                 <span>14 days ago</span>
                 <span>today</span>
               </div>
             </div>
           </section>
 
-          {/* Two-column: recent signups + recent admin actions */}
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Recent activity panels — two columns on desktop, full width
+              when it's the last row on the page. */}
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Recent signups */}
             <Panel
               title="Recent signups"
@@ -446,7 +455,7 @@ function UserLookup() {
   };
 
   return (
-    <div className="relative mb-8">
+    <div className="relative mb-6 max-w-[520px]">
       <HugeiconsIcon
         icon={Search01Icon}
         size={14}
