@@ -198,7 +198,14 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
               <span className="font-semibold text-[14px] text-text-primary">SecureWarp</span>
             </div>
 
-            {mode === "signup" && signupsEnabled === false ? (
+            {mode === "signup" && signupsEnabled === null ? (
+              /* Config fetch in flight on signup mount. Render nothing
+                 for the panel body so we don't briefly show the form
+                 only to replace it with the "Signups unavailable"
+                 notice if the flag turns out to be off. The surrounding
+                 panel + logo still render, so the page isn't blank. */
+              <div className="h-[320px]" aria-hidden />
+            ) : mode === "signup" && signupsEnabled === false ? (
               /* Signups disabled via feature flag. Render a clean
                  "come back later" notice instead of the form so users
                  don't fill in fields that would 503 on submit. */
