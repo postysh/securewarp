@@ -23,10 +23,20 @@ export async function middleware(request: NextRequest) {
   // wandering user lands on the main app.
   const host = request.headers.get("host")?.toLowerCase() ?? "";
   if (host === PDF_SUBDOMAIN_HOST) {
-    if (pathname !== "/viewer") {
+    // Allow the PDF viewer plus the Office (docx/xlsx) viewers, all
+    // under the /viewer prefix. Each renderer is a separate route so
+    // its (heavy) library deps lazy-load only when that file type is
+    // opened. Static assets (_next/static/*) bypass middleware
+    // automatically. Everything else on the subdomain redirects so
+    // the origin doesn't accidentally serve auth/account UI.
+    if (
+      pathname !== "/viewer" &&
+      pathname !== "/viewer/docx" &&
+      pathname !== "/viewer/xlsx"
+    ) {
       return NextResponse.redirect(new URL(pathname, "https://www.securewarp.com"));
     }
-    // Serve the viewer without running auth checks; the page is
+    // Serve viewer routes without running auth checks; the pages are
     // anonymous by design.
     return NextResponse.next();
   }

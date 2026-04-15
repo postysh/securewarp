@@ -11,7 +11,12 @@ import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import { useFilesContext } from "@/hooks/use-files";
-import { isPreviewableMime, isTextPreviewMime } from "@/lib/mime-safety";
+import {
+  isPreviewableMime,
+  isTextPreviewMime,
+  isDocxMime,
+  isXlsxMime,
+} from "@/lib/mime-safety";
 import { CodePreview } from "@/components/code-preview";
 
 interface FilePreviewProps {
@@ -329,6 +334,22 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
           <PdfPreview blobUrl={preview.blobUrl} name={preview.name} />
         )}
 
+        {!loading && preview && isDocxMime(preview.type) && (
+          <OfficePreview
+            blobUrl={preview.blobUrl}
+            name={preview.name}
+            kind="docx"
+          />
+        )}
+
+        {!loading && preview && isXlsxMime(preview.type) && (
+          <OfficePreview
+            blobUrl={preview.blobUrl}
+            name={preview.name}
+            kind="xlsx"
+          />
+        )}
+
         {/* Text preview — CodePreview lazy-loads highlight.js and
             falls back to plain <pre> for unrecognized extensions. */}
         {!loading && preview && textContent !== null && isText(preview.type) && (
@@ -387,6 +408,77 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
  * true cross-domain boundary. See AGENTS.md → "File-preview safety".
  */
 function PdfPreview({ blobUrl, name }: { blobUrl: string; name: string }) {
+  return (
+    <IsolatedPreview
+      blobUrl={blobUrl}
+      name={name}
+      viewerPath="/viewer"
+      messageType="pdf-bytes"
+      fallback={
+        <iframe
+          src={blobUrl}
+          title={name}
+          className="w-[95vw] h-[90vh] rounded-lg bg-white"
+        />
+      }
+    />
+  );
+}
+
+/**
+ * Isolated Office (.docx, .xlsx) preview.
+ *
+ * Same isolation pattern as PdfPreview — content renders on
+ * pdf.securewarp.com (the dedicated viewer subdomain) so a malicious
+ * document that exploits mammoth or exceljs cannot reach main-app
+ * cookies, sessionStorage, or APIs. When the subdomain isn't
+ * configured (no DNS yet, local dev), there is no safe inline
+ * fallback for Office docs, so the preview shows a download prompt.
+ */
+function OfficePreview({
+  blobUrl,
+  name,
+  kind,
+}: {
+  blobUrl: string;
+  name: string;
+  kind: "docx" | "xlsx";
+}) {
+  return (
+    <IsolatedPreview
+      blobUrl={blobUrl}
+      name={name}
+      viewerPath={`/viewer/${kind}`}
+      messageType={`${kind}-bytes`}
+      fallback={
+        <div className="text-center max-w-[320px] text-white/70 text-[13px]">
+          Office preview requires the isolated viewer subdomain.
+        </div>
+      }
+    />
+  );
+}
+
+/**
+ * Generic isolated-iframe preview wrapper. Loads
+ * `${viewerOrigin}${viewerPath}`, waits for a `viewer-ready`
+ * postMessage, then ships the blob bytes across as `messageType`.
+ * Falls back to `fallback` if the subdomain isn't configured or the
+ * viewer never reports ready within 5s.
+ */
+function IsolatedPreview({
+  blobUrl,
+  name,
+  viewerPath,
+  messageType,
+  fallback,
+}: {
+  blobUrl: string;
+  name: string;
+  viewerPath: string;
+  messageType: string;
+  fallback: React.ReactNode;
+}) {
   const viewerOrigin = process.env.NEXT_PUBLIC_PDF_VIEWER_ORIGIN?.trim();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [failed, setFailed] = useState(false);
@@ -409,7 +501,7 @@ function PdfPreview({ blobUrl, name }: { blobUrl: string; name: string }) {
         if (cancelled) return;
         const bytes = new Uint8Array(buf);
         iframeRef.current?.contentWindow?.postMessage(
-          { type: "pdf-bytes", bytes },
+          { type: messageType, bytes },
           viewerOrigin,
           [bytes.buffer]
         );
@@ -421,7 +513,7 @@ function PdfPreview({ blobUrl, name }: { blobUrl: string; name: string }) {
     window.addEventListener("message", handler);
 
     // If the viewer never reports ready (DNS not set up, origin
-    // unreachable, etc.), fall back to the inline render.
+    // unreachable, etc.), fall back to the parent-supplied fallback.
     const timeout = setTimeout(() => {
       if (!cancelled) setFailed(true);
     }, 5000);
@@ -431,25 +523,14 @@ function PdfPreview({ blobUrl, name }: { blobUrl: string; name: string }) {
       window.removeEventListener("message", handler);
       clearTimeout(timeout);
     };
-  }, [viewerOrigin, blobUrl]);
+  }, [viewerOrigin, blobUrl, messageType]);
 
-  if (!viewerOrigin || failed) {
-    // Fallback path: same-origin inline iframe, equivalent to the
-    // pre-Phase-2 behavior. Used when the subdomain isn't configured
-    // or the viewer failed to load.
-    return (
-      <iframe
-        src={blobUrl}
-        title={name}
-        className="w-[95vw] h-[90vh] rounded-lg bg-white"
-      />
-    );
-  }
+  if (!viewerOrigin || failed) return <>{fallback}</>;
 
   return (
     <iframe
       ref={iframeRef}
-      src={`${viewerOrigin}/viewer`}
+      src={`${viewerOrigin}${viewerPath}`}
       title={name}
       className="w-[95vw] h-[90vh] rounded-lg bg-white"
     />

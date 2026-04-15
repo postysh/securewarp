@@ -97,6 +97,36 @@ const PREVIEWABLE_TEXT_MIMES = new Set([
   // Blob's declared type should never be text/html regardless.
 ]);
 
+// Office document MIMEs. Rendered exclusively on the isolated viewer
+// subdomain so a malicious .docx/.xlsx that exploits the renderer
+// cannot reach main-app cookies or storage. Older binary formats
+// (.doc, .xls) are intentionally excluded — no safe pure-client
+// renderer exists, and a plaintext-recovery attempt would be lossy.
+const PREVIEWABLE_DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const PREVIEWABLE_XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+const PREVIEWABLE_OFFICE_MIMES = new Set([
+  PREVIEWABLE_DOCX_MIME,
+  PREVIEWABLE_XLSX_MIME,
+]);
+
+/** True for Office document MIMEs rendered on the isolated viewer. */
+export function isOfficeMime(mime: string): boolean {
+  return PREVIEWABLE_OFFICE_MIMES.has(mime);
+}
+
+/** True for .docx specifically. */
+export function isDocxMime(mime: string): boolean {
+  return mime === PREVIEWABLE_DOCX_MIME;
+}
+
+/** True for .xlsx specifically. */
+export function isXlsxMime(mime: string): boolean {
+  return mime === PREVIEWABLE_XLSX_MIME;
+}
+
 /** MIME types we are willing to preview inline in the browser. */
 export function isPreviewableMime(mime: string): boolean {
   return (
@@ -104,6 +134,7 @@ export function isPreviewableMime(mime: string): boolean {
     PREVIEWABLE_VIDEO_MIMES.has(mime) ||
     PREVIEWABLE_AUDIO_MIMES.has(mime) ||
     PREVIEWABLE_TEXT_MIMES.has(mime) ||
+    PREVIEWABLE_OFFICE_MIMES.has(mime) ||
     mime === "application/pdf"
   );
 }
