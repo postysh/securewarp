@@ -138,6 +138,16 @@ CLEANUP_SECRET=long-random-secret-for-cron-to-call-cleanup
 # set both variables and auth routes start enforcing the widget.
 TURNSTILE_SECRET_KEY=
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=
+# Resend (optional). When RESEND_API_KEY is unset, src/lib/email/send.ts
+# runs in dev no-op mode: it logs a one-line summary and returns success
+# without hitting the network. Handy for local dev and CI. In production,
+# verify your sending domain in the Resend dashboard, add the SPF/DKIM
+# records to your DNS zone, and set both vars below.
+RESEND_API_KEY=
+EMAIL_FROM="SecureWarp <no-reply@yourdomain.com>"
+# Optional — set this if you want replies to land somewhere other than
+# the From address.
+EMAIL_REPLY_TO=
 ```
 
 Run database migrations (via Supabase dashboard or CLI):

@@ -7,6 +7,7 @@ import { verifyTurnstile } from "@/lib/auth/turnstile";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { getBoolFlag } from "@/lib/flags";
 import { auditEvent } from "@/lib/audit";
+import { sendEmail } from "@/lib/email/send";
 import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
@@ -80,6 +81,18 @@ export async function POST(request: Request) {
     // Create session
     await createSession({ userId: user.id, email: user.email });
     auditEvent({ event: "auth.register", actorUserId: user.id });
+
+    // Welcome email. We await it (rather than fire-and-forget) because
+    // dangling promises get killed when the Cloudflare Worker isolate
+    // tears down after the response returns. `sendEmail` never throws —
+    // it logs and returns { ok: false } on failure — so awaiting it can
+    // only add latency, not break registration.
+    const origin = request.headers.get("origin") ?? new URL(request.url).origin;
+    await sendEmail({
+      to: user.email,
+      template: "welcome",
+      data: { displayName: null, driveUrl: `${origin}/drive` },
+    });
 
     return NextResponse.json({ success: true, userId: user.id });
   } catch (err: unknown) {

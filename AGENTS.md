@@ -332,6 +332,37 @@ the password alone — no SRP, no server round-trip.
   reachable today (the create flow can't introduce one), but the
   throw gives us a loud alarm if it ever does.
 
+## Email (transactional & notifications)
+
+SecureWarp is zero-knowledge. Emails are sent from the server, which by
+design cannot read encrypted user data. Every template and every call site
+must respect that boundary.
+
+- **Never interpolate a plaintext filename, folder name, or file content
+  into an email.** The server doesn't legitimately know these — if your
+  code path has one, you decrypted on the server, which is a product-level
+  regression (see "Crypto is the product" above). Templates say "someone
+  shared a file with you", never "Alice shared budget.xlsx".
+- **Only these user fields are safe to interpolate**: `users.email`,
+  `users.display_name` (stored plaintext), workspace `name` (plaintext),
+  and opaque tokens/URLs the server mints itself. Anything else is either
+  encrypted or a leak.
+- **Sender display name** comes from `users.display_name` (plaintext on
+  `users`), not from any decrypted key-protected blob. If `display_name`
+  is null, fall back to a generic "A SecureWarp user".
+- **Respect `users.notification_prefs`** on any non-security email. Only
+  security-critical mail (password reset, new-device alert, account
+  deletion) bypasses prefs — and even those must be opt-out-able via a
+  global unsubscribe for legal compliance in the future, just not today.
+- **All outbound email goes through `src/lib/email/send.ts`**, never ad-hoc
+  `fetch` calls to the provider. The helper is the single choke point for
+  the zero-knowledge rules above, for rate limiting, and for dev/test
+  no-op behavior when `RESEND_API_KEY` is unset.
+- **Logs omit recipient addresses and bodies.** Log the template name and
+  a provider message-id on success; log the template name and error class
+  on failure. `logError("email.<template>", err)` — same convention as
+  routes.
+
 ## Don't
 
 - Don't add telemetry, analytics, or logging that includes request bodies,

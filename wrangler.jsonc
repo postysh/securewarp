@@ -6,8 +6,10 @@
  * emits `.open-next/worker.js` and uploads it using this config.
  *
  * Secrets (SESSION_SECRET, SUPABASE_*, R2_*, TURNSTILE_*, SENTRY_*,
- * CLEANUP_SECRET, CRON_SECRET) are set via `wrangler secret put <NAME>`,
- * NOT here — this file is committed to git.
+ * CLEANUP_SECRET, CRON_SECRET, RESEND_API_KEY) are set via
+ * `wrangler secret put <NAME>`, NOT here — this file is committed to git.
+ * Non-secret build-time config (EMAIL_FROM, EMAIL_REPLY_TO) goes under
+ * `vars` below.
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -46,7 +48,18 @@
       "binding": "R2_BUCKET_BINDING",
       "bucket_name": "securewarp"
     }
-  ]
+  ],
+
+  // Non-secret email config. EMAIL_FROM must match a sender identity
+  // verified in Resend (e.g. no-reply@<verified-domain>). RESEND_API_KEY
+  // itself is set as a Worker secret via `wrangler secret put RESEND_API_KEY`.
+  // Leave these empty here and override per-environment if needed; when
+  // RESEND_API_KEY is unset at runtime, src/lib/email/send.ts runs in
+  // dev no-op mode.
+  "vars": {
+    "EMAIL_FROM": "SecureWarp <noreply@mail.securewarp.com>",
+    "EMAIL_REPLY_TO": ""
+  }
 
   // NOTE on scheduled cleanup: Cloudflare Cron Triggers invoke a Worker's
   // `scheduled()` handler, not an HTTP route, and OpenNext doesn't wire
