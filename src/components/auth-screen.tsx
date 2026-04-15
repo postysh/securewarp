@@ -35,8 +35,13 @@ function FadeIn({ children, keyVal }: { children: React.ReactNode; keyVal: strin
   );
 }
 
-export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
-  const [mode, setMode] = useState<Mode>(initialMode);
+export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
+  // `mode` is read directly from props. Using local state initialized
+  // from the prop would bite here: Next's App Router keeps the same
+  // AuthScreen instance alive when navigating /login ↔ /signup (both
+  // routes render this component), so a useState initializer would
+  // only pick up the first mode and subsequent link clicks would
+  // change the URL without changing the form.
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
@@ -74,10 +79,10 @@ export function AuthScreen({ mode: initialMode = "login" }: { mode?: Mode }) {
     // Only in login mode — the /signup route explicitly wants a fresh
     // account flow even if a cache happens to exist (e.g. a user
     // wants to create a second account on the same device).
-    if (initialMode !== "login") return;
+    if (mode !== "login") return;
     const meta = readLockCacheMeta();
     if (meta) setLockCache(meta);
-  }, [initialMode]);
+  }, [mode]);
 
   // Turnstile token for the main (login/signup) form. A second slot
   // exists for the recovery form below so the two widgets don't share
