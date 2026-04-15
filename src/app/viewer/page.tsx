@@ -65,6 +65,7 @@ export default function ViewerPage() {
       if (!ALLOWED_PARENT_ORIGINS.includes(e.origin)) return;
       if (!isPdfMessage(e.data)) return;
       bytesReceived = true;
+      let copy: Uint8Array | null = null;
       try {
         // Revoke any prior blob URL before issuing a new one — this
         // page is generally single-shot but be safe against reuse.
@@ -72,13 +73,25 @@ export default function ViewerPage() {
         // `e.data.bytes` has type Uint8Array<ArrayBufferLike> under strict
         // TS, but Blob's BlobPart expects Uint8Array<ArrayBuffer>. Copy
         // into a fresh Uint8Array backed by a plain ArrayBuffer.
-        const copy = new Uint8Array(e.data.bytes);
-        const blob = new Blob([copy], { type: "application/pdf" });
+        copy = new Uint8Array(e.data.bytes);
+        const blob = new Blob([copy as Uint8Array<ArrayBuffer>], { type: "application/pdf" });
         const url = URL.createObjectURL(blob);
         blobUrlRef.current = url;
         setBlobUrl(url);
       } catch {
         setErrored(true);
+      } finally {
+        // Zero the typed-array view of the plaintext PDF. The Blob
+        // retains its own internal copy that the browser's PDF
+        // viewer reads from — we can't reach that — but every view
+        // we control gets cleared.
+        if (copy) {
+          try {
+            copy.fill(0);
+          } catch {
+            // Buffer already detached; nothing to clear.
+          }
+        }
       }
     };
     window.addEventListener("message", handler);

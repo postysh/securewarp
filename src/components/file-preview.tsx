@@ -496,6 +496,7 @@ function IsolatedPreview({
       // timeout so a slow renderer (mammoth/exceljs) can't trigger the
       // fallback after we've already shipped bytes successfully.
       clearTimeout(timeout);
+      let bytes: Uint8Array | null = null;
       try {
         // Re-fetch the blob to get raw bytes. The blob URL is
         // same-origin to the main app, so this is just a memory copy;
@@ -503,14 +504,27 @@ function IsolatedPreview({
         // across the postMessage structured-clone boundary.
         const buf = await (await fetch(blobUrl)).arrayBuffer();
         if (cancelled) return;
-        const bytes = new Uint8Array(buf);
+        bytes = new Uint8Array(buf);
         iframeRef.current?.contentWindow?.postMessage(
           { type: messageType, bytes },
           viewerOrigin,
           [bytes.buffer]
         );
+        // After transfer the underlying ArrayBuffer is detached, so
+        // the Uint8Array view is already unreadable. The reference is
+        // dropped on function return.
       } catch {
         if (!cancelled) setFailed(true);
+        // Best-effort zero on the failure path before GC reclaims it.
+        // Per the AGENTS.md crypto rules: typed-array secrets must be
+        // .fill(0)'d on every exit path that doesn't transfer them.
+        if (bytes) {
+          try {
+            bytes.fill(0);
+          } catch {
+            // Buffer was detached by a partial transfer; nothing to do.
+          }
+        }
       }
     };
 
@@ -536,6 +550,18 @@ function IsolatedPreview({
       ref={iframeRef}
       src={`${viewerOrigin}${viewerPath}`}
       title={name}
+      // Defense in depth on top of origin isolation:
+      // - allow-scripts: viewer needs JS to run mammoth/exceljs/PDFium UI
+      // - allow-same-origin: viewer needs same-origin (its own subdomain)
+      //   to use sessionStorage internals and blob URLs in nested frames
+      // What's REMOVED by this sandbox set:
+      //   * top-level navigation, popups, downloads
+      //   * form submission, pointer lock, orientation lock
+      //   * presentation API, modal dialogs (alert/confirm/prompt)
+      //   * autoplay, the unprefixed Storage Access API
+      // The sandboxed frame's effective origin still matches the viewer
+      // host, so postMessage origin checks on both sides keep working.
+      sandbox="allow-scripts allow-same-origin"
       className="w-[95vw] h-[90vh] rounded-lg bg-white"
     />
   );

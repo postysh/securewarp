@@ -52,11 +52,12 @@ export default function XlsxViewerPage() {
       if (!ALLOWED_PARENT_ORIGINS.includes(e.origin)) return;
       if (!isXlsxMessage(e.data)) return;
       bytesReceived = true;
+      let copy: Uint8Array | null = null;
       try {
         const ExcelJS = (await import("exceljs")).default;
         const workbook = new ExcelJS.Workbook();
-        const copy = new Uint8Array(e.data.bytes);
-        await workbook.xlsx.load(copy.buffer);
+        copy = new Uint8Array(e.data.bytes);
+        await workbook.xlsx.load(copy.buffer as ArrayBuffer);
         const out: SheetData[] = [];
         workbook.eachSheet((worksheet) => {
           const rows: string[][] = [];
@@ -72,6 +73,15 @@ export default function XlsxViewerPage() {
         setSheets(out);
       } catch {
         setErrored(true);
+      } finally {
+        // Zero the plaintext bytes once exceljs has parsed them.
+        if (copy) {
+          try {
+            copy.fill(0);
+          } catch {
+            // Already detached; nothing to clear.
+          }
+        }
       }
     };
     window.addEventListener("message", handler);

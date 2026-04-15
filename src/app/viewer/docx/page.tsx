@@ -52,17 +52,39 @@ export default function DocxViewerPage() {
       if (!ALLOWED_PARENT_ORIGINS.includes(e.origin)) return;
       if (!isDocxMessage(e.data)) return;
       bytesReceived = true;
+      let copy: Uint8Array | null = null;
       try {
-        const mammoth = await import("mammoth");
+        const [mammoth, { default: DOMPurify }] = await Promise.all([
+          import("mammoth"),
+          import("dompurify"),
+        ]);
         // Copy bytes into a fresh ArrayBuffer (mammoth's typings expect
         // `ArrayBuffer`, not `ArrayBufferLike`/`SharedArrayBuffer`).
-        const copy = new Uint8Array(e.data.bytes);
+        copy = new Uint8Array(e.data.bytes);
         const result = await mammoth.convertToHtml({
-          arrayBuffer: copy.buffer,
+          arrayBuffer: copy.buffer as ArrayBuffer,
         });
-        setHtml(result.value);
+        // Belt-and-suspenders. .docx has no script primitive and we're
+        // already isolated to this subdomain — but mammoth's HTML
+        // output is built from untrusted input, so strip <script>,
+        // event handlers, and javascript: URIs before injecting.
+        const sanitized = DOMPurify.sanitize(result.value, {
+          USE_PROFILES: { html: true },
+        });
+        setHtml(sanitized);
       } catch {
         setErrored(true);
+      } finally {
+        // Zero the plaintext bytes once mammoth has parsed them.
+        // Mammoth holds its own internal copies we can't reach, but
+        // every typed-array secret we control gets cleared.
+        if (copy) {
+          try {
+            copy.fill(0);
+          } catch {
+            // Already detached; nothing to clear.
+          }
+        }
       }
     };
     window.addEventListener("message", handler);

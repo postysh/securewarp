@@ -395,28 +395,68 @@ hands them to the browser. The invariants live in
   Blob's declared type. The text-preview panel renders via
   `<pre>{content}</pre>` (React auto-escapes), and the blob itself
   always carries `text/plain` regardless of the original MIME.
-- PDF previews render at a dedicated origin
-  (`pdf.securewarp.com/viewer`) when `NEXT_PUBLIC_PDF_VIEWER_ORIGIN`
-  is set at build time, falling back to a same-origin inline iframe
-  when unset. The viewer page listens for `postMessage` from the
-  main app, creates its own blob URL on its own origin, and renders
-  via a native `<iframe>` so the browser's built-in PDF viewer
-  handles the content. A PDF-viewer exploit at the subdomain has
-  no cookies (cookies are host-scoped, not domain-scoped), no
-  sessionStorage, no API routes, and a CSP with `connect-src 'self'`
-  — there's nowhere to exfiltrate to. Middleware restricts the
-  subdomain to `/viewer` only; every other path 302s to
-  www.securewarp.com.
-- Neither Chrome's PDFium nor Firefox's PDF.js works under a
-  script-blocking iframe sandbox (the viewer UI itself needs JS),
-  which is why we use origin isolation rather than `sandbox=""`.
+- **Isolated viewer subdomain** (`pdf.securewarp.com`) hosts every
+  preview type the browser would otherwise execute as
+  same-origin code: PDFs, `.docx`, `.xlsx`. Each lives at its own
+  route (`/viewer`, `/viewer/docx`, `/viewer/xlsx`) so the heavy
+  per-type renderer (PDFium/PDF.js for PDF, mammoth for docx,
+  exceljs for xlsx) lazy-loads only when that type is opened.
+  Middleware restricts the subdomain to those three exact paths;
+  every other path 302s to www.securewarp.com.
+
+  Architecture invariants:
+  - Bytes flow main app → viewer via `postMessage`, never via the URL
+    or a server hop. Both ends do strict origin checks
+    (`ALLOWED_PARENT_ORIGINS` on the viewer side; `e.origin ===
+    viewerOrigin` on the parent).
+  - The parent iframe is rendered with
+    `sandbox="allow-scripts allow-same-origin"`. Removes top-level
+    navigation, popups, downloads, form submission, modal dialogs,
+    pointer lock, presentation API, autoplay. CSP is the primary
+    defense; the sandbox attribute is browser-enforced defense in
+    depth on a separate layer.
+  - The viewer's own CSP is `default-src 'none'` plus narrow grants
+    per type. `connect-src` is `'self'` plus the Cloudflare Web
+    Analytics beacon endpoint (auto-injected by CF, can't be
+    stripped per page). Sentry is disabled on the viewer origin via
+    a hostname check in `instrumentation-client.ts` so a compromised
+    viewer can't phone home through the tunnel route.
+  - **Mammoth output is sanitized with DOMPurify** before being
+    injected via `dangerouslySetInnerHTML`. Origin isolation is the
+    load-bearing defense, but mammoth's output is built from
+    untrusted bytes, so stripping `<script>`, event handlers, and
+    `javascript:` URIs is cheap belt-suspenders.
+  - **Exceljs output is rendered as React elements** (`<table>`/`<tr>`/`<td>`),
+    NOT via `dangerouslySetInnerHTML`. Every cell value goes through
+    React's text escaping. Don't switch to a string-template render
+    path.
+  - **Plaintext bytes are zeroed** with `.fill(0)` on the parent (after
+    postMessage transfer) AND on the viewer (in the message handler's
+    `finally`). Mammoth/exceljs hold internal copies we can't reach;
+    those rely on GC. Document this in any new isolated-viewer route.
+- Neither Chrome's PDFium nor Firefox's PDF.js works under the
+  script-blocking iframe `sandbox` flag set (the viewer UI itself
+  needs JS), so we keep `allow-scripts` in the sandbox attr and rely
+  on origin isolation as the primary defense, sandbox as the
+  secondary.
+- Office binary formats (`.doc`, `.xls`, `.ppt`, `.pptx`, `.rtf`)
+  are intentionally NOT previewable. See the comment in
+  `mime-safety.ts` for the full list and the reasoning. Server-side
+  rendering would break zero-knowledge; pure-client renderers either
+  don't exist or aren't auditable.
 
 If you add a new preview type:
 1. Add the MIME to the correct category set in `mime-safety.ts`.
-2. Add the render branch in `src/components/file-preview.tsx`
-   (or wherever the preview is rendered).
-3. Verify in DevTools that the Blob's declared type matches and
-   the content renders via a same-origin-safe element.
+2. If the format would otherwise be browser-executable (HTML-ish) or
+   uses a heavy/unaudited parser, route it through the viewer
+   subdomain at `/viewer/<type>` with the postMessage + sandbox
+   pattern from the existing routes.
+3. If you `dangerouslySetInnerHTML` parser output, sanitize first
+   (DOMPurify with `USE_PROFILES: { html: true }`).
+4. Zero plaintext typed-array views in a `finally` block on both
+   the parent and viewer sides.
+5. Verify in DevTools that the Blob's declared type matches and the
+   content renders via a same-origin-safe element.
 
 The reverse direction — a render branch that accepts a MIME not on
 the allowlist — is the real hazard. Reject the change if you see

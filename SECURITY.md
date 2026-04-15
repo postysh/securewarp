@@ -137,14 +137,23 @@ The short list, with where it lives in code:
   `text/html` on a Blob's declared type. SVGs render via `<img src>`
   only — browsers block embedded scripts and external fetches when
   SVG is loaded that way.
-- **Isolated PDF viewer** — PDFs render at a dedicated origin
-  (`pdf.securewarp.com`) in an iframe the main app embeds. The main
-  app decrypts the PDF client-side and postMessages the raw bytes
-  to the viewer; the viewer creates its own blob URL on its own
-  origin. A malicious PDF that exploits the browser's built-in PDF
-  viewer is contained to an origin with no cookies, no storage, and
-  no ability to call our API. Falls back to the same-origin iframe
-  when the subdomain isn't configured.
+- **Isolated viewer subdomain** — PDFs (`/viewer`), Word docs
+  (`/viewer/docx`), and Excel sheets (`/viewer/xlsx`) all render at
+  a dedicated origin (`pdf.securewarp.com`) in an iframe the main
+  app embeds. The main app decrypts client-side and postMessages
+  the raw bytes to the viewer; each viewer route runs its renderer
+  (PDFium/PDF.js, mammoth, exceljs) entirely in the browser. A
+  malicious file that exploits a renderer is contained to an origin
+  with no cookies, no storage, no API routes, and a CSP whose
+  `connect-src` is `'self'` only — there is nowhere to exfiltrate
+  to. Sentry is disabled on this origin so the tunnel route can't
+  be abused. The parent's iframe carries
+  `sandbox="allow-scripts allow-same-origin"` for browser-enforced
+  defense in depth (no popups, no top-level navigation, no
+  downloads, no form submission). Mammoth output is sanitized with
+  DOMPurify before injection; exceljs output is rendered through
+  React (escaped). Plaintext bytes are zeroed on both sides after
+  transfer.
 - **Admin audit log** — every privileged admin action appended to
   `admin_audit` forever, separate from security_audit.
 - **Turnstile** — optional bot-gate on auth routes; on when

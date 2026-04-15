@@ -99,9 +99,24 @@ const PREVIEWABLE_TEXT_MIMES = new Set([
 
 // Office document MIMEs. Rendered exclusively on the isolated viewer
 // subdomain so a malicious .docx/.xlsx that exploits the renderer
-// cannot reach main-app cookies or storage. Older binary formats
-// (.doc, .xls) are intentionally excluded — no safe pure-client
-// renderer exists, and a plaintext-recovery attempt would be lossy.
+// cannot reach main-app cookies or storage.
+//
+// Intentionally NOT on this list (and why):
+//   - application/msword (.doc)             — legacy binary CFB; only
+//     pure-client lib (`mammoth-doc`) is unmaintained and brittle.
+//   - application/vnd.ms-excel (.xls)       — same story, legacy BIFF.
+//   - application/vnd.openxmlformats-officedocument.presentationml.presentation
+//     (.pptx)                               — no pure-client renderer
+//     produces output close to the original; would mislead users.
+//   - application/vnd.ms-powerpoint (.ppt)  — legacy binary, same issues.
+//   - application/rtf (.rtf)                — pure-client RTF renderers
+//     are rare and security-audited even more rarely.
+//
+// Don't add any of these without (a) finding a maintained, audited
+// pure-client renderer that runs under the viewer's CSP, and
+// (b) adding an isolated /viewer/<type> route mirroring the docx
+// and xlsx pattern. Server-side rendering is not an option — it
+// would break zero-knowledge.
 const PREVIEWABLE_DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const PREVIEWABLE_XLSX_MIME =
