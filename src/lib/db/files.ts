@@ -749,7 +749,43 @@ export async function getAllAccessibleFiles(
 
   const ownedRows = (owned || []).map((r) => shapeRow(r as unknown as FileJoinRow));
   const sharedRows = (shared || []).map((r) => shapeRow(r as unknown as FileJoinRow));
-  return [...ownedRows, ...sharedRows];
+  let combined = [...ownedRows, ...sharedRows];
+
+  // Inherited workspace files: files in a workspace the user is a
+  // member of, where they have NO direct file_keys row (i.e. they're
+  // not the creator and weren't individually shared on). They access
+  // these via the parent_keys_claim chain rooted at the workspace
+  // root, which they DO have a file_keys row for. The client builds
+  // the chain itself; we just need to surface the file rows.
+  if (includeWorkspaces) {
+    const { data: memberships } = await supabase
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("user_id", userId);
+    const wsIds = (memberships ?? []).map((m) => m.workspace_id as string);
+    if (wsIds.length > 0) {
+      const knownIds = new Set(combined.map((f) => f.id));
+      // Same LIST_SELECT but the file_keys join becomes a left join via
+      // PostgREST embedding — without an .eq filter on file_keys.user_id
+      // we get rows whether or not the user has a key. We then exclude
+      // rows we already have via the owned/shared queries.
+      const { data: wsFiles, error: wsErr } = await supabase
+        .from("files")
+        .select(LIST_SELECT)
+        .in("workspace_id", wsIds)
+        .eq("upload_complete", true)
+        .eq("is_workspace_root", false)
+        .is("deleted_at", null)
+        .limit(1000);
+      if (wsErr) throw new Error(`Failed to fetch workspace files: ${wsErr.message}`);
+      const inheritedRows = (wsFiles ?? [])
+        .map((r) => shapeRow(r as unknown as FileJoinRow))
+        .filter((f) => !knownIds.has(f.id));
+      combined = [...combined, ...inheritedRows];
+    }
+  }
+
+  return combined;
 }
 
 /**

@@ -2439,30 +2439,110 @@ export function useFiles(keys: {
           }
           if (filesRes.ok) {
             const index: SearchCacheEntry[] = [];
-            for (const f of data.files) {
+            // hierMap holds decrypted private hier keys for folders
+            // we've successfully unwrapped this build. Lets the
+            // inheritance pass below decrypt children whose parent
+            // chain we've already resolved.
+            const hierMap = new Map<string, string>();
+            const pushEntry = (f: Record<string, unknown>, name: string, type: string, size: number) => {
+              const wsId = (f.workspace_id as string | null) ?? null;
+              index.push({
+                id: f.id as string,
+                name,
+                isFolder: f.is_folder as boolean,
+                parentId: (f.parent_id as string | null) ?? null,
+                workspaceId: wsId,
+                workspaceName: wsId ? (wsNameById.get(wsId) ?? null) : null,
+                type,
+                size,
+              });
+            };
+
+            // Pass 1: directly-keyed files (the user has their own
+            // file_keys row → encrypted_private_hierarchical_key set).
+            const pending: Record<string, unknown>[] = [];
+            for (const f of data.files as Record<string, unknown>[]) {
               const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
-              if (!encPrivHier) continue;
+              if (!encPrivHier) {
+                pending.push(f);
+                continue;
+              }
               try {
-                const privHier = unwrapPrivateHierarchicalKey(encPrivHier, f.wrapped_by_public_key || "", keys.encryptionPrivateKey);
-                const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file, f.session_key_nonce, f.owner_public_key || "", privHier);
-                const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata) : f.encrypted_metadata;
-                const meta = decryptMetadata(encMeta, sk);
+                const privHier = unwrapPrivateHierarchicalKey(
+                  encPrivHier,
+                  (f.wrapped_by_public_key as string) || "",
+                  keys.encryptionPrivateKey,
+                );
+                const sk = unwrapSessionKeyFromFile(
+                  f.encrypted_session_key_by_file as string,
+                  f.session_key_nonce as string,
+                  (f.owner_public_key as string) || "",
+                  privHier,
+                );
+                const encMeta = typeof f.encrypted_metadata === "string"
+                  ? JSON.parse(f.encrypted_metadata as string)
+                  : f.encrypted_metadata;
+                const meta = decryptMetadata(encMeta as Parameters<typeof decryptMetadata>[0], sk);
                 sk.fill(0);
-                const wsId = (f.workspace_id as string | null) ?? null;
-                index.push({
-                  id: f.id,
-                  name: meta.name,
-                  isFolder: f.is_folder,
-                  parentId: f.parent_id ?? null,
-                  workspaceId: wsId,
-                  workspaceName: wsId ? (wsNameById.get(wsId) ?? null) : null,
-                  type: typeof meta.type === "string" ? meta.type : "",
-                  size: typeof meta.size === "number" ? meta.size : 0,
-                });
+                pushEntry(
+                  f,
+                  meta.name,
+                  typeof meta.type === "string" ? meta.type : "",
+                  typeof meta.size === "number" ? meta.size : 0,
+                );
+                if (f.is_folder) hierMap.set(f.id as string, privHier);
               } catch {
                 // skip undecryptable
               }
             }
+
+            // Pass 2..N: inherited files (workspace members on shared
+            // subtrees). For each pending file, look up its parent's
+            // priv hier in hierMap; unwrap parent_keys_claim to get
+            // this file's session key + own priv hier; decrypt
+            // metadata; cache hier for grandchildren. Iterate until no
+            // progress (handles arbitrary subtree depths).
+            let safety = 0;
+            while (pending.length > 0 && safety < 20) {
+              safety++;
+              const stillPending: Record<string, unknown>[] = [];
+              let progressed = false;
+              for (const f of pending) {
+                const parentId = f.parent_id as string | null;
+                const claim = f.parent_keys_claim as string | null;
+                const claimBy = f.parent_keys_claim_wrapped_by as string | null;
+                const parentHier = parentId ? hierMap.get(parentId) : null;
+                if (!parentHier || !claim || !claimBy) {
+                  stillPending.push(f);
+                  continue;
+                }
+                try {
+                  const unwrapped = unwrapParentKeysClaim(claim, claimBy, parentHier);
+                  const encMeta = typeof f.encrypted_metadata === "string"
+                    ? JSON.parse(f.encrypted_metadata as string)
+                    : f.encrypted_metadata;
+                  const meta = decryptMetadata(
+                    encMeta as Parameters<typeof decryptMetadata>[0],
+                    unwrapped.sessionKey,
+                  );
+                  unwrapped.sessionKey.fill(0);
+                  pushEntry(
+                    f,
+                    meta.name,
+                    typeof meta.type === "string" ? meta.type : "",
+                    typeof meta.size === "number" ? meta.size : 0,
+                  );
+                  if (f.is_folder) hierMap.set(f.id as string, unwrapped.childPrivateHierarchicalKey);
+                  progressed = true;
+                } catch {
+                  // skip undecryptable
+                }
+              }
+              pending.length = 0;
+              pending.push(...stillPending);
+              if (!progressed) break; // no parent in hierMap; give up on the rest
+            }
+
             searchIndexRef.current = index;
           }
         } catch {
