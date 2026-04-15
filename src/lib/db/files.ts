@@ -694,6 +694,7 @@ export async function getRecentForUser(userId: string): Promise<FileRowWithKey[]
     .eq("owner_id", userId)
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
+    .eq("is_workspace_root", false)
     .is("deleted_at", null)
     .is("workspace_id", null)
     .order("updated_at", { ascending: false })
@@ -715,6 +716,7 @@ export async function getAllAccessibleFiles(userId: string): Promise<FileRowWith
     .eq("owner_id", userId)
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
+    .eq("is_workspace_root", false)
     .is("deleted_at", null)
     .is("workspace_id", null)
     .limit(500);
@@ -727,6 +729,7 @@ export async function getAllAccessibleFiles(userId: string): Promise<FileRowWith
     .eq("file_keys.user_id", userId)
     .neq("owner_id", userId)
     .eq("upload_complete", true)
+    .eq("is_workspace_root", false)
     .is("deleted_at", null)
     .is("workspace_id", null)
     .limit(200);
@@ -780,6 +783,7 @@ export async function getStarredForUser(userId: string): Promise<FileRowWithKey[
     .in("id", fileIds)
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
+    .eq("is_workspace_root", false)
     .is("deleted_at", null)
     .is("workspace_id", null);
   if (error) throw new Error(`Failed to fetch starred files: ${error.message}`);
