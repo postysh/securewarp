@@ -70,7 +70,17 @@ export default function DriveClient() {
   // view toggle) and the file browser. Created here so its state outlives
   // any one child unmounting.
   const fileOps = useFiles(
-    keys ? { encryptionPublicKey: keys.encryptionPublicKey, encryptionPrivateKey: keys.encryptionPrivateKey } : null
+    keys
+      ? {
+          encryptionPublicKey: keys.encryptionPublicKey,
+          encryptionPrivateKey: keys.encryptionPrivateKey,
+          // searchIndexKey was added later but the destructuring here
+          // wasn't updated, so the hook never saw it. Without it,
+          // runBackfill aborted, no tokens were ever written, and
+          // /api/files/search was never called.
+          searchIndexKey: keys.searchIndexKey,
+        }
+      : null,
   );
 
   const toggleSidebar = () => {
