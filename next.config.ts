@@ -246,19 +246,26 @@ const nextConfig: NextConfig = {
     return [
       {
         // Viewer gets a tighter, embedder-friendly header set. The
-        // catch-all below explicitly excludes /viewer via a negative
-        // lookahead — if both rules matched, Next.js would apply them
-        // in order and the later catch-all would overwrite the viewer
-        // headers (frame-ancestors, X-Frame-Options, CORP) with the
-        // main-app values. Observed in prod: the viewer came back
-        // with X-Frame-Options: DENY, which blocks embedding.
+        // catch-all below explicitly excludes the viewer paths via a
+        // negative lookahead — if both rules matched, Next.js would
+        // apply them in order and the later catch-all would overwrite
+        // the viewer headers (frame-ancestors, X-Frame-Options, CORP)
+        // with the main-app values. Observed in prod: the viewer came
+        // back with X-Frame-Options: DENY, which blocks embedding.
+        // The Office viewers (/viewer/docx, /viewer/xlsx) need the
+        // same embedder-friendly headers so they're matched here too.
+        source: "/viewer/:path*",
+        headers: viewerHeaders,
+      },
+      {
         source: "/viewer",
         headers: viewerHeaders,
       },
       {
-        // Apply on every other route. Negative lookahead excludes
-        // /viewer so its header set isn't clobbered by this catch-all.
-        source: "/((?!viewer$).*)",
+        // Apply on every other route. Negative lookahead excludes the
+        // /viewer family so its header set isn't clobbered by this
+        // catch-all.
+        source: "/((?!viewer$|viewer/).*)",
         headers: securityHeaders,
       },
     ];
