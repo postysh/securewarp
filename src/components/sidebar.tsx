@@ -105,9 +105,11 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
           : "w-full gap-3 px-2.5 h-[36px] text-[13px] text-text-secondary hover:bg-cta-nav-hover"
       }`}
     >
-      <HugeiconsIcon icon={UserCircleIcon} size={18} />
+      <HugeiconsIcon icon={UserCircleIcon} size={18} className="shrink-0" />
       {!collapsed && (
-        <span className="text-text-primary text-[12px] font-medium truncate">{userEmail}</span>
+        <span className="text-text-primary text-[12px] font-medium truncate flex-1 min-w-0 text-left">
+          {userEmail}
+        </span>
       )}
     </button>
   );
@@ -119,7 +121,11 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
       style={{ top: pos.top, left: pos.left, boxShadow: "var(--shadow-l2)" }}
     >
       <div className="px-3 py-2.5 border-b border-border-tertiary">
-        <div className="text-[12px] text-text-primary font-medium truncate">{userEmail}</div>
+        <Tooltip label={userEmail} side="bottom">
+          <div className="text-[12px] text-text-primary font-medium truncate max-w-full">
+            {userEmail}
+          </div>
+        </Tooltip>
         <div className="text-[11px] text-text-disabled mt-0.5">Free plan</div>
       </div>
       <div className="py-1">
@@ -151,7 +157,15 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
 
   return (
     <div className={`${collapsed ? "flex justify-center" : ""}`}>
-      {collapsed ? <Tooltip label="Account">{button}</Tooltip> : button}
+      {collapsed ? (
+        <Tooltip label="Account">{button}</Tooltip>
+      ) : (
+        // Wrap the expanded account button so users with long emails
+        // can hover to read the full address when the button truncates.
+        <Tooltip label={userEmail} side="right">
+          <div className="w-full">{button}</div>
+        </Tooltip>
+      )}
       {dropdown}
       {recoveryOpen && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center">
