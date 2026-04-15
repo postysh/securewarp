@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
+import { getEffectivePermission } from "@/lib/db/files";
 import { logError } from "@/lib/log";
 
 /**
@@ -56,11 +57,12 @@ export async function POST(request: Request) {
     }
     const { fileId, tokens } = parsed.data;
 
-    // Validate caller has access to the file. Owners always have a
-    // file_keys row (per AGENTS.md sharing rule 7), so this single
-    // check covers both owned and shared files. The exception is the
-    // brief upload window before the keys row is committed — for that
-    // path we also accept "user owns the files row" as proof of access.
+    // Validate caller has access to the file via the same logic the
+    // file list endpoint uses: direct file_keys row OR ownership OR
+    // inherited access through a parent folder's file_keys row
+    // (Phase 3 parent_keys_claim chain). Without the inherited check,
+    // workspace members couldn't index any file inside a workspace
+    // folder they didn't directly create — which is most files.
     const { data: keyRow } = await supabase
       .from("file_keys")
       .select("file_id")
@@ -74,8 +76,12 @@ export async function POST(request: Request) {
         .select("owner_id")
         .eq("id", fileId)
         .maybeSingle();
-      if (!fileRow || fileRow.owner_id !== session.userId) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      const isOwner = fileRow?.owner_id === session.userId;
+      if (!isOwner) {
+        const inheritedPerm = await getEffectivePermission(fileId, session.userId);
+        if (!inheritedPerm) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
       }
     }
 

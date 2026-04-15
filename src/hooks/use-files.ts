@@ -2481,62 +2481,71 @@ export function useFiles(keys: {
       // Empty query returns the cached recent items directly.
       if (!trimmed) return (searchIndexRef.current ?? []).slice(0, 20);
 
-      // Encrypted server-side query path. Tokens are HMAC'd with the
-      // user's searchIndexKey; the server matches opaque hashes against
-      // hashes the client computed at index time. AND-semantics: every
-      // query token must appear in the file's stored set.
-      if (!keys.searchIndexKey) {
-        // No HMAC key in this session (legacy unlock cache or pre-
-        // search account). Fall back to in-memory substring on the
-        // decrypted cache so the user still sees results.
-        const q = trimmed.toLowerCase();
-        return (searchIndexRef.current ?? [])
-          .filter((f) => f.name.toLowerCase().includes(q))
-          .slice(0, 50);
-      }
-
-      const queryTokens = tokenizeQuery(trimmed);
-      if (queryTokens.length === 0) return (searchIndexRef.current ?? []).slice(0, 20);
-
-      let key: Uint8Array | null = null;
-      let matchedIds: Set<string> = new Set();
-      try {
-        key = fromBase64(keys.searchIndexKey);
-        const hashed = hashTokens(queryTokens, key);
-        const res = await fetch("/api/files/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tokens: hashed }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          matchedIds = new Set(data.fileIds as string[]);
-        }
-      } catch {
-        // network error — fall through to local fallback below
-      } finally {
-        if (key) {
-          try { key.fill(0); } catch { /* detached */ }
-        }
-      }
-
-      // Project matched IDs through the decrypted-name cache so the UI
-      // gets `{ id, name, isFolder, parentId }` rows. Files matched by
-      // the server but not in the cache (e.g. cache built before a
-      // recent share) are filtered out — they'll appear after the
-      // cache rebuilds on next mutation.
       const cache = searchIndexRef.current ?? [];
-      const matched: typeof cache = [];
+      const q = trimmed.toLowerCase();
+
+      // ─── Filename matches via in-memory substring on the decrypted
+      // cache. Always runs. Fast, complete, deterministic — does not
+      // depend on backfill state. Handles every accessible file
+      // including workspaces. This is the primary search path and
+      // what users see by default.
+      const filenameMatches: SearchCacheEntry[] = [];
+      const seen = new Set<string>();
       for (const row of cache) {
-        if (matchedIds.has(row.id)) matched.push(row);
+        if (row.name.toLowerCase().includes(q)) {
+          filenameMatches.push(row);
+          seen.add(row.id);
+        }
       }
-      // Local fallback if the encrypted index returned nothing AND we
-      // have a populated cache — covers the pre-backfill window.
-      if (matched.length === 0 && cache.length > 0) {
-        const q = trimmed.toLowerCase();
-        return cache.filter((f) => f.name.toLowerCase().includes(q)).slice(0, 50);
+
+      // ─── Encrypted content matches via the server-side index. ADDS
+      // results that aren't filename hits but contain the query inside
+      // the file body (text/Office content). Best-effort: if the
+      // index hasn't been populated yet (pre-backfill, indexing
+      // failed, etc.) we just return the filename matches.
+      //
+      // Query semantics: only the WHOLE-WORD tokens are required.
+      // Trigrams are excluded from the query because AND-semantics
+      // over trigrams generates false negatives ("test" trigrams not
+      // present in "Tests"-tokenized files even though substring
+      // matches). Substring matching is already handled above by the
+      // cache filter. Encrypted index covers content, and content
+      // queries are typed as whole words.
+      if (keys.searchIndexKey) {
+        const allQueryTokens = tokenizeQuery(trimmed);
+        const wholeWordTokens = allQueryTokens.filter((t) => t.startsWith("w:"));
+        if (wholeWordTokens.length > 0) {
+          let key: Uint8Array | null = null;
+          try {
+            key = fromBase64(keys.searchIndexKey);
+            const hashed = hashTokens(wholeWordTokens, key);
+            const res = await fetch("/api/files/search", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ tokens: hashed }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const matchedIds = new Set(data.fileIds as string[]);
+              for (const row of cache) {
+                if (matchedIds.has(row.id) && !seen.has(row.id)) {
+                  filenameMatches.push(row);
+                  seen.add(row.id);
+                }
+              }
+            }
+          } catch {
+            // Network error — return the filename matches we already
+            // have. The encrypted side is additive, not load-bearing.
+          } finally {
+            if (key) {
+              try { key.fill(0); } catch { /* detached */ }
+            }
+          }
+        }
       }
-      return matched.slice(0, 50);
+
+      return filenameMatches.slice(0, 50);
     },
     [keys]
   );
