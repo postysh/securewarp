@@ -23,12 +23,40 @@ import UnfoldMoreIcon from "@hugeicons/core-free-icons/UnfoldMoreIcon";
 import SidebarLeft01Icon from "@hugeicons/core-free-icons/SidebarLeft01Icon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import Key01Icon from "@hugeicons/core-free-icons/Key01Icon";
 
 const GREEN = "#04a45c";
+
+// Unified layout constants. Every content section uses SECTION_MAX;
+// the dashboard mockup is the one intentional wider moment because
+// it's the visual focal point. SECTION_PAD_Y normalizes the vertical
+// rhythm so readers don't ping-pong between wide/narrow/tall/short.
+const SECTION_MAX = 1200;
+const MOCKUP_MAX = 1400;
+const SECTION_PAD_Y = 96;
+
+const EYEBROW_STYLE: React.CSSProperties = {
+  display: "inline-block",
+  fontSize: 11,
+  fontFamily: "var(--font-geist-mono), monospace",
+  textTransform: "uppercase",
+  letterSpacing: 2,
+  color: "rgba(255,255,255,0.4)",
+  marginBottom: 14,
+};
+
+const H2_STYLE: React.CSSProperties = {
+  fontSize: "clamp(28px, 3.5vw, 40px)",
+  fontWeight: 700,
+  color: "white",
+  letterSpacing: -1.2,
+  lineHeight: 1.12,
+  margin: 0,
+};
 
 /**
  * Logo reveal animation: each character starts as `*`, then cycles
@@ -152,8 +180,170 @@ function mockCipher(seed: string, length = 24): string {
   return out.join("");
 }
 
+
+/**
+ * Interactive "encrypt anything" widget. User types a word; it gets
+ * HMAC-ish transformed with the same mockCipher as the dashboard
+ * toggle, updating on every keystroke. Feels like real-time
+ * encryption even though it's a deterministic hash for demo
+ * purposes only. Seeds the input with a rotating placeholder so
+ * first-time visitors see something happening before they type.
+ */
+function EncryptPlayground() {
+  const SAMPLES = [
+    "tax returns 2025.pdf",
+    "Patient Records.xlsx",
+    "Q4 Financials",
+    "Design Mockups",
+    "family photos",
+  ];
+  const [input, setInput] = useState(SAMPLES[0]);
+  const [sampleIdx, setSampleIdx] = useState(0);
+  const [focused, setFocused] = useState(false);
+
+  // Rotate the sample every 3s while the input is untouched, so the
+  // widget has motion and demonstrates different kinds of content.
+  // Stops rotating once the user interacts.
+  const [userTouched, setUserTouched] = useState(false);
+  useEffect(() => {
+    if (userTouched) return;
+    const t = setInterval(() => {
+      setSampleIdx((i) => (i + 1) % SAMPLES.length);
+    }, 3000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userTouched]);
+  useEffect(() => {
+    if (!userTouched) setInput(SAMPLES[sampleIdx]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sampleIdx]);
+
+  const cipher = input.length === 0 ? "" : mockCipher(input, 40);
+
+  return (
+    <section style={{ padding: `${SECTION_PAD_Y}px 32px`, maxWidth: SECTION_MAX, margin: "0 auto" }}>
+      <div style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 32px" }}>
+        <span style={EYEBROW_STYLE}>Try it yourself</span>
+        <h2 style={H2_STYLE}>Type anything. Watch it disappear.</h2>
+      </div>
+      <div
+        style={{
+          maxWidth: 720,
+          margin: "0 auto",
+          background: "#1a1a1a",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 16,
+          padding: "28px 28px 24px",
+        }}
+      >
+        {/* Input row */}
+        <label
+          style={{
+            display: "block",
+            fontSize: 11,
+            fontFamily: "var(--font-geist-mono), monospace",
+            textTransform: "uppercase",
+            letterSpacing: 1.5,
+            color: "rgba(255,255,255,0.4)",
+            marginBottom: 8,
+          }}
+        >
+          You type
+        </label>
+        <input
+          value={input}
+          onChange={(e) => {
+            setUserTouched(true);
+            setInput(e.target.value.slice(0, 80));
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder="Type a filename, note, anything…"
+          style={{
+            width: "100%",
+            background: "rgba(255,255,255,0.04)",
+            border: `1px solid ${focused ? "rgba(110,210,170,0.4)" : "rgba(255,255,255,0.08)"}`,
+            borderRadius: 10,
+            padding: "12px 14px",
+            fontSize: 15,
+            color: "white",
+            outline: "none",
+            transition: "border-color 180ms ease",
+            fontFamily: "inherit",
+          }}
+        />
+
+        {/* Arrow divider */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "18px 0 8px" }}>
+          <span style={{ height: 1, flex: 1, background: "rgba(255,255,255,0.08)" }} />
+          <span
+            style={{
+              fontSize: 10,
+              fontFamily: "var(--font-geist-mono), monospace",
+              textTransform: "uppercase",
+              letterSpacing: 1.5,
+              color: "rgba(255,255,255,0.4)",
+            }}
+          >
+            Encrypt in browser
+          </span>
+          <span style={{ height: 1, flex: 1, background: "rgba(255,255,255,0.08)" }} />
+        </div>
+
+        {/* Ciphertext row */}
+        <label
+          style={{
+            display: "block",
+            fontSize: 11,
+            fontFamily: "var(--font-geist-mono), monospace",
+            textTransform: "uppercase",
+            letterSpacing: 1.5,
+            color: "rgba(255,255,255,0.4)",
+            marginBottom: 8,
+          }}
+        >
+          Our server stores
+        </label>
+        <div
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 10,
+            padding: "12px 14px",
+            fontFamily: "var(--font-geist-mono), monospace",
+            fontSize: 13,
+            color: "rgba(255,255,255,0.55)",
+            wordBreak: "break-all",
+            lineHeight: 1.55,
+            minHeight: 44,
+          }}
+        >
+          {cipher || <span style={{ color: "rgba(255,255,255,0.3)" }}>—</span>}
+        </div>
+        <p
+          style={{
+            fontSize: 12,
+            color: "rgba(255,255,255,0.4)",
+            marginTop: 14,
+            textAlign: "center",
+            lineHeight: 1.6,
+          }}
+        >
+          Demo transform. Real content is encrypted with XSalsa20-Poly1305
+          under a key that never leaves your device.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 export default function Home() {
   const [encryptedView, setEncryptedView] = useState(false);
+  // Track which ciphertext row the user is hovering so we can
+  // "decrypt" it back to the real filename. Reinforces the
+  // zero-knowledge claim: same file, your key is the only thing
+  // standing between the blob and the plaintext.
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   return (
     <div style={{ fontFamily: "var(--font-chillax), var(--font-geist-sans), system-ui, sans-serif", background: "#111", minHeight: "100vh" }}>
@@ -173,12 +363,10 @@ export default function Home() {
       </div>
 
       {/* Hero copy */}
-      <section style={{ padding: "140px 32px 0", maxWidth: 1400, margin: "0 auto", textAlign: "center" }}>
+      <section style={{ padding: "140px 32px 0", maxWidth: SECTION_MAX, margin: "0 auto", textAlign: "center" }}>
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
-          <span style={{ display: "inline-block", fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", letterSpacing: 2, color: "rgba(255,255,255,0.4)", marginBottom: 18 }}>
-            Zero-knowledge cloud drive
-          </span>
-          <h1 style={{ fontSize: "clamp(32px, 4.2vw, 48px)", fontWeight: 700, lineHeight: 1.08, color: "white", margin: "0 0 18px", letterSpacing: -1.5 }}>
+          <span style={EYEBROW_STYLE}>Zero-knowledge cloud drive</span>
+          <h1 style={{ ...H2_STYLE, fontSize: "clamp(32px, 4.2vw, 48px)", margin: "0 0 18px" }}>
             The cloud drive
             <br />
             that can&apos;t read your files.
@@ -200,13 +388,16 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Dashboard mockup */}
-      <section style={{ padding: "72px 32px 0" }}>
+      {/* Dashboard mockup — let the visual speak for itself. The
+          before/after toggle above the mockup is self-explanatory;
+          adding a section heading here just piles more large text
+          onto the page without adding information. */}
+      <section style={{ padding: `${SECTION_PAD_Y}px 32px 0` }}>
         {/* Before/after toggle — lets visitors see the same files
             as the user sees them (decrypted) vs what the server
             actually stores (opaque ciphertext). Concrete proof of
             the zero-knowledge claim in the copy above. */}
-        <div style={{ maxWidth: 1400, margin: "0 auto 16px", display: "flex", justifyContent: "center" }}>
+        <div style={{ maxWidth: MOCKUP_MAX, margin: "0 auto 16px", display: "flex", justifyContent: "center" }}>
           <div
             role="tablist"
             aria-label="Dashboard view"
@@ -277,7 +468,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div style={{ background: "#111", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", overflow: "hidden", maxWidth: 1400, margin: "0 auto" }}>
+        <div style={{ background: "#111", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", overflow: "hidden", maxWidth: MOCKUP_MAX, margin: "0 auto" }}>
           <div style={{ display: "flex", minHeight: 560 }}>
             {/* Sidebar */}
             <div className="hidden lg:flex" style={{ width: 195, flexDirection: "column", background: "#111", padding: "12px 8px", flexShrink: 0 }}>
@@ -456,17 +647,46 @@ export default function Home() {
                     const cfg = fileIconMap[f.kind];
                     const ext = f.name.includes(".") ? f.name.split(".").pop()!.toUpperCase() : "";
                     const isSelected = idx === 2;
+                    // When hovering an encrypted row, "decrypt" just
+                    // that one row so the visitor sees the real name
+                    // behind the cipher — reinforces the zero-knowledge
+                    // idea interactively. Only triggers in encrypted mode.
+                    const isHovered = encryptedView && hoveredRow === f.name;
                     return (
-                      <div key={f.name} style={{ display: "flex", alignItems: "center", height: 56, padding: "0 16px", borderRadius: 12, border: isSelected ? "1px solid rgba(110,210,170,0.2)" : "1px solid rgba(255,255,255,0.04)", background: isSelected ? "rgba(255,255,255,0.03)" : "transparent", marginBottom: 6 }}>
+                      <div
+                        key={f.name}
+                        onMouseEnter={() => encryptedView && setHoveredRow(f.name)}
+                        onMouseLeave={() => encryptedView && setHoveredRow((r) => (r === f.name ? null : r))}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          height: 56,
+                          padding: "0 16px",
+                          borderRadius: 12,
+                          border: isHovered
+                            ? "1px solid rgba(110,210,170,0.35)"
+                            : isSelected
+                              ? "1px solid rgba(110,210,170,0.2)"
+                              : "1px solid rgba(255,255,255,0.04)",
+                          background: isHovered
+                            ? "rgba(110,210,170,0.04)"
+                            : isSelected
+                              ? "rgba(255,255,255,0.03)"
+                              : "transparent",
+                          marginBottom: 6,
+                          cursor: encryptedView ? "help" : "default",
+                          transition: "border-color 180ms ease, background 180ms ease",
+                        }}
+                      >
                         <div style={{ width: 18, height: 18, borderRadius: 4, border: isSelected ? "none" : "1px solid rgba(255,255,255,0.08)", background: isSelected ? "rgba(110,210,170,0.85)" : "transparent", marginRight: 16, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                           {isSelected && <HugeiconsIcon icon={Tick01Icon} size={12} color="white" />}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
                           <div style={{ width: 32, height: 32, borderRadius: f.kind === "folder" ? 8 : 6, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                             <HugeiconsIcon
-                              icon={encryptedView ? LockIcon : cfg.icon}
+                              icon={isHovered ? cfg.icon : encryptedView ? LockIcon : cfg.icon}
                               size={18}
-                              color={encryptedView ? "rgba(255,255,255,0.35)" : cfg.color}
+                              color={isHovered ? cfg.color : encryptedView ? "rgba(255,255,255,0.35)" : cfg.color}
                             />
                           </div>
                           <span
@@ -476,21 +696,22 @@ export default function Home() {
                               overflow: "hidden",
                               textOverflow: "ellipsis",
                               whiteSpace: "nowrap",
-                              fontFamily: encryptedView
+                              fontFamily: encryptedView && !isHovered
                                 ? "var(--font-geist-mono), monospace"
                                 : undefined,
-                              letterSpacing: encryptedView ? 0 : undefined,
+                              letterSpacing: encryptedView && !isHovered ? 0 : undefined,
+                              transition: "color 180ms ease",
                             }}
                           >
-                            {encryptedView ? mockCipher(f.name, 28) : f.name}
+                            {encryptedView && !isHovered ? mockCipher(f.name, 28) : f.name}
                           </span>
                         </div>
                         <div className="hidden md:flex" style={{ alignItems: "center", gap: 46 }}>
                           <div style={{ width: 100, display: "flex", justifyContent: "flex-end" }}>
-                            {!encryptedView && f.kind !== "folder" && ext && (
+                            {(!encryptedView || isHovered) && f.kind !== "folder" && ext && (
                               <span style={{ display: "flex", height: 20, alignItems: "center", justifyContent: "center", borderRadius: 4, background: "rgba(255,255,255,0.04)", padding: "0 6px", fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", color: "rgba(255,255,255,0.2)" }}>{ext}</span>
                             )}
-                            {encryptedView && f.kind !== "folder" && (
+                            {encryptedView && !isHovered && f.kind !== "folder" && (
                               <span style={{ display: "flex", height: 20, alignItems: "center", justifyContent: "center", borderRadius: 4, background: "rgba(255,255,255,0.04)", padding: "0 6px", fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", color: "rgba(255,255,255,0.2)" }}>???</span>
                             )}
                           </div>
@@ -515,8 +736,14 @@ export default function Home() {
       </section>
 
       {/* Three-column feature explainers */}
-      <section id="features" style={{ padding: "96px 32px 96px", maxWidth: 1600, margin: "0 auto" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 24 }}>
+      <section id="features" style={{ padding: `${SECTION_PAD_Y}px 32px`, maxWidth: SECTION_MAX, margin: "0 auto" }}>
+        <div style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 48px" }}>
+          <span style={EYEBROW_STYLE}>What makes it different</span>
+          <h2 style={H2_STYLE}>
+            Three promises we can actually keep.
+          </h2>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20 }}>
           {[
             {
               icon: LockIcon,
@@ -600,6 +827,115 @@ export default function Home() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Encrypt-anything interactive widget. Type a word, watch it
+          resolve into the same pseudo-ciphertext the server sees.
+          A tangible way to feel how zero-knowledge works without
+          writing a sentence of marketing copy. */}
+      <EncryptPlayground />
+
+      {/* Transparency block — honest inventory of what our servers
+          can and cannot see. The whole point of a zero-knowledge
+          app is that the list on the right is real, and the list on
+          the left is the legitimate minimum we need to run a cloud
+          service. Visitors who care about privacy scrutinize these
+          tradeoffs; stating them plainly builds more trust than any
+          generic "we value your privacy" copy. */}
+      <section style={{ padding: `${SECTION_PAD_Y}px 32px`, maxWidth: SECTION_MAX, margin: "0 auto" }}>
+        <div style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 48px" }}>
+          <span style={EYEBROW_STYLE}>Honest by design</span>
+          <h2 style={H2_STYLE}>
+            Here&apos;s everything we can&apos;t see.
+            <br />
+            And the little we can.
+          </h2>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: 20,
+          }}
+        >
+          {/* What we CAN'T see */}
+          <div style={{ background: "#1a1a1a", border: "1px solid rgba(110,210,170,0.2)", borderRadius: 16, padding: "28px 26px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(110,210,170,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <HugeiconsIcon icon={LockIcon} size={16} color="rgba(110,210,170,0.9)" />
+              </div>
+              <h3 style={{ fontSize: 17, fontWeight: 600, color: "white", letterSpacing: -0.3, margin: 0 }}>
+                What we can&apos;t see
+              </h3>
+            </div>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+              {[
+                { what: "File contents", why: "Every byte is encrypted in your browser before upload." },
+                { what: "Filenames and folder names", why: "Stored as ciphertext alongside the content." },
+                { what: "Your password", why: "SRP-6a means your password never leaves your device." },
+                { what: "Your recovery phrase", why: "Generated client-side, we only store a hash." },
+                { what: "What's inside a shared link", why: "The link key lives in the URL fragment, which browsers never send to us." },
+                { what: "Who a collaborator shares with downstream", why: "Re-shares wrap keys directly between client devices." },
+              ].map((item) => (
+                <li key={item.what} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <div style={{ flexShrink: 0, marginTop: 2 }}>
+                    <HugeiconsIcon icon={Tick01Icon} size={14} color="rgba(110,210,170,0.9)" />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, color: "white", fontWeight: 500, marginBottom: 2 }}>
+                      {item.what}
+                    </div>
+                    <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>
+                      {item.why}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* What we CAN see */}
+          <div style={{ background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: "28px 26px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <HugeiconsIcon icon={CloudServerIcon} size={16} color="rgba(255,255,255,0.55)" />
+              </div>
+              <h3 style={{ fontSize: 17, fontWeight: 600, color: "white", letterSpacing: -0.3, margin: 0 }}>
+                What we do see
+              </h3>
+            </div>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+              {[
+                { what: "Your email address", why: "Needed to sign you in and send account notifications." },
+                { what: "File sizes", why: "The number of encrypted bytes, not their content." },
+                { what: "Upload and modified timestamps", why: "When a file changed, never what changed." },
+                { what: "Sharing relationships", why: "Which accounts have access to which files, not what the files contain." },
+                { what: "Workspace membership", why: "Which users belong to which teams." },
+                { what: "IP and device info (temporarily)", why: "For rate limiting and abuse prevention. Not tied to content." },
+              ].map((item) => (
+                <li key={item.what} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <div style={{ flexShrink: 0, marginTop: 2 }}>
+                    <HugeiconsIcon icon={Cancel01Icon} size={14} color="rgba(255,255,255,0.45)" />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, color: "white", fontWeight: 500, marginBottom: 2 }}>
+                      {item.what}
+                    </div>
+                    <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>
+                      {item.why}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <p style={{ textAlign: "center", marginTop: 32, fontSize: 13, color: "rgba(255,255,255,0.4)", maxWidth: 640, marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
+          If you see anything on the right that surprises you, it&apos;s because we&apos;d rather be honest than
+          hide a metadata leak in fine print.
+        </p>
       </section>
     </div>
   );
