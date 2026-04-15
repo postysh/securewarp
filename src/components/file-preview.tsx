@@ -12,6 +12,7 @@ import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import { useFilesContext } from "@/hooks/use-files";
 import { isPreviewableMime, isTextPreviewMime } from "@/lib/mime-safety";
+import { CodePreview } from "@/components/code-preview";
 
 interface FilePreviewProps {
   fileId: string | null;
@@ -328,13 +329,10 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
           <PdfPreview blobUrl={preview.blobUrl} name={preview.name} />
         )}
 
-        {/* Text preview */}
+        {/* Text preview — CodePreview lazy-loads highlight.js and
+            falls back to plain <pre> for unrecognized extensions. */}
         {!loading && preview && textContent !== null && isText(preview.type) && (
-          <div className="w-[90vw] max-w-[800px] max-h-[85vh] overflow-auto rounded-lg bg-[#1a1a2e] p-6">
-            <pre className="text-[13px] text-white/80 font-mono whitespace-pre-wrap break-words leading-relaxed">
-              {textContent}
-            </pre>
-          </div>
+          <CodePreview text={textContent} filename={preview.name} />
         )}
 
         {/* Unsupported type */}

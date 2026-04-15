@@ -40,6 +40,7 @@ const PREVIEWABLE_IMAGE_MIMES = new Set([
   "image/avif",
   "image/heic",
   "image/heif",
+  "image/bmp",
   // SVG is safe ONLY when rendered via <img src> or as a CSS
   // background. Every major browser blocks <script> elements and
   // external resource fetches inside SVG loaded this way — it's a
