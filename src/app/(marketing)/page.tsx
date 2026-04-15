@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import HardDriveIcon from "@hugeicons/core-free-icons/HardDriveIcon";
 import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
@@ -29,13 +30,139 @@ import Key01Icon from "@hugeicons/core-free-icons/Key01Icon";
 
 const GREEN = "#04a45c";
 
+/**
+ * Logo reveal animation: each character starts as `*`, then cycles
+ * through random glyphs for a brief moment before resolving to the
+ * real letter. Lands left-to-right like a decryption sequence —
+ * fits the zero-knowledge positioning.
+ *
+ * The string width stays fixed throughout the animation because
+ * every in-between glyph is the same single-character monospace
+ * width, so the nav pill doesn't reflow during the reveal.
+ */
+function LogoReveal({ text }: { text: string }) {
+  // One cycle char per position. Starts with `*` for every slot, gets
+  // resolved to the real letter when that position's turn comes.
+  const [display, setDisplay] = useState<string[]>(() => text.split("").map(() => "*"));
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    const FRAME_MS = 40;          // glitch cycle speed per position
+    const REVEAL_DELAY = 110;     // delay between each position locking in
+    const CYCLES_PER_SLOT = 5;    // how many random chars flash before the real letter
+    const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ*/#@!$%&+<>?";
+
+    let cancelled = false;
+    const slots = text.split("");
+    const locked = slots.map(() => false);
+    const current = slots.map(() => "*");
+
+    // Drive the animation from a single interval so all still-cycling
+    // positions update in sync. Once a position is locked we stop
+    // scrambling it; when every position is locked we stop the loop.
+    let tick = 0;
+    const timer = setInterval(() => {
+      if (cancelled) return;
+      tick++;
+      for (let i = 0; i < slots.length; i++) {
+        if (locked[i]) continue;
+        // Only start cycling a position after its reveal delay has
+        // elapsed. Before that, leave it as `*`.
+        const startTick = Math.floor((i * REVEAL_DELAY) / FRAME_MS);
+        if (tick < startTick) continue;
+        const elapsed = tick - startTick;
+        if (elapsed >= CYCLES_PER_SLOT) {
+          current[i] = slots[i];
+          locked[i] = true;
+        } else {
+          current[i] = GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+        }
+      }
+      setDisplay([...current]);
+      if (locked.every(Boolean)) {
+        clearInterval(timer);
+        setRevealed(true);
+      }
+    }, FRAME_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [text]);
+
+  const handleClick = () => {
+    if (typeof window === "undefined") return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={!revealed}
+      aria-label={revealed ? `${text} — scroll to top` : text}
+      style={{
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        margin: 0,
+        color: "inherit",
+        font: "inherit",
+        // During the reveal the button is non-interactive so users
+        // can't trigger a scroll before the name finishes animating.
+        cursor: revealed ? "pointer" : "default",
+        fontFamily: "var(--font-geist-mono), monospace",
+        // Monospace + tabular-nums keeps every slot the same pixel
+        // width so the nav pill doesn't jitter as glyphs swap.
+        fontVariantNumeric: "tabular-nums",
+        letterSpacing: 1,
+      }}
+    >
+      {display.join("")}
+    </button>
+  );
+}
+
+/**
+ * Deterministic pseudo-ciphertext. Takes a seed string (the real
+ * filename / folder name), returns a fixed-length base64-looking
+ * string that stays stable across renders. Used to illustrate what
+ * our server actually stores — an opaque blob — instead of the
+ * plaintext the user sees.
+ */
+function mockCipher(seed: string, length = 24): string {
+  const alphabet =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/";
+  // FNV-1a hash to derive the initial seed. Math.imul keeps the
+  // multiplication in true 32-bit range; plain `*` loses precision
+  // for values above 2^53 and makes every output collapse to the
+  // same character.
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  // LCG to stream pseudo-random bytes. Same reason for Math.imul.
+  const out: string[] = [];
+  for (let i = 0; i < length; i++) {
+    h = (Math.imul(h, 1103515245) + 12345) >>> 0;
+    out.push(alphabet[h % alphabet.length]);
+  }
+  return out.join("");
+}
+
 export default function Home() {
+  const [encryptedView, setEncryptedView] = useState(false);
+
   return (
     <div style={{ fontFamily: "var(--font-chillax), var(--font-geist-sans), system-ui, sans-serif", background: "#111", minHeight: "100vh" }}>
 
       {/* Floating nav pill */}
       <div style={{ position: "fixed", left: "50%", top: 20, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 0, background: "rgba(30,30,30,0.95)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderRadius: 12, padding: "6px 6px 6px 10px", zIndex: 99999 }}>
-        <span style={{ padding: "8px 16px 8px 6px", fontSize: 14, fontWeight: 600, color: "white", letterSpacing: 0.5 }}>SECUREWARP</span>
+        <span style={{ padding: "8px 16px 8px 6px", fontSize: 14, fontWeight: 600, color: "white", letterSpacing: 0.5 }}>
+          <LogoReveal text="SECUREWARP" />
+        </span>
         <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.15)" }} />
         <Link href="#features" style={{ padding: "8px 16px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Features</Link>
         <Link href="#" style={{ padding: "8px 16px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>About</Link>
@@ -75,6 +202,81 @@ export default function Home() {
 
       {/* Dashboard mockup */}
       <section style={{ padding: "72px 32px 0" }}>
+        {/* Before/after toggle — lets visitors see the same files
+            as the user sees them (decrypted) vs what the server
+            actually stores (opaque ciphertext). Concrete proof of
+            the zero-knowledge claim in the copy above. */}
+        <div style={{ maxWidth: 1400, margin: "0 auto 16px", display: "flex", justifyContent: "center" }}>
+          <div
+            role="tablist"
+            aria-label="Dashboard view"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: 4,
+              background: "rgba(30,30,30,0.95)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 10,
+              fontFamily: "var(--font-geist-mono), monospace",
+            }}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!encryptedView}
+              onClick={() => setEncryptedView(false)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                fontSize: 11,
+                letterSpacing: 1,
+                textTransform: "uppercase",
+                color: !encryptedView ? "#111" : "rgba(255,255,255,0.6)",
+                background: !encryptedView ? "white" : "transparent",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: !encryptedView ? "rgba(4,164,92,0.9)" : "rgba(255,255,255,0.3)",
+                }}
+              />
+              What you see
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={encryptedView}
+              onClick={() => setEncryptedView(true)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                fontSize: 11,
+                letterSpacing: 1,
+                textTransform: "uppercase",
+                color: encryptedView ? "#111" : "rgba(255,255,255,0.6)",
+                background: encryptedView ? "white" : "transparent",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              <HugeiconsIcon icon={LockIcon} size={12} />
+              What we see
+            </button>
+          </div>
+        </div>
+
         <div style={{ background: "#111", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", overflow: "hidden", maxWidth: 1400, margin: "0 auto" }}>
           <div style={{ display: "flex", minHeight: 560 }}>
             {/* Sidebar */}
@@ -83,7 +285,20 @@ export default function Home() {
                 <div style={{ width: 28, height: 28, borderRadius: 6, background: GREEN, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: "white" }}>P</span>
                 </div>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "white", flex: 1 }}>Personal</span>
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "white",
+                    flex: 1,
+                    fontFamily: encryptedView ? "var(--font-geist-mono), monospace" : undefined,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {encryptedView ? mockCipher("Personal", 10) : "Personal"}
+                </span>
                 <HugeiconsIcon icon={UnfoldMoreIcon} size={14} color="rgba(255,255,255,0.3)" />
               </div>
               {[
@@ -106,9 +321,34 @@ export default function Home() {
                   { name: "Engineering", isFolder: true },
                   { name: "Q4 Report.pdf", isFolder: false },
                 ].map((pin) => (
-                  <div key={pin.name} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 10px", borderRadius: 6, fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
-                    <HugeiconsIcon icon={pin.isFolder ? Folder01Icon : File01Icon} size={15} color={pin.isFolder ? "rgb(100,170,220)" : "rgba(255,255,255,0.3)"} />
-                    {pin.name}
+                  <div
+                    key={pin.name}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "4px 10px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: "rgba(255,255,255,0.4)",
+                      fontFamily: encryptedView ? "var(--font-geist-mono), monospace" : undefined,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <HugeiconsIcon
+                      icon={encryptedView ? LockIcon : pin.isFolder ? Folder01Icon : File01Icon}
+                      size={15}
+                      color={
+                        encryptedView
+                          ? "rgba(255,255,255,0.3)"
+                          : pin.isFolder
+                            ? "rgb(100,170,220)"
+                            : "rgba(255,255,255,0.3)"
+                      }
+                    />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {encryptedView ? mockCipher(pin.name, 12) : pin.name}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -223,14 +463,35 @@ export default function Home() {
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
                           <div style={{ width: 32, height: 32, borderRadius: f.kind === "folder" ? 8 : 6, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                            <HugeiconsIcon icon={cfg.icon} size={18} color={cfg.color} />
+                            <HugeiconsIcon
+                              icon={encryptedView ? LockIcon : cfg.icon}
+                              size={18}
+                              color={encryptedView ? "rgba(255,255,255,0.35)" : cfg.color}
+                            />
                           </div>
-                          <span style={{ fontSize: 13, color: "white", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                          <span
+                            style={{
+                              fontSize: 13,
+                              color: "white",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              fontFamily: encryptedView
+                                ? "var(--font-geist-mono), monospace"
+                                : undefined,
+                              letterSpacing: encryptedView ? 0 : undefined,
+                            }}
+                          >
+                            {encryptedView ? mockCipher(f.name, 28) : f.name}
+                          </span>
                         </div>
                         <div className="hidden md:flex" style={{ alignItems: "center", gap: 46 }}>
                           <div style={{ width: 100, display: "flex", justifyContent: "flex-end" }}>
-                            {f.kind !== "folder" && ext && (
+                            {!encryptedView && f.kind !== "folder" && ext && (
                               <span style={{ display: "flex", height: 20, alignItems: "center", justifyContent: "center", borderRadius: 4, background: "rgba(255,255,255,0.04)", padding: "0 6px", fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", color: "rgba(255,255,255,0.2)" }}>{ext}</span>
+                            )}
+                            {encryptedView && f.kind !== "folder" && (
+                              <span style={{ display: "flex", height: 20, alignItems: "center", justifyContent: "center", borderRadius: 4, background: "rgba(255,255,255,0.04)", padding: "0 6px", fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", color: "rgba(255,255,255,0.2)" }}>???</span>
                             )}
                           </div>
                           <div style={{ width: 100, display: "flex", justifyContent: "flex-end" }}>
