@@ -2296,7 +2296,13 @@ export function useFiles(keys: {
   // show a badge ("from Engineering Team") instead of silently
   // returning matches from elsewhere.
   const searchIndexRef = useRef<SearchCacheEntry[] | null>(null);
-  const searchBuildingRef = useRef(false);
+  // Holds the in-flight cache-build promise so concurrent search
+  // calls await the same build instead of seeing an empty cache. The
+  // previous boolean flag let the second call skip the build branch
+  // while the first was still resolving — observed as "first search
+  // finds everything, second search finds nothing" until one search
+  // happened to wait long enough for the cache to land.
+  const searchBuildPromiseRef = useRef<Promise<void> | null>(null);
   const backfillRef = useRef<"unknown" | "running" | "done">("unknown");
 
   // Backfill the encrypted search index for any files that exist
@@ -2417,11 +2423,13 @@ export function useFiles(keys: {
       const trimmed = query.trim();
       // Build the metadata cache on first use so we can decrypt the
       // names of result files without a separate roundtrip per match.
-      // The cache is shared with the rest of the hook (rename, list,
-      // etc.) and invalidates on any mutation.
-      if (!searchIndexRef.current && !searchBuildingRef.current) {
-        searchBuildingRef.current = true;
-        try {
+      // Subsequent concurrent searches AWAIT the in-flight build
+      // promise instead of skipping it — that prevents the
+      // "first search finds everything, second finds nothing" race.
+      if (!searchIndexRef.current) {
+        if (!searchBuildPromiseRef.current) {
+          searchBuildPromiseRef.current = (async () => {
+            try {
           // Fetch the file list and the workspace list in parallel.
           // `includeWorkspaces=true` is critical here — without it the
           // search cache would only contain personal-drive files and
@@ -2550,10 +2558,12 @@ export function useFiles(keys: {
 
             searchIndexRef.current = index;
           }
-        } catch {
-          // Cache build failed; we can still serve empty queries.
+            } catch {
+              // Cache build failed; we can still serve empty queries.
+            }
+          })();
         }
-        searchBuildingRef.current = false;
+        await searchBuildPromiseRef.current;
       }
 
       // Kick off backfill in the background once the cache is up.
