@@ -468,6 +468,21 @@ INSERT INTO app_settings (key, value, description) VALUES
 -- get NULL by default, which is correct — they haven't been offered the
 -- display-name step yet and it's useful to prompt them once.
 ALTER TABLE users ADD COLUMN onboarded_at timestamptz;
+
+-- Admin user-delete cleanup. The admin hard-delete endpoint relies on
+-- cascades from `users` to wipe owned files, their keys/chunks/links,
+-- notifications, and live SRP challenges. `files.owner_id` and
+-- `srp_sessions.user_id` were created without ON DELETE CASCADE, so
+-- deleting any user who had ever owned a file (or started an unfinished
+-- SRP handshake) failed with an FK violation. Retrofit CASCADE on both.
+ALTER TABLE files
+  DROP CONSTRAINT files_owner_id_fkey,
+  ADD CONSTRAINT files_owner_id_fkey
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE srp_sessions
+  DROP CONSTRAINT srp_sessions_user_id_fkey,
+  ADD CONSTRAINT srp_sessions_user_id_fkey
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 ```
 
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from

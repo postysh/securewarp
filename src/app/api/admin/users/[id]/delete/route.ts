@@ -15,8 +15,15 @@ const BodySchema = z.object({
 /**
  * Hard-delete a user. Owner-only. Wipes:
  *   - all R2 blobs (files + chunks) owned by the user
- *   - the user row (cascades: files, file_keys, file_chunks, file_links,
- *     notifications, srp_sessions, sessions)
+ *   - the user row, which cascades to:
+ *       files (owner_id), file_keys (user_id), file_chunks (via files),
+ *       file_links (created_by + via files), notifications (user_id,
+ *       actor_user_id SET NULL), sessions, srp_sessions, workspace_members,
+ *       workspaces (owner_id → cascades the workspace root folder too).
+ *   Relies on the `files.owner_id → users.id ON DELETE CASCADE` and
+ *   `srp_sessions.user_id → users.id ON DELETE CASCADE` FKs added in the
+ *   Phase 8 follow-up migration. Older deployments missing those cascades
+ *   will hit an FK violation here.
  *
  * Identical mechanics to `/api/auth/delete-account` (user-initiated), but
  * executed against another user. Can't delete yourself via this endpoint —
