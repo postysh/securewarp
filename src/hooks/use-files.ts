@@ -32,7 +32,21 @@ import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
 import { indexFile } from "@/lib/search/index-file";
 import { tokenizeQuery } from "@/lib/search/tokenize";
 import { hashTokens } from "@/lib/search/hash-token";
-import { readTextForIndex } from "@/lib/search/text-extract";
+import { readTextForIndex, isBackfillCandidate, extractTextFromBytes } from "@/lib/search/text-extract";
+
+interface SearchCacheEntry {
+  id: string;
+  name: string;
+  isFolder: boolean;
+  parentId: string | null;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  // MIME type and size are needed by the content-backfill pass to
+  // decide whether a file is worth downloading and tokenizing.
+  // Folders carry type === "folder" and size 0.
+  type: string;
+  size: number;
+}
 
 export interface FileCollaboratorPreview {
   userId: string;
@@ -2278,56 +2292,126 @@ export function useFiles(keys: {
   // ── Search index ─────────────────────────────────────────────────
   // Lazily built on first search, cached for the session. Contains
   // every file the user can access with decrypted names.
-  const searchIndexRef = useRef<{ id: string; name: string; isFolder: boolean; parentId: string | null }[] | null>(null);
+  // Cache shape includes the workspace context so search results can
+  // show a badge ("from Engineering Team") instead of silently
+  // returning matches from elsewhere.
+  const searchIndexRef = useRef<SearchCacheEntry[] | null>(null);
   const searchBuildingRef = useRef(false);
   const backfillRef = useRef<"unknown" | "running" | "done">("unknown");
 
   // Backfill the encrypted search index for any files that exist
   // pre-search. Runs once per session, lazily — kicked off the first
-  // time the user invokes search after the cache is built. Posts
-  // tokens for every cached file in parallel, marks the user as
-  // indexed, returns. Failures are best-effort: the next session will
-  // try again because `search_indexed_at` only flips to non-null on
-  // success.
+  // time the user invokes search after the cache is built.
+  //
+  // Two passes:
+  //   1. Names — tokenize every cached file's filename. Cheap (no
+  //      bytes downloaded). Marked complete via search_indexed_at.
+  //   2. Content — for text/Office files under the size cap, download,
+  //      decrypt, tokenize body, re-index with content. Heavy (bytes
+  //      cross the network) but bounded: only previewable types, only
+  //      under 2MB text / 10MB office. Marked complete via
+  //      search_content_indexed_at.
+  //
+  // Both timestamps only flip on success so a partial run retries on
+  // next session.
   const runBackfill = useCallback(async () => {
     if (!keys?.searchIndexKey) return;
     if (backfillRef.current !== "unknown") return;
     backfillRef.current = "running";
     try {
       const statusRes = await fetch("/api/files/search/status");
+      let namesDone = false;
+      let contentDone = false;
       if (statusRes.ok) {
         const status = await statusRes.json();
-        if (status.indexedAt) {
-          backfillRef.current = "done";
-          return;
-        }
+        namesDone = !!status.indexedAt;
+        contentDone = !!status.contentIndexedAt;
+      }
+      if (namesDone && contentDone) {
+        backfillRef.current = "done";
+        return;
       }
       const cache = searchIndexRef.current ?? [];
-      // Cap parallelism so large accounts don't open hundreds of
-      // simultaneous requests against the Worker.
-      const PARALLEL = 6;
-      let cursor = 0;
-      const workers = Array.from({ length: PARALLEL }, async () => {
-        while (cursor < cache.length) {
-          const i = cursor++;
-          await indexFile({
-            fileId: cache[i].id,
-            filename: cache[i].name,
-            searchIndexKeyB64: keys.searchIndexKey!,
-          });
-        }
-      });
-      await Promise.all(workers);
-      await fetch("/api/files/search/status", { method: "POST" });
+
+      // Pass 1: filenames (skip if already done).
+      if (!namesDone) {
+        const PARALLEL = 6;
+        let cursor = 0;
+        const workers = Array.from({ length: PARALLEL }, async () => {
+          while (cursor < cache.length) {
+            const i = cursor++;
+            await indexFile({
+              fileId: cache[i].id,
+              filename: cache[i].name,
+              searchIndexKeyB64: keys.searchIndexKey!,
+            });
+          }
+        });
+        await Promise.all(workers);
+        await fetch("/api/files/search/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ which: "names" }),
+        });
+      }
+
+      // Pass 2: content for text/Office files. Lower parallelism
+      // because each call downloads + decrypts + tokenizes a file —
+      // CPU and bandwidth are the bottleneck, not request count.
+      if (!contentDone) {
+        const candidates = cache.filter(
+          (f) =>
+            !f.isFolder &&
+            isBackfillCandidate(f.type, f.name, f.size),
+        );
+        const CONTENT_PARALLEL = 2;
+        let cIdx = 0;
+        const cWorkers = Array.from({ length: CONTENT_PARALLEL }, async () => {
+          while (cIdx < candidates.length) {
+            const i = cIdx++;
+            const entry = candidates[i];
+            try {
+              const res = await previewFile(entry.id);
+              if (!res.ok) continue;
+              const blobRes = await fetch(res.blobUrl);
+              const buf = await blobRes.arrayBuffer();
+              const bytes = new Uint8Array(buf);
+              const text = await extractTextFromBytes(bytes, res.type, entry.name);
+              try { bytes.fill(0); } catch { /* detached */ }
+              URL.revokeObjectURL(res.blobUrl);
+              if (text) {
+                await indexFile({
+                  fileId: entry.id,
+                  filename: entry.name,
+                  content: text,
+                  searchIndexKeyB64: keys.searchIndexKey!,
+                });
+              }
+            } catch {
+              // Skip this file; the next sign-in will retry the whole
+              // pass since contentIndexedAt only flips to non-null
+              // after the loop completes.
+            }
+          }
+        });
+        await Promise.all(cWorkers);
+        await fetch("/api/files/search/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ which: "content" }),
+        });
+      }
+
       backfillRef.current = "done";
     } catch {
       // Leave backfillRef at "running" so a later searchFiles call
-      // doesn't re-enter; we'll retry on next session.
+      // doesn't re-enter; next session will retry whichever pass(es)
+      // still have null timestamps.
     }
-  }, [keys]);
+  }, [keys, previewFile]);
 
   const searchFiles = useCallback(
-    async (query: string): Promise<{ id: string; name: string; isFolder: boolean; parentId: string | null }[]> => {
+    async (query: string): Promise<{ id: string; name: string; isFolder: boolean; parentId: string | null; workspaceId: string | null; workspaceName: string | null }[]> => {
       if (!keys) return [];
 
       const trimmed = query.trim();
@@ -2338,10 +2422,23 @@ export function useFiles(keys: {
       if (!searchIndexRef.current && !searchBuildingRef.current) {
         searchBuildingRef.current = true;
         try {
-          const res = await fetch("/api/files/list?all=true");
-          const data = await res.json();
-          if (res.ok) {
-            const index: { id: string; name: string; isFolder: boolean; parentId: string | null }[] = [];
+          // Fetch the file list and the workspace list in parallel.
+          // `includeWorkspaces=true` is critical here — without it the
+          // search cache would only contain personal-drive files and
+          // every workspace match would be silently dropped during the
+          // result-projection step.
+          const [filesRes, wsRes] = await Promise.all([
+            fetch("/api/files/list?all=true&includeWorkspaces=true"),
+            fetch("/api/workspaces"),
+          ]);
+          const data = await filesRes.json();
+          const wsData = wsRes.ok ? await wsRes.json() : { workspaces: [] };
+          const wsNameById = new Map<string, string>();
+          for (const ws of (wsData.workspaces ?? []) as { id: string; name: string }[]) {
+            wsNameById.set(ws.id, ws.name);
+          }
+          if (filesRes.ok) {
+            const index: SearchCacheEntry[] = [];
             for (const f of data.files) {
               const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
               if (!encPrivHier) continue;
@@ -2351,7 +2448,17 @@ export function useFiles(keys: {
                 const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata) : f.encrypted_metadata;
                 const meta = decryptMetadata(encMeta, sk);
                 sk.fill(0);
-                index.push({ id: f.id, name: meta.name, isFolder: f.is_folder, parentId: f.parent_id ?? null });
+                const wsId = (f.workspace_id as string | null) ?? null;
+                index.push({
+                  id: f.id,
+                  name: meta.name,
+                  isFolder: f.is_folder,
+                  parentId: f.parent_id ?? null,
+                  workspaceId: wsId,
+                  workspaceName: wsId ? (wsNameById.get(wsId) ?? null) : null,
+                  type: typeof meta.type === "string" ? meta.type : "",
+                  size: typeof meta.size === "number" ? meta.size : 0,
+                });
               } catch {
                 // skip undecryptable
               }

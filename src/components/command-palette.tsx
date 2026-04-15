@@ -20,7 +20,7 @@ interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   onAction?: (action: string) => void;
-  onOpenFile?: (fileId: string, isFolder: boolean) => void;
+  onOpenFile?: (fileId: string, isFolder: boolean, name?: string) => void;
 }
 
 interface SearchItem {
@@ -30,6 +30,10 @@ interface SearchItem {
   iconColor: string;
   section: "files" | "actions";
   isFolder?: boolean;
+  // Workspace context for file results — null for personal-drive
+  // matches, set to the workspace name for any file living inside a
+  // workspace. Used to render the "from <workspace>" badge.
+  workspaceName?: string | null;
 }
 
 const quickActions: SearchItem[] = [
@@ -86,6 +90,7 @@ export function CommandPalette({ open, onClose, onAction, onOpenFile }: CommandP
           iconColor: f.isFolder ? "var(--accent-blue-primary)" : "var(--icon-secondary)",
           section: "files" as const,
           isFolder: f.isFolder,
+          workspaceName: f.workspaceName,
         }))
       );
       setSearching(false);
@@ -111,7 +116,7 @@ export function CommandPalette({ open, onClose, onAction, onOpenFile }: CommandP
     if (item.section === "actions" && onAction) {
       onAction(item.id);
     } else if (item.section === "files" && onOpenFile) {
-      onOpenFile(item.id, item.isFolder ?? false);
+      onOpenFile(item.id, item.isFolder ?? false, item.label);
     }
     onClose();
   };
@@ -152,6 +157,16 @@ export function CommandPalette({ open, onClose, onAction, onOpenFile }: CommandP
               <span className={`flex-1 text-left truncate ${selectedIndex === idx ? "text-text-primary" : "text-text-secondary"}`}>
                 {item.label}
               </span>
+              {item.section === "files" && item.workspaceName && (
+                <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-field text-text-tertiary truncate max-w-[140px]">
+                  {item.workspaceName}
+                </span>
+              )}
+              {item.section === "files" && item.workspaceName === null && (
+                <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-field text-text-tertiary">
+                  My Drive
+                </span>
+              )}
               {selectedIndex === idx && (
                 <HugeiconsIcon icon={ArrowTurnDownIcon} size={12} color="var(--icon-tertiary)" />
               )}

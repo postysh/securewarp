@@ -60,6 +60,54 @@ export function isLikelyTextFile(mime: string, name: string): boolean {
 }
 
 /**
+ * True if a file is a candidate for content backfill — text-like or
+ * Office, AND under the relevant size cap. Used by the backfill path
+ * to decide which files to download for tokenization.
+ */
+export function isBackfillCandidate(mime: string, name: string, size: number): boolean {
+  if (isLikelyTextFile(mime, name) && size <= MAX_BYTES) return true;
+  if ((isDocxMime(mime) || isXlsxMime(mime)) && size <= MAX_OFFICE_BYTES) return true;
+  return false;
+}
+
+/**
+ * Extract searchable text from already-decrypted bytes + a known
+ * MIME/filename. Used by the backfill path which decrypts via
+ * `previewFile` and hands us the plaintext bytes directly (no File
+ * object exists for cloud-stored files, only ArrayBuffer-ish blobs).
+ */
+export async function extractTextFromBytes(
+  bytes: Uint8Array,
+  mime: string,
+  name: string,
+): Promise<string | null> {
+  if (isLikelyTextFile(mime, name)) {
+    if (bytes.byteLength > MAX_BYTES) return null;
+    try {
+      return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    } catch {
+      return null;
+    }
+  }
+  if (isDocxMime(mime) || isXlsxMime(mime)) {
+    if (bytes.byteLength > MAX_OFFICE_BYTES) return null;
+    try {
+      const copy = new Uint8Array(bytes.byteLength);
+      copy.set(bytes);
+      try {
+        if (isDocxMime(mime)) return await extractDocx(copy.buffer as ArrayBuffer);
+        return await extractXlsx(copy.buffer as ArrayBuffer);
+      } finally {
+        try { copy.fill(0); } catch { /* detached */ }
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
  * Returns plaintext content suitable for the search tokenizer, or
  * null if the file isn't indexable or exceeds its size cap.
  *

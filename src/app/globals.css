@@ -34,8 +34,17 @@
   --color-accent-pink: var(--accent-pink-primary);
   --color-accent-dark-blue: var(--accent-dark-blue-primary);
   --color-glass: var(--glass-color);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-chillax), var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
+}
+
+/* Apply the brand sans to every element by default. Tailwind v4's
+   @theme exposes `font-sans` as a utility but doesn't auto-apply it
+   to html/body, so without this declaration components that don't
+   explicitly use `font-sans` (most of them) would fall back to the
+   browser default UI font instead of Chillax. */
+html, body {
+  font-family: var(--font-sans);
 }
 
 /* Light */

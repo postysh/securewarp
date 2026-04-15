@@ -41,6 +41,10 @@ yarn-error.log*
 .wrangler
 cloudflare-env.d.ts
 
+# Tooling / fonts source
+.emdash.json
+/Chillax Complete/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

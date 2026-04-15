@@ -1911,14 +1911,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             case "a6": fileOps.setViewMode("trash"); break;
           }
         }}
-        onOpenFile={(fileId, isFolder) => {
+        onOpenFile={(fileId, isFolder, name) => {
           if (isFolder) {
+            // Prefer the locally-loaded files list for the freshest
+            // name, but fall back to the name passed from the search
+            // result (or, finally, a generic placeholder) so the
+            // breadcrumb never shows the literal word "Folder".
             const f = fileOps.files.find((x) => x.id === fileId);
-            if (f) {
-              fileOps.navigateToFolder(f.id, f.name);
-            } else {
-              fileOps.navigateToFolder(fileId, "Folder");
-            }
+            const resolvedName = f?.name ?? name ?? "Folder";
+            fileOps.navigateToFolder(fileId, resolvedName);
           } else {
             setPreviewFileId(fileId);
           }

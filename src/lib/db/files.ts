@@ -711,31 +711,40 @@ export async function getRecentForUser(userId: string): Promise<FileRowWithKey[]
  * scoping. Used to build the client-side search index. Capped at
  * 500 rows to keep the response reasonable.
  */
-export async function getAllAccessibleFiles(userId: string): Promise<FileRowWithKey[]> {
-  // Owned files
-  const { data: owned, error: ownErr } = await supabase
+export async function getAllAccessibleFiles(
+  userId: string,
+  options: { includeWorkspaces?: boolean } = {},
+): Promise<FileRowWithKey[]> {
+  const { includeWorkspaces = false } = options;
+
+  // Owned files. By default we exclude workspace files because the
+  // primary caller (export-as-zip) only handles personal drive. Search
+  // passes includeWorkspaces=true so its cache covers the user's full
+  // accessible set.
+  let ownedQuery = supabase
     .from("files")
     .select(LIST_SELECT)
     .eq("owner_id", userId)
     .eq("file_keys.user_id", userId)
     .eq("upload_complete", true)
     .eq("is_workspace_root", false)
-    .is("deleted_at", null)
-    .is("workspace_id", null)
-    .limit(500);
+    .is("deleted_at", null);
+  if (!includeWorkspaces) ownedQuery = ownedQuery.is("workspace_id", null);
+  const { data: owned, error: ownErr } = await ownedQuery.limit(500);
   if (ownErr) throw new Error(`Failed to fetch owned files: ${ownErr.message}`);
 
-  // Shared files (where user has a direct file_keys row but isn't owner)
-  const { data: shared, error: sharedErr } = await supabase
+  // Shared files (where user has a direct file_keys row but isn't
+  // owner). Same workspace inclusion logic as above.
+  let sharedQuery = supabase
     .from("files")
     .select(LIST_SELECT)
     .eq("file_keys.user_id", userId)
     .neq("owner_id", userId)
     .eq("upload_complete", true)
     .eq("is_workspace_root", false)
-    .is("deleted_at", null)
-    .is("workspace_id", null)
-    .limit(200);
+    .is("deleted_at", null);
+  if (!includeWorkspaces) sharedQuery = sharedQuery.is("workspace_id", null);
+  const { data: shared, error: sharedErr } = await sharedQuery.limit(200);
   if (sharedErr) throw new Error(`Failed to fetch shared files: ${sharedErr.message}`);
 
   const ownedRows = (owned || []).map((r) => shapeRow(r as unknown as FileJoinRow));

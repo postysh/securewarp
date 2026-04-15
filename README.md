@@ -505,10 +505,13 @@ CREATE TABLE file_search_tokens (
 CREATE INDEX file_search_tokens_lookup_idx
   ON file_search_tokens (user_id, token_hash);
 
--- One-time backfill marker. NULL means "this user pre-dates encrypted
--- search and needs to reindex their existing files." Set to now() once
--- the client has finished a full pass.
+-- Backfill markers. NULL means "this user pre-dates the corresponding
+-- pass and needs to reindex." Each is set to now() once the client
+-- finishes a full pass over the user's accessible files.
+--   search_indexed_at         → filename / folder name pass
+--   search_content_indexed_at → text + Office body content pass
 ALTER TABLE users ADD COLUMN search_indexed_at timestamptz;
+ALTER TABLE users ADD COLUMN search_content_indexed_at timestamptz;
 
 -- RLS belt-and-braces (the API uses the service-role client, but
 -- enabling RLS prevents anonymous-key access if it ever leaks).

@@ -28,6 +28,7 @@ export async function GET(request: Request) {
     const starred = searchParams.get("starred") === "true";
     const recent = searchParams.get("recent") === "true";
     const all = searchParams.get("all") === "true";
+    const includeWorkspaces = searchParams.get("includeWorkspaces") === "true";
     const parentId = searchParams.get("parentId") || null;
     const cursor = searchParams.get("cursor") || undefined;
     const workspaceId = searchParams.get("workspaceId") || null;
@@ -36,7 +37,7 @@ export async function GET(request: Request) {
     let nextCursor: string | null = null;
 
     if (all) {
-      files = await getAllAccessibleFiles(session.userId);
+      files = await getAllAccessibleFiles(session.userId, { includeWorkspaces });
     } else if (starred) {
       files = await getStarredForUser(session.userId);
     } else if (recent) {
