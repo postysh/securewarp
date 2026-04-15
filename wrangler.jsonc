@@ -28,14 +28,14 @@
   // Static assets emitted by OpenNext build (public/ + Next.js static files).
   "assets": {
     "binding": "ASSETS",
-    "directory": ".open-next/assets"
+    "directory": ".open-next/assets",
   },
 
   // Observability — logs visible via `wrangler tail` and in the Cloudflare
   // dashboard. Sampled at 100% for now; dial down if log volume blows up.
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 1,
   },
 
   // R2 bucket binding for encrypted file blobs. The bucket already exists
@@ -46,8 +46,8 @@
   "r2_buckets": [
     {
       "binding": "R2_BUCKET_BINDING",
-      "bucket_name": "securewarp"
-    }
+      "bucket_name": "securewarp",
+    },
   ],
 
   // Non-secret email config. EMAIL_FROM must match a sender identity
@@ -56,10 +56,22 @@
   // Leave these empty here and override per-environment if needed; when
   // RESEND_API_KEY is unset at runtime, src/lib/email/send.ts runs in
   // dev no-op mode.
+  // `NEXT_PUBLIC_PDF_VIEWER_ORIGIN` activates the isolated PDF viewer
+  // on pdf.securewarp.com. It must be set at BUILD time, not runtime —
+  // Next.js inlines NEXT_PUBLIC_* vars into the client bundle during
+  // `next build`. If you set it in wrangler but not as a build env,
+  // the client won't know about it.
+  //
+  // Until DNS for pdf.securewarp.com is pointed at this Worker AND
+  // the subdomain is added to the custom-domain list in the Cloudflare
+  // dashboard, leave this empty. The client falls back gracefully to
+  // the same-origin inline PDF iframe, which still works correctly;
+  // activating it prematurely just means PDFs fail to preview.
   "vars": {
     "EMAIL_FROM": "SecureWarp <noreply@mail.securewarp.com>",
-    "EMAIL_REPLY_TO": ""
-  }
+    "EMAIL_REPLY_TO": "",
+    "NEXT_PUBLIC_PDF_VIEWER_ORIGIN": "https://pdf.securewarp.com",
+  },
 
   // NOTE on scheduled cleanup: Cloudflare Cron Triggers invoke a Worker's
   // `scheduled()` handler, not an HTTP route, and OpenNext doesn't wire
@@ -70,4 +82,17 @@
   //   (b) add a companion Worker that runs scheduled() and fetches the URL.
   // Not wiring `triggers.crons` here because the default would 404 — the
   // route is at `/api/admin/cleanup-stale`, not at `scheduled()`.
+  //
+  // NOTE on PDF subdomain: the isolated PDF viewer ships at
+  // pdf.securewarp.com. To activate it you need to:
+  //   (1) Add `pdf.securewarp.com` as a CNAME in Cloudflare DNS
+  //       (or any subdomain record pointing to the Worker).
+  //   (2) Add `pdf.securewarp.com` as a custom domain on this Worker
+  //       via the Cloudflare dashboard → Workers & Pages → securewarp
+  //       → Settings → Domains & Routes.
+  //   (3) Set NEXT_PUBLIC_PDF_VIEWER_ORIGIN=https://pdf.securewarp.com
+  //       above and redeploy. Rebuild is required — the value is
+  //       inlined into the client bundle.
+  // Middleware already restricts pdf.securewarp.com to only /viewer;
+  // everything else 302s back to www.
 }

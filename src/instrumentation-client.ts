@@ -1,6 +1,19 @@
 import * as Sentry from "@sentry/nextjs";
 
-Sentry.init({
+// Skip Sentry on the isolated PDF viewer subdomain. The viewer's CSP
+// (`connect-src 'self'`) blocks the tunnel POST anyway, so initializing
+// Sentry there only produces noise:
+//   - blocked /sentry-tunnel POSTs in the console
+//   - cross-origin frame-access errors from Sentry's auto-instrumentation
+//     trying to read iframe state across the main↔viewer origin boundary
+// The viewer is intentionally analytics-free per the threat model
+// (see AGENTS.md → "File-preview safety").
+const isViewerOrigin =
+  typeof window !== "undefined" &&
+  window.location.hostname.startsWith("pdf.");
+
+if (!isViewerOrigin) {
+  Sentry.init({
   dsn: "https://050c7bc5aa26792e2b3d73cf4d7c296f@o4511205422137344.ingest.us.sentry.io/4511205432819712",
 
   // Don't send PII — zero-knowledge app
@@ -30,6 +43,7 @@ Sentry.init({
     }
     return event;
   },
-});
+  });
+}
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

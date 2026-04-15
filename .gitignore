@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# .env.production holds non-secret NEXT_PUBLIC_* build-time vars that
+# must be inlined into the client bundle on every build (local + CI).
+!.env.production
 
 # cloudflare / opennext
 .open-next

@@ -28,6 +28,7 @@ import {
 } from "@/lib/crypto/chunked-encryption";
 import { decryptFileContent } from "@/lib/crypto/file-crypto";
 import { toBase64, fromBase64 } from "@/lib/crypto/utils";
+import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
 
 export interface FileCollaboratorPreview {
   userId: string;
@@ -835,8 +836,11 @@ export function useFiles(keys: {
         decryptedContent = decryptFileContent(encrypted, data.encryptionNonce, sessionKey);
       }
 
-      // 5. Create download
-      const blob = new Blob([new Uint8Array(decryptedContent)], { type: meta.type });
+      // 5. Create download. Force application/octet-stream on the Blob
+      // so that even if the user middle-clicks the anchor or the
+      // browser auto-opens certain MIME types, it gets handled as a
+      // save-to-disk action — never inline rendered as HTML/SVG/XML.
+      const blob = new Blob([new Uint8Array(decryptedContent)], { type: safeMimeForDownload(meta.type) });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -923,7 +927,15 @@ export function useFiles(keys: {
           );
         }
 
-        const blob = new Blob([new Uint8Array(decryptedContent)], { type: meta.type });
+        // Defense in depth: the MIME inside encrypted metadata is
+        // uploader-supplied. safeMimeForBlob coerces unrecognized or
+        // dangerous types (text/html, SVG, etc.) to octet-stream so
+        // the preview pipeline can never render uploaded HTML as
+        // same-origin script. We keep the original `type` in the
+        // returned object so callers can still branch on it for the
+        // correct render path.
+        const safeMime = safeMimeForBlob(meta.type);
+        const blob = new Blob([new Uint8Array(decryptedContent)], { type: safeMime });
         return { ok: true, blobUrl: URL.createObjectURL(blob), name: meta.name, type: meta.type };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Preview failed";

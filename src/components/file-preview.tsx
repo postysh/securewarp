@@ -11,6 +11,7 @@ import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import { useFilesContext } from "@/hooks/use-files";
+import { isPreviewableMime, isTextPreviewMime } from "@/lib/mime-safety";
 
 interface FilePreviewProps {
   fileId: string | null;
@@ -19,31 +20,26 @@ interface FilePreviewProps {
   onNavigate: (fileId: string) => void;
 }
 
+// Per-category predicates intersect the explicit allowlist in
+// mime-safety.ts. They must stay in sync — `isPreviewableMime`
+// returning true for a MIME that no render branch handles would show
+// an unusable placeholder, but it won't compromise security. The
+// reverse (a render branch that accepts a non-allowlisted MIME) is
+// the real hazard; don't add one.
 function isImage(type: string): boolean {
-  return type.startsWith("image/");
+  return isPreviewableMime(type) && type.startsWith("image/");
 }
 function isVideo(type: string): boolean {
-  return type.startsWith("video/");
+  return isPreviewableMime(type) && type.startsWith("video/");
 }
 function isAudio(type: string): boolean {
-  return type.startsWith("audio/");
+  return isPreviewableMime(type) && type.startsWith("audio/");
 }
 function isText(type: string): boolean {
-  return (
-    type.startsWith("text/") ||
-    type === "application/json" ||
-    type === "application/xml" ||
-    type === "text/xml"
-  );
+  return isTextPreviewMime(type);
 }
 function isPreviewable(type: string): boolean {
-  return (
-    isImage(type) ||
-    isVideo(type) ||
-    isAudio(type) ||
-    type === "application/pdf" ||
-    isText(type)
-  );
+  return isPreviewableMime(type);
 }
 
 const MIN_ZOOM = 0.1;
@@ -328,36 +324,8 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
           </div>
         )}
 
-        {/* PDF preview — blob URLs don't render inline reliably in
-             Safari/WebKit, so we show a card with Open + Download
-             buttons. window.open(blobUrl) works in all browsers. */}
         {!loading && preview && preview.type === "application/pdf" && (
-          <div className="flex flex-col items-center gap-5 max-w-[360px] text-center">
-            <div className="w-20 h-20 rounded-2xl bg-white/5 flex items-center justify-center">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-                <polyline points="10 9 9 9 8 9" />
-              </svg>
-            </div>
-            <span className="text-[14px] text-white/70">{preview.name}</span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => window.open(preview.blobUrl, "_blank")}
-                className="h-[36px] px-5 rounded-[8px] text-[13px] font-medium bg-white/10 text-white hover:bg-white/20 transition-colors cursor-pointer"
-              >
-                Open PDF
-              </button>
-              <button
-                onClick={triggerDownload}
-                className="h-[36px] px-5 rounded-[8px] text-[13px] font-medium text-white/60 hover:text-white border border-white/20 hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                Download
-              </button>
-            </div>
-          </div>
+          <PdfPreview blobUrl={preview.blobUrl} name={preview.name} />
         )}
 
         {/* Text preview */}
@@ -396,5 +364,96 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
       )}
     </div>,
     document.body
+  );
+}
+
+/**
+ * PDF preview with optional subdomain isolation.
+ *
+ * When `NEXT_PUBLIC_PDF_VIEWER_ORIGIN` is set at build time (e.g.
+ * `https://pdf.securewarp.com`), PDFs render through an iframe at
+ * that origin. The iframe hosts `/viewer`, which is a small page
+ * that does nothing but accept PDF bytes via postMessage and render
+ * them via its own blob URL. A malicious PDF that exploits the
+ * viewer can't reach the main app's cookies or storage because the
+ * iframe is on a different origin.
+ *
+ * When the env var is unset (no DNS configured yet, local dev), the
+ * component falls back to the same-origin inline iframe — same
+ * security posture as before this change, so shipping the code
+ * before DNS is wired doesn't regress anything.
+ *
+ * Neither Chrome's PDFium nor Firefox's PDF.js works with
+ * `sandbox` attributes that block scripts (the viewer UI itself
+ * needs to run JS), so isolation via origin is the only path to a
+ * true cross-domain boundary. See AGENTS.md → "File-preview safety".
+ */
+function PdfPreview({ blobUrl, name }: { blobUrl: string; name: string }) {
+  const viewerOrigin = process.env.NEXT_PUBLIC_PDF_VIEWER_ORIGIN?.trim();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!viewerOrigin) return;
+    let cancelled = false;
+
+    const handler = async (e: MessageEvent) => {
+      if (cancelled) return;
+      if (e.origin !== viewerOrigin) return;
+      if (!e.data || typeof e.data !== "object") return;
+      if ((e.data as { type?: unknown }).type !== "viewer-ready") return;
+      try {
+        // Re-fetch the blob to get raw bytes. The blob URL is
+        // same-origin to the main app, so this is just a memory copy;
+        // no network. Transferring the buffer avoids a second copy
+        // across the postMessage structured-clone boundary.
+        const buf = await (await fetch(blobUrl)).arrayBuffer();
+        if (cancelled) return;
+        const bytes = new Uint8Array(buf);
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: "pdf-bytes", bytes },
+          viewerOrigin,
+          [bytes.buffer]
+        );
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    };
+
+    window.addEventListener("message", handler);
+
+    // If the viewer never reports ready (DNS not set up, origin
+    // unreachable, etc.), fall back to the inline render.
+    const timeout = setTimeout(() => {
+      if (!cancelled) setFailed(true);
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("message", handler);
+      clearTimeout(timeout);
+    };
+  }, [viewerOrigin, blobUrl]);
+
+  if (!viewerOrigin || failed) {
+    // Fallback path: same-origin inline iframe, equivalent to the
+    // pre-Phase-2 behavior. Used when the subdomain isn't configured
+    // or the viewer failed to load.
+    return (
+      <iframe
+        src={blobUrl}
+        title={name}
+        className="w-[95vw] h-[90vh] rounded-lg bg-white"
+      />
+    );
+  }
+
+  return (
+    <iframe
+      ref={iframeRef}
+      src={`${viewerOrigin}/viewer`}
+      title={name}
+      className="w-[95vw] h-[90vh] rounded-lg bg-white"
+    />
   );
 }

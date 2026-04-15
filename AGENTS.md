@@ -332,6 +332,96 @@ the password alone — no SRP, no server round-trip.
   reachable today (the create flow can't introduce one), but the
   throw gives us a loud alarm if it ever does.
 
+## Threat model — who we protect against
+
+The server is assumed hostile or compromised. Database breach, R2
+breach, rogue operator, TLS interception — none of these reveal
+plaintext content, file names, or the user's password. If a code
+change would weaken that, stop and flag it.
+
+**We defend against**
+
+- Server-side adversaries (including us): ciphertext-only storage,
+  SRP so the password never leaves the client, Argon2id-wrapped
+  verifier, public keys only for the asymmetric layer.
+- Database breach: even with the full DB + R2 contents, content and
+  names stay encrypted; only metadata (email, timestamps, file
+  sizes, sharing relationships) is exposed.
+- Active network attackers on our own domain: strict CSP with
+  `frame-ancestors 'none'`, COOP/CORP, HSTS + preload, nosniff.
+- Malicious file uploads rendering as same-origin code: the preview
+  pipeline coerces unknown MIMEs to `application/octet-stream` and
+  runs PDFs in a sandboxed iframe with origin `null`. See next
+  section.
+
+**We do NOT defend against**
+
+- Malware on the user's device. If the browser or OS is owned, so
+  are decrypted keys.
+- Users picking weak passwords. Argon2id slows offline guessing but
+  doesn't save you from "password123".
+- Users losing both password and recovery phrase. There is no master
+  key; account recovery is impossible by design.
+- Metadata leakage. Email, login timestamps, IP, file sizes,
+  sharing graph — all visible server-side. Only bodies and names
+  are encrypted.
+- Collaborator leak. A user you share with can cache decrypted
+  content. Phase 5 rotation invalidates new access but can't
+  un-decrypt what someone already downloaded.
+
+Concrete list + reporting process lives in `SECURITY.md`. Update
+both files together if the threat model changes.
+
+## File-preview safety
+
+Preview is the most exposed surface that takes uploaded bytes and
+hands them to the browser. The invariants live in
+`src/lib/mime-safety.ts`:
+
+- `safeMimeForBlob(mime)` is the only function that should decide
+  the `type` for a Blob the browser will render inline. It coerces
+  anything not on the preview allowlist to
+  `application/octet-stream`.
+- `safeMimeForDownload()` always returns `application/octet-stream`
+  so downloaded Blobs cannot be inline-rendered if the anchor is
+  middle-clicked.
+- SVG preview is allowed but ONLY via `<img src={blobUrl}>`. Every
+  major browser blocks `<script>` and external fetches inside SVG
+  loaded through `<img>` or CSS background — it's a browser-level
+  spec invariant. SVG inlined as DOM (`innerHTML`,
+  `dangerouslySetInnerHTML`, `DOMParser` + adopt) WILL execute
+  scripts. Don't add such a render path.
+- `text/html` and `application/xhtml+xml` are NEVER passed to a
+  Blob's declared type. The text-preview panel renders via
+  `<pre>{content}</pre>` (React auto-escapes), and the blob itself
+  always carries `text/plain` regardless of the original MIME.
+- PDF previews render at a dedicated origin
+  (`pdf.securewarp.com/viewer`) when `NEXT_PUBLIC_PDF_VIEWER_ORIGIN`
+  is set at build time, falling back to a same-origin inline iframe
+  when unset. The viewer page listens for `postMessage` from the
+  main app, creates its own blob URL on its own origin, and renders
+  via a native `<iframe>` so the browser's built-in PDF viewer
+  handles the content. A PDF-viewer exploit at the subdomain has
+  no cookies (cookies are host-scoped, not domain-scoped), no
+  sessionStorage, no API routes, and a CSP with `connect-src 'self'`
+  — there's nowhere to exfiltrate to. Middleware restricts the
+  subdomain to `/viewer` only; every other path 302s to
+  www.securewarp.com.
+- Neither Chrome's PDFium nor Firefox's PDF.js works under a
+  script-blocking iframe sandbox (the viewer UI itself needs JS),
+  which is why we use origin isolation rather than `sandbox=""`.
+
+If you add a new preview type:
+1. Add the MIME to the correct category set in `mime-safety.ts`.
+2. Add the render branch in `src/components/file-preview.tsx`
+   (or wherever the preview is rendered).
+3. Verify in DevTools that the Blob's declared type matches and
+   the content renders via a same-origin-safe element.
+
+The reverse direction — a render branch that accepts a MIME not on
+the allowlist — is the real hazard. Reject the change if you see
+one.
+
 ## Email (transactional & notifications)
 
 SecureWarp is zero-knowledge. Emails are sent from the server, which by

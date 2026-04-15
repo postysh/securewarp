@@ -31,6 +31,11 @@ import { withSentryConfig } from "@sentry/nextjs";
 //     Browsers respect both; having both is belt+suspenders.
 const connectSources = [
   "'self'",
+  // Decrypted preview content lives in same-origin blob: URLs. The PDF
+  // preview path does `fetch(blobUrl)` to read raw bytes for transfer
+  // to the isolated viewer iframe via postMessage. `'self'` doesn't
+  // cover the blob: scheme, so list it explicitly.
+  "blob:",
   // R2 endpoints for direct presigned PUT/GET. Use a wildcard on the
   // r2.cloudflarestorage.com host so both the account-specific endpoint
   // and any R2 region subdomain work.
@@ -53,12 +58,16 @@ const scriptSources = [
   "https://challenges.cloudflare.com",
   // Cloudflare Web Analytics beacon, auto-injected by the proxy.
   "https://static.cloudflareinsights.com",
-  // Required for Next.js hydration inline bootstrap.
+  // Required for Next.js hydration inline bootstrap. Moving to a
+  // nonce-based scheme is tracked as a separate hardening task —
+  // see SECURITY.md "What's coming".
   "'unsafe-inline'",
-  // Required for Next.js dev HMR. Kept in prod because removing it
-  // triggers CSP violations on certain Next internals; revisit if
-  // Next ships a nonce-based alternative.
-  "'unsafe-eval'",
+  // `'wasm-unsafe-eval'` is the narrow CSP3 grant that covers
+  // WebAssembly.instantiate() without re-enabling string-to-code
+  // eval() / new Function(). argon2-browser ships a WASM module
+  // for Argon2id key derivation and needs this; Next.js production
+  // bundles don't use eval(), so we drop `'unsafe-eval'` entirely.
+  "'wasm-unsafe-eval'",
 ];
 
 const frameSources = [
@@ -67,6 +76,11 @@ const frameSources = [
   "https://challenges.cloudflare.com",
   // PDF preview renders decrypted content in blob: iframes.
   "blob:",
+  // Isolated PDF viewer subdomain (Phase 2 of PDF hardening). Only
+  // applies when NEXT_PUBLIC_PDF_VIEWER_ORIGIN is set at build time
+  // and DNS is pointed at this Worker; before that, PDF preview
+  // uses the inline blob-iframe path and this entry is harmless.
+  "https://pdf.securewarp.com",
 ];
 
 const csp = [
@@ -78,13 +92,107 @@ const csp = [
   `font-src 'self' data:`,
   `connect-src ${connectSources.join(" ")}`,
   `frame-src ${frameSources.join(" ")}`,
-  `frame-ancestors 'none'`,
+  // `'self'` (rather than `'none'`) so the main app can iframe its
+  // own same-origin blob URLs when the isolated PDF viewer subdomain
+  // isn't available and we fall back to the inline blob iframe. No
+  // cross-origin clickjacking is enabled by this — only our own
+  // origin can embed us, which is equivalent to
+  // `X-Frame-Options: SAMEORIGIN` (which we also send as defense in
+  // depth).
+  `frame-ancestors 'self'`,
   `base-uri 'self'`,
   `form-action 'self'`,
   `worker-src 'self' blob:`,
   `object-src 'none'`,
   `upgrade-insecure-requests`,
 ].join("; ");
+
+// ──────────────────────────────────────────────────────────────────────
+// Isolated PDF viewer subdomain
+// ──────────────────────────────────────────────────────────────────────
+//
+// Served at /viewer on a separate subdomain (e.g. pdf.securewarp.com).
+// The main app embeds it as an iframe and postMessages the decrypted
+// PDF bytes over. The subdomain has its own origin, so a PDF-viewer
+// exploit runs isolated from the main app's cookies and storage.
+//
+// CSP differences from the main app:
+//   - `frame-ancestors` includes the main app so iframe embedding is
+//     allowed; we keep `'none'` for every other host.
+//   - `connect-src` is `'self'` only. The viewer doesn't talk to any
+//     third parties; even Sentry and analytics are intentionally
+//     absent here so a compromised PDF viewer can't phone home.
+//   - `object-src 'none'` and `form-action 'none'` tighten further.
+//   - `default-src 'none'` is the baseline; we only open specific
+//     directives (script, style, img, blob for the inline PDF).
+//
+// Headers NOT applied on the viewer (vs. main app):
+//   - `X-Frame-Options: DENY` — omitted so the main app can embed.
+//     `frame-ancestors` is the CSP equivalent and is strict enough.
+//   - `Cross-Origin-Resource-Policy: same-origin` — overridden to
+//     `cross-origin` so the main app can render the iframe.
+const viewerScriptSources = [
+  "'self'",
+  // Next.js hydration inline bootstrap. Same caveat as the main app;
+  // nonce-based CSP will drop this eventually.
+  "'unsafe-inline'",
+  // argon2 isn't used on this page, but keeping the narrow WASM
+  // grant in place means future code that might need it doesn't
+  // silently fail.
+  "'wasm-unsafe-eval'",
+  // Cloudflare Web Analytics beacon. Auto-injected by the CF proxy on
+  // every HTML response in this zone — we can't strip it per-page from
+  // the Worker. Allowed here only to silence the otherwise-blocked
+  // injection. Sentry stays disabled on this origin (see
+  // instrumentation-client.ts) so the viewer's exfil surface remains
+  // limited to this single first-party CF endpoint.
+  "https://static.cloudflareinsights.com",
+];
+
+const viewerCsp = [
+  "default-src 'none'",
+  `script-src ${viewerScriptSources.join(" ")}`,
+  "style-src 'self' 'unsafe-inline'",
+  // blob: is how the viewer renders the received PDF bytes.
+  "img-src 'self' blob: data:",
+  // 'self' covers same-origin XHR/fetch; cloudflareinsights.com is the
+  // beacon data endpoint paired with the script allowlisted above.
+  "connect-src 'self' https://cloudflareinsights.com",
+  "font-src 'self' data:",
+  // Allowed embedders: the main app (for the outer iframe embed) AND
+  // `'self'` — the viewer iframes its OWN blob: URL to render the
+  // PDF, which inherits the viewer's CSP. Without `'self'` the
+  // blob iframe is blocked and the viewer shows blank.
+  "frame-ancestors 'self' https://securewarp.com https://www.securewarp.com",
+  "frame-src 'self' blob:",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "object-src 'none'",
+  // Safari's built-in PDF viewer (and Firefox's PDF.js) spawns a blob:
+  // worker for rendering. `'none'` blocks that and the PDF stays blank.
+  // The isolation guarantee still holds — workers inherit their parent
+  // document's origin, and connect-src 'self' confines any network
+  // calls a worker tries to make.
+  "worker-src 'self' blob:",
+  "upgrade-insecure-requests",
+].join("; ");
+
+const viewerHeaders = [
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+  { key: "Content-Security-Policy", value: viewerCsp },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "no-referrer" },
+  {
+    key: "Permissions-Policy",
+    value:
+      "camera=(), microphone=(), geolocation=(), usb=(), serial=(), payment=(), accelerometer=(), gyroscope=(), magnetometer=(), interest-cohort=()",
+  },
+  { key: "X-DNS-Prefetch-Control", value: "off" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  // Cross-origin so the main app can embed the iframe. The CSP
+  // `frame-ancestors` still locks down WHICH origins may embed.
+  { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
+];
 
 const securityHeaders = [
   {
@@ -95,7 +203,11 @@ const securityHeaders = [
   },
   { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
+  // SAMEORIGIN matches our CSP `frame-ancestors 'self'`. It lets
+  // the main app iframe its own pages (needed for the same-origin
+  // blob PDF fallback) while continuing to block any external site
+  // from embedding us.
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
     key: "Permissions-Policy",
@@ -133,9 +245,20 @@ const nextConfig: NextConfig = {
     }
     return [
       {
-        // Apply on every route. The Turnstile / R2 / Supabase allowances
-        // are wide enough that we don't need per-path relaxations.
-        source: "/:path*",
+        // Viewer gets a tighter, embedder-friendly header set. The
+        // catch-all below explicitly excludes /viewer via a negative
+        // lookahead — if both rules matched, Next.js would apply them
+        // in order and the later catch-all would overwrite the viewer
+        // headers (frame-ancestors, X-Frame-Options, CORP) with the
+        // main-app values. Observed in prod: the viewer came back
+        // with X-Frame-Options: DENY, which blocks embedding.
+        source: "/viewer",
+        headers: viewerHeaders,
+      },
+      {
+        // Apply on every other route. Negative lookahead excludes
+        // /viewer so its header set isn't clobbered by this catch-all.
+        source: "/((?!viewer$).*)",
         headers: securityHeaders,
       },
     ];

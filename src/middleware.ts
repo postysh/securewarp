@@ -7,8 +7,30 @@ const SESSION_COOKIE = "securewarp_session";
 const protectedRoutes = ["/drive", "/admin", "/welcome"];
 const authRoutes = ["/login", "/signup"];
 
+// The isolated PDF viewer subdomain. Only `/viewer` is meaningful
+// here; every other path redirects back to the main app so the
+// subdomain doesn't accidentally become a second surface for
+// authentication or account UI. Stored as a constant so a typo in
+// one place doesn't silently break the lockdown.
+const PDF_SUBDOMAIN_HOST = "pdf.securewarp.com";
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Host-based routing for the isolated PDF viewer subdomain. We
+  // don't serve anything other than /viewer there — no login, no
+  // drive UI, no API endpoints. Everything else redirects so a
+  // wandering user lands on the main app.
+  const host = request.headers.get("host")?.toLowerCase() ?? "";
+  if (host === PDF_SUBDOMAIN_HOST) {
+    if (pathname !== "/viewer") {
+      return NextResponse.redirect(new URL(pathname, "https://www.securewarp.com"));
+    }
+    // Serve the viewer without running auth checks; the page is
+    // anonymous by design.
+    return NextResponse.next();
+  }
+
   const token = request.cookies.get(SESSION_COOKIE)?.value;
 
   let isAuthenticated = false;
@@ -42,6 +64,20 @@ export async function middleware(request: NextRequest) {
 // middleware, and `jose` + `jwtVerify` work fine on edge since they rely on
 // Web Crypto. The `middleware` convention is deprecated-but-supported in
 // Next 16; revisit if a future OpenNext version supports Node proxy.
+//
+// `has: [{ type: "host", value: PDF_SUBDOMAIN_HOST }]` runs middleware on
+// every path for the pdf subdomain so we can enforce the /viewer-only
+// rule above. Main-app paths keep their narrow matchers.
 export const config = {
-  matcher: ["/drive/:path*", "/admin/:path*", "/welcome", "/login", "/signup"],
+  matcher: [
+    "/drive/:path*",
+    "/admin/:path*",
+    "/welcome",
+    "/login",
+    "/signup",
+    {
+      source: "/:path*",
+      has: [{ type: "host", value: "pdf.securewarp.com" }],
+    },
+  ],
 };
