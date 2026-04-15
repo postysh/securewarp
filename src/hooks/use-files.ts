@@ -29,6 +29,9 @@ import {
 import { decryptFileContent } from "@/lib/crypto/file-crypto";
 import { toBase64, fromBase64 } from "@/lib/crypto/utils";
 import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
+import { indexFile } from "@/lib/search/index-file";
+import { tokenizeQuery } from "@/lib/search/tokenize";
+import { hashTokens } from "@/lib/search/hash-token";
 
 export interface FileCollaboratorPreview {
   userId: string;
@@ -119,6 +122,11 @@ interface UseFilesState {
 export function useFiles(keys: {
   encryptionPublicKey: string;
   encryptionPrivateKey: string;
+  // base64-encoded HMAC key for the encrypted search index. Optional
+  // because legacy sessionStorage blobs from before search shipped
+  // won't have it; consumers fall back to client-side substring
+  // matching when missing.
+  searchIndexKey?: string;
 } | null) {
   const [state, setState] = useState<UseFilesState>({
     files: [],
@@ -705,6 +713,17 @@ export function useFiles(keys: {
         body: JSON.stringify({ action: "finalize", fileId }),
       });
 
+      // 5. Update the encrypted search index. Filename only for now;
+      //    Phase 2 will extract body text for previewable types here.
+      //    Best-effort — failures don't block the upload.
+      if (keys.searchIndexKey) {
+        await indexFile({
+          fileId,
+          filename: file.name,
+          searchIndexKeyB64: keys.searchIndexKey,
+        });
+      }
+
       updateProgress(100, "Done");
       await new Promise((r) => setTimeout(r, 400));
       setState((s) => ({
@@ -1029,6 +1048,15 @@ export function useFiles(keys: {
         return;
       }
 
+      // Index the folder's name so it appears in search results.
+      if (data.folderId && keys.searchIndexKey) {
+        await indexFile({
+          fileId: data.folderId,
+          filename: name,
+          searchIndexKeyB64: keys.searchIndexKey,
+        });
+      }
+
       await fetchFiles(parentId);
     } catch (err) {
       console.error("Create folder error:", err);
@@ -1114,6 +1142,15 @@ export function useFiles(keys: {
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           return { ok: false, error: data.error || "Rename failed" };
+        }
+
+        // Re-tokenize under the new name. Best-effort.
+        if (keys.searchIndexKey) {
+          await indexFile({
+            fileId: file.id,
+            filename: trimmed,
+            searchIndexKeyB64: keys.searchIndexKey,
+          });
         }
 
         // Optimistic local update + invalidate cache so other views
@@ -2236,53 +2273,156 @@ export function useFiles(keys: {
   // every file the user can access with decrypted names.
   const searchIndexRef = useRef<{ id: string; name: string; isFolder: boolean; parentId: string | null }[] | null>(null);
   const searchBuildingRef = useRef(false);
+  const backfillRef = useRef<"unknown" | "running" | "done">("unknown");
+
+  // Backfill the encrypted search index for any files that exist
+  // pre-search. Runs once per session, lazily — kicked off the first
+  // time the user invokes search after the cache is built. Posts
+  // tokens for every cached file in parallel, marks the user as
+  // indexed, returns. Failures are best-effort: the next session will
+  // try again because `search_indexed_at` only flips to non-null on
+  // success.
+  const runBackfill = useCallback(async () => {
+    if (!keys?.searchIndexKey) return;
+    if (backfillRef.current !== "unknown") return;
+    backfillRef.current = "running";
+    try {
+      const statusRes = await fetch("/api/files/search/status");
+      if (statusRes.ok) {
+        const status = await statusRes.json();
+        if (status.indexedAt) {
+          backfillRef.current = "done";
+          return;
+        }
+      }
+      const cache = searchIndexRef.current ?? [];
+      // Cap parallelism so large accounts don't open hundreds of
+      // simultaneous requests against the Worker.
+      const PARALLEL = 6;
+      let cursor = 0;
+      const workers = Array.from({ length: PARALLEL }, async () => {
+        while (cursor < cache.length) {
+          const i = cursor++;
+          await indexFile({
+            fileId: cache[i].id,
+            filename: cache[i].name,
+            searchIndexKeyB64: keys.searchIndexKey!,
+          });
+        }
+      });
+      await Promise.all(workers);
+      await fetch("/api/files/search/status", { method: "POST" });
+      backfillRef.current = "done";
+    } catch {
+      // Leave backfillRef at "running" so a later searchFiles call
+      // doesn't re-enter; we'll retry on next session.
+    }
+  }, [keys]);
 
   const searchFiles = useCallback(
     async (query: string): Promise<{ id: string; name: string; isFolder: boolean; parentId: string | null }[]> => {
       if (!keys) return [];
 
-      // Build index on first call
+      const trimmed = query.trim();
+      // Build the metadata cache on first use so we can decrypt the
+      // names of result files without a separate roundtrip per match.
+      // The cache is shared with the rest of the hook (rename, list,
+      // etc.) and invalidates on any mutation.
       if (!searchIndexRef.current && !searchBuildingRef.current) {
         searchBuildingRef.current = true;
         try {
           const res = await fetch("/api/files/list?all=true");
           const data = await res.json();
-          if (!res.ok) { searchBuildingRef.current = false; return []; }
-
-          const index: { id: string; name: string; isFolder: boolean; parentId: string | null }[] = [];
-          for (const f of data.files) {
-            const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
-            if (!encPrivHier) continue;
-            try {
-              const privHier = unwrapPrivateHierarchicalKey(encPrivHier, f.wrapped_by_public_key || "", keys.encryptionPrivateKey);
-              const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file, f.session_key_nonce, f.owner_public_key || "", privHier);
-              const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata) : f.encrypted_metadata;
-              const meta = decryptMetadata(encMeta, sk);
-              sk.fill(0);
-              index.push({ id: f.id, name: meta.name, isFolder: f.is_folder, parentId: f.parent_id ?? null });
-            } catch {
-              // skip undecryptable
+          if (res.ok) {
+            const index: { id: string; name: string; isFolder: boolean; parentId: string | null }[] = [];
+            for (const f of data.files) {
+              const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
+              if (!encPrivHier) continue;
+              try {
+                const privHier = unwrapPrivateHierarchicalKey(encPrivHier, f.wrapped_by_public_key || "", keys.encryptionPrivateKey);
+                const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file, f.session_key_nonce, f.owner_public_key || "", privHier);
+                const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata) : f.encrypted_metadata;
+                const meta = decryptMetadata(encMeta, sk);
+                sk.fill(0);
+                index.push({ id: f.id, name: meta.name, isFolder: f.is_folder, parentId: f.parent_id ?? null });
+              } catch {
+                // skip undecryptable
+              }
             }
+            searchIndexRef.current = index;
           }
-          searchIndexRef.current = index;
         } catch {
-          searchBuildingRef.current = false;
-          return [];
+          // Cache build failed; we can still serve empty queries.
         }
         searchBuildingRef.current = false;
       }
 
-      // Wait for in-progress build
-      if (searchBuildingRef.current) {
-        await new Promise((r) => setTimeout(r, 500));
-        if (!searchIndexRef.current) return [];
+      // Kick off backfill in the background once the cache is up.
+      // Non-blocking — current search proceeds with whatever the
+      // index already has; future searches benefit once it finishes.
+      if (searchIndexRef.current && backfillRef.current === "unknown") {
+        void runBackfill();
       }
 
-      if (!searchIndexRef.current) return [];
+      // Empty query returns the cached recent items directly.
+      if (!trimmed) return (searchIndexRef.current ?? []).slice(0, 20);
 
-      const q = query.toLowerCase().trim();
-      if (!q) return searchIndexRef.current.slice(0, 20);
-      return searchIndexRef.current.filter((f) => f.name.toLowerCase().includes(q)).slice(0, 50);
+      // Encrypted server-side query path. Tokens are HMAC'd with the
+      // user's searchIndexKey; the server matches opaque hashes against
+      // hashes the client computed at index time. AND-semantics: every
+      // query token must appear in the file's stored set.
+      if (!keys.searchIndexKey) {
+        // No HMAC key in this session (legacy unlock cache or pre-
+        // search account). Fall back to in-memory substring on the
+        // decrypted cache so the user still sees results.
+        const q = trimmed.toLowerCase();
+        return (searchIndexRef.current ?? [])
+          .filter((f) => f.name.toLowerCase().includes(q))
+          .slice(0, 50);
+      }
+
+      const queryTokens = tokenizeQuery(trimmed);
+      if (queryTokens.length === 0) return (searchIndexRef.current ?? []).slice(0, 20);
+
+      let key: Uint8Array | null = null;
+      let matchedIds: Set<string> = new Set();
+      try {
+        key = fromBase64(keys.searchIndexKey);
+        const hashed = hashTokens(queryTokens, key);
+        const res = await fetch("/api/files/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tokens: hashed }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          matchedIds = new Set(data.fileIds as string[]);
+        }
+      } catch {
+        // network error — fall through to local fallback below
+      } finally {
+        if (key) {
+          try { key.fill(0); } catch { /* detached */ }
+        }
+      }
+
+      // Project matched IDs through the decrypted-name cache so the UI
+      // gets `{ id, name, isFolder, parentId }` rows. Files matched by
+      // the server but not in the cache (e.g. cache built before a
+      // recent share) are filtered out — they'll appear after the
+      // cache rebuilds on next mutation.
+      const cache = searchIndexRef.current ?? [];
+      const matched: typeof cache = [];
+      for (const row of cache) {
+        if (matchedIds.has(row.id)) matched.push(row);
+      }
+      // Local fallback if the encrypted index returned nothing AND we
+      // have a populated cache — covers the pre-backfill window.
+      if (matched.length === 0 && cache.length > 0) {
+        const q = trimmed.toLowerCase();
+        return cache.filter((f) => f.name.toLowerCase().includes(q)).slice(0, 50);
+      }
+      return matched.slice(0, 50);
     },
     [keys]
   );

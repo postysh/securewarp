@@ -485,6 +485,36 @@ ALTER TABLE srp_sessions
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 ```
 
+#### Encrypted search index (Phase 1)
+
+The encrypted search feature stores per-user opaque token hashes that
+the server matches against query hashes the client computes with the
+same HKDF-derived `searchIndexKey`. Plaintext tokens never reach the
+server. See `src/lib/search/` and AGENTS.md → "Encrypted search".
+
+```sql
+CREATE TABLE file_search_tokens (
+  user_id     uuid  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  file_id     uuid  NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  token_hash  bytea NOT NULL,
+  PRIMARY KEY (user_id, file_id, token_hash)
+);
+-- Primary lookup pattern: "all file_ids for this user matching ANY of
+-- these N token hashes." A composite index on (user_id, token_hash)
+-- supports that with no extra sort.
+CREATE INDEX file_search_tokens_lookup_idx
+  ON file_search_tokens (user_id, token_hash);
+
+-- One-time backfill marker. NULL means "this user pre-dates encrypted
+-- search and needs to reindex their existing files." Set to now() once
+-- the client has finished a full pass.
+ALTER TABLE users ADD COLUMN search_indexed_at timestamptz;
+
+-- RLS belt-and-braces (the API uses the service-role client, but
+-- enabling RLS prevents anonymous-key access if it ever leaks).
+ALTER TABLE file_search_tokens ENABLE ROW LEVEL SECURITY;
+```
+
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from
 `rate_limits` and `used_recovery_tokens`:
 

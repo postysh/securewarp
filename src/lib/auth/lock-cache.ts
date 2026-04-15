@@ -75,6 +75,11 @@ interface UnsealedKeyPayload {
   signingPrivateKey: string;
 }
 
+// NOTE: `searchIndexKey` (HKDF output for search-token HMAC) is NOT
+// cached here. It's deterministic from the master key, and the unlock
+// flow already re-derives the master key, so the caller can recompute
+// it for free. Caching it would just enlarge the on-disk blob.
+
 const CURRENT_VERSION = 1;
 
 /**

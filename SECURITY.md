@@ -169,8 +169,6 @@ Tracked separately, but worth naming:
   `'unsafe-eval'` has already been dropped in favor of the narrower
   `'wasm-unsafe-eval'` required by the WASM Argon2id implementation.
 - Third-party security review.
-- Reproducible builds so you can verify the code we ship matches
-  the code in this repository.
 
 ## Contact
 
