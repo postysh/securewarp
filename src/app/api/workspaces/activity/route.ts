@@ -84,9 +84,12 @@ export async function GET(request: Request) {
       if (e.target_user_id) userIds.add(e.target_user_id);
     }
     const { data: users } = userIds.size > 0
-      ? await supabase.from("users").select("id, email").in("id", [...userIds])
+      ? await supabase.from("users").select("id, email, display_name").in("id", [...userIds])
       : { data: [] };
     const emailMap = new Map((users || []).map((u) => [u.id, u.email as string]));
+    const nameMap = new Map(
+      (users || []).map((u) => [u.id, (u.display_name as string | null) ?? null])
+    );
 
     // Resolve file metadata for target files — include encrypted_metadata
     // so the client can decrypt file names
@@ -117,7 +120,9 @@ export async function GET(request: Request) {
           id: e.id,
           type: e.event_type,
           actorEmail: e.actor_user_id ? emailMap.get(e.actor_user_id) ?? null : null,
+          actorDisplayName: e.actor_user_id ? nameMap.get(e.actor_user_id) ?? null : null,
           targetEmail: e.target_user_id ? emailMap.get(e.target_user_id) ?? null : null,
+          targetDisplayName: e.target_user_id ? nameMap.get(e.target_user_id) ?? null : null,
           targetFileId: e.target_file_id,
           targetIsFolder: fileMeta?.isFolder ?? null,
           // Encrypted file metadata for client-side name decryption

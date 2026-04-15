@@ -32,6 +32,7 @@ import { toBase64, fromBase64 } from "@/lib/crypto/utils";
 export interface FileCollaboratorPreview {
   userId: string;
   email: string;
+  displayName?: string | null;
   isOwner: boolean;
   permissionLevel: PermissionLevel | "owner";
 }
@@ -47,6 +48,7 @@ export interface DecryptedFile {
   parentId: string | null;
   ownerId: string;
   ownerEmail: string | null;
+  ownerDisplayName?: string | null;
   createdAt: string;
   updatedAt: string;
   // Phase 2 hierarchical key payload, passed through from the server so
@@ -86,6 +88,7 @@ interface FileListCollabShape {
 export interface Collaborator {
   userId: string;
   email: string;
+  displayName?: string | null;
   publicEncryptionKey: string;
   isOwner: boolean;
   permissionLevel: PermissionLevel | "owner";
@@ -226,7 +229,7 @@ export function useFiles(keys: {
             }
             results.push({
               id: f.id as string, isFolder: f.is_folder as boolean, parentId: (f.parent_id as string | null) ?? null,
-              ownerId: (f.owner_id as string) || "", ownerEmail: (f.owner_email as string | null) ?? null, createdAt: f.created_at as string, updatedAt: f.updated_at as string,
+              ownerId: (f.owner_id as string) || "", ownerEmail: (f.owner_email as string | null) ?? null, ownerDisplayName: (f.owner_display_name as string | null) ?? null, createdAt: f.created_at as string, updatedAt: f.updated_at as string,
               encryptedPrivateHierarchicalKey: encPrivHier, wrappedByPublicKey: (f.wrapped_by_public_key as string) || "",
               ownerPublicKey: (f.owner_public_key as string) || "", publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
               encryptedSessionKeyByFile: f.encrypted_session_key_by_file as string, sessionKeyNonce: f.session_key_nonce as string,
@@ -358,7 +361,7 @@ export function useFiles(keys: {
             isFolder,
             parentId: rowParentId,
             ownerId: (f.owner_id as string) || "",
-            ownerEmail: (f.owner_email as string | null) ?? null,
+            ownerEmail: (f.owner_email as string | null) ?? null, ownerDisplayName: (f.owner_display_name as string | null) ?? null,
             createdAt: f.created_at as string,
             updatedAt: f.updated_at as string,
             encryptedPrivateHierarchicalKey: encryptedPrivHier,
@@ -384,7 +387,7 @@ export function useFiles(keys: {
           isFolder: f.is_folder as boolean,
           parentId: (f.parent_id as string | null) ?? null,
           ownerId: (f.owner_id as string) || "",
-          ownerEmail: (f.owner_email as string | null) ?? null,
+          ownerEmail: (f.owner_email as string | null) ?? null, ownerDisplayName: (f.owner_display_name as string | null) ?? null,
           createdAt: f.created_at as string,
           updatedAt: f.updated_at as string,
           encryptedPrivateHierarchicalKey: (f.encrypted_private_hierarchical_key as string) || "",
@@ -2423,7 +2426,7 @@ export function useFiles(keys: {
           newResults.push({
             id: f.id, name: meta.name, type: meta.type, size: meta.size,
             isFolder: f.is_folder, parentId: f.parent_id ?? null,
-            ownerId: f.owner_id || "", ownerEmail: (f as Record<string, unknown>).owner_email as string | null ?? null, createdAt: f.created_at, updatedAt: f.updated_at,
+            ownerId: f.owner_id || "", ownerEmail: (f as Record<string, unknown>).owner_email as string | null ?? null, ownerDisplayName: (f as Record<string, unknown>).owner_display_name as string | null ?? null, createdAt: f.created_at, updatedAt: f.updated_at,
             encryptedPrivateHierarchicalKey: encPrivHier, wrappedByPublicKey: f.wrapped_by_public_key || "",
             ownerPublicKey: f.owner_public_key || "", publicHierarchicalKey: f.public_hierarchical_key || "",
             encryptedSessionKeyByFile: f.encrypted_session_key_by_file, sessionKeyNonce: f.session_key_nonce,

@@ -8,6 +8,7 @@ import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleI
 import type { DecryptedFile } from "@/hooks/use-files";
 import { FileIcon, type FileKind } from "./file-icon";
 import { colorForEmail } from "@/lib/avatar";
+import { userLabel, userInitials, userColor } from "@/lib/display";
 
 interface FileDetailsModalProps {
   file: DecryptedFile | null;
@@ -78,15 +79,20 @@ export function FileDetailsModal({ file, onClose }: FileDetailsModalProps) {
           <span className="text-[12px] text-text-disabled">No one</span>
         ) : (
           file.collaborators.filter(c => !c.isOwner).map((c) => (
-            <div key={c.userId} className="flex items-center gap-2">
+            <div key={c.userId} className="flex items-center gap-2 min-w-0">
               <div
-                className="w-5 h-5 rounded-[4px] flex items-center justify-center text-[8px] font-bold text-white"
-                style={{ backgroundColor: colorForEmail(c.email) }}
+                className="w-5 h-5 rounded-[4px] flex items-center justify-center text-[8px] font-bold text-white shrink-0"
+                style={{ backgroundColor: userColor(c) }}
               >
-                {c.email.charAt(0).toUpperCase()}
+                {userInitials(c)}
               </div>
-              <span className="text-[12px] text-text-secondary">{c.email}</span>
-              <span className="text-[10px] text-text-disabled ml-auto">{c.permissionLevel === "owner" ? "Owner" : c.permissionLevel === "editor" ? "Editor" : "Viewer"}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[12px] text-text-secondary truncate">{userLabel(c)}</p>
+                {c.displayName?.trim() && c.email && (
+                  <p className="text-[10px] text-text-disabled truncate">{c.email}</p>
+                )}
+              </div>
+              <span className="text-[10px] text-text-disabled ml-auto shrink-0">{c.permissionLevel === "owner" ? "Owner" : c.permissionLevel === "editor" ? "Editor" : "Viewer"}</span>
             </div>
           ))
         )}

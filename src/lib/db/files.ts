@@ -387,6 +387,7 @@ export type PermissionLevel = "editor" | "viewer";
 export interface CollaboratorRow {
   user_id: string;
   email: string;
+  display_name: string | null;
   public_encryption_key: string;
   is_owner: boolean;
   permission_level: PermissionLevel;
@@ -412,7 +413,7 @@ export async function getCollaborators(fileId: string): Promise<CollaboratorRow[
   );
   const { data: users, error: usersErr } = await supabase
     .from("users")
-    .select("id, email, public_encryption_key")
+    .select("id, email, display_name, public_encryption_key")
     .in("id", userIds);
   if (usersErr) throw new Error(`Failed to load users: ${usersErr.message}`);
 
@@ -424,7 +425,7 @@ export async function getCollaborators(fileId: string): Promise<CollaboratorRow[
   const ownerId = (file as { owner_id: string } | null)?.owner_id ?? null;
 
   const userById = new Map(
-    (users as { id: string; email: string; public_encryption_key: string }[]).map((u) => [u.id, u])
+    (users as { id: string; email: string; display_name: string | null; public_encryption_key: string }[]).map((u) => [u.id, u])
   );
 
   return (rows as { user_id: string; permission_level: PermissionLevel }[])
@@ -433,6 +434,7 @@ export async function getCollaborators(fileId: string): Promise<CollaboratorRow[
       return {
         user_id: r.user_id,
         email: u?.email ?? "",
+        display_name: u?.display_name ?? null,
         public_encryption_key: u?.public_encryption_key ?? "",
         is_owner: r.user_id === ownerId,
         permission_level: r.permission_level ?? "editor",
@@ -464,7 +466,7 @@ export async function getCollaboratorsBulk(
   );
   const { data: users, error: usersErr } = await supabase
     .from("users")
-    .select("id, email, public_encryption_key")
+    .select("id, email, display_name, public_encryption_key")
     .in("id", userIds);
   if (usersErr) throw new Error(`Failed to load users: ${usersErr.message}`);
 
@@ -477,7 +479,7 @@ export async function getCollaboratorsBulk(
   );
 
   const userById = new Map(
-    (users as { id: string; email: string; public_encryption_key: string }[]).map((u) => [u.id, u])
+    (users as { id: string; email: string; display_name: string | null; public_encryption_key: string }[]).map((u) => [u.id, u])
   );
 
   for (const row of fkRows as {
@@ -490,6 +492,7 @@ export async function getCollaboratorsBulk(
     const collab: CollaboratorRow = {
       user_id: row.user_id,
       email: u?.email ?? "",
+      display_name: u?.display_name ?? null,
       public_encryption_key: u?.public_encryption_key ?? "",
       is_owner: row.user_id === ownerId,
       permission_level: row.permission_level ?? "editor",
@@ -499,11 +502,11 @@ export async function getCollaboratorsBulk(
     else result.set(row.file_id, [collab]);
   }
 
-  // Sort: owner first, then by email for stable avatar ordering.
+  // Sort: owner first, then by displayName-or-email for stable avatar ordering.
   for (const list of result.values()) {
     list.sort((a, b) => {
       if (a.is_owner !== b.is_owner) return a.is_owner ? -1 : 1;
-      return a.email.localeCompare(b.email);
+      return (a.display_name || a.email).localeCompare(b.display_name || b.email);
     });
   }
   return result;

@@ -7,7 +7,7 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import { RoleDropdown } from "./role-dropdown";
-import { colorForEmail } from "./facepile";
+import { userLabel, userInitials, userColor } from "@/lib/display";
 
 const WORKSPACE_ROLES = ["admin", "editor", "viewer"] as const;
 const ROLE_LABELS: Record<string, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
@@ -22,6 +22,7 @@ interface MembersModalProps {
 interface Member {
   userId: string;
   email: string;
+  displayName?: string | null;
   role: string;
 }
 
@@ -64,9 +65,13 @@ export function MembersModal({ open, onClose, workspaceId, isAdmin }: MembersMod
     setMembers((prev) => prev.filter((m) => m.userId !== userId));
   };
 
-  const filtered = members.filter((m) =>
-    m.email.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = members.filter((m) => {
+    const q = search.toLowerCase();
+    return (
+      m.email.toLowerCase().includes(q) ||
+      (m.displayName ?? "").toLowerCase().includes(q)
+    );
+  });
 
   if (!open) return null;
 
@@ -118,14 +123,17 @@ export function MembersModal({ open, onClose, workspaceId, isAdmin }: MembersMod
                 <div className="relative shrink-0">
                   <div
                     className="w-8 h-8 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white"
-                    style={{ backgroundColor: colorForEmail(m.email) }}
+                    style={{ backgroundColor: userColor(m) }}
                   >
-                    {m.email.charAt(0).toUpperCase()}
+                    {userInitials(m)}
                   </div>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[12px] text-text-primary truncate">{m.email}</p>
-                  <p className="text-[10px] text-text-disabled capitalize">{ROLE_LABELS[m.role] ?? m.role}</p>
+                  <p className="text-[12px] text-text-primary truncate">{userLabel(m)}</p>
+                  <p className="text-[10px] text-text-disabled truncate">
+                    {m.displayName?.trim() && m.email ? <>{m.email} · </> : null}
+                    <span className="capitalize">{ROLE_LABELS[m.role] ?? m.role}</span>
+                  </p>
                 </div>
                 {isAdmin && m.email !== myEmail ? (
                   <RoleDropdown

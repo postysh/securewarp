@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getOwnedFile, setCollaboratorPermission } from "@/lib/db/files";
-import { createNotification } from "@/lib/db/notifications";
+import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
 import { logError } from "@/lib/log";
 
 const Schema = z.object({
@@ -42,11 +42,12 @@ export async function POST(request: Request) {
 
     await setCollaboratorPermission(parsed.data.fileId, parsed.data.userId, parsed.data.level);
 
+    const actorLabel = await resolveActorLabel(session.userId, session.email);
     createNotification({
       userId: parsed.data.userId,
       type: "permission_changed",
       title: "Permission updated",
-      description: `${session.email} changed your access to ${parsed.data.level}`,
+      description: `${actorLabel} changed your access to ${parsed.data.level}`,
       fileId: parsed.data.fileId,
       actorUserId: session.userId,
     });

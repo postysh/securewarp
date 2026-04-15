@@ -42,6 +42,7 @@ export async function GET(request: Request) {
       collaborators: collaborators.map((c) => ({
         userId: c.user_id,
         email: c.email,
+        displayName: c.display_name,
         publicEncryptionKey: c.public_encryption_key,
         isOwner: c.is_owner,
         permissionLevel: c.permission_level,

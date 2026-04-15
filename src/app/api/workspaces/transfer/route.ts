@@ -4,7 +4,7 @@ import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
-import { createNotification } from "@/lib/db/notifications";
+import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
 import { logError } from "@/lib/log";
 
 const Schema = z.object({
@@ -73,11 +73,12 @@ export async function POST(request: Request) {
       detail: `workspace.transfer:${workspaceId}`,
     });
 
+    const actorLabel = await resolveActorLabel(session.userId, session.email);
     createNotification({
       userId: newOwnerId,
       type: "file_shared",
       title: "Workspace ownership transferred",
-      description: `${session.email} transferred workspace ownership to you`,
+      description: `${actorLabel} transferred workspace ownership to you`,
       actorUserId: session.userId,
     });
 

@@ -23,17 +23,21 @@ export async function GET(request: Request) {
 
     const { data, error } = await supabase
       .from("workspace_members")
-      .select("user_id, role, joined_at, user:users!workspace_members_user_id_fkey(email)")
+      .select("user_id, role, joined_at, user:users!workspace_members_user_id_fkey(email, display_name)")
       .eq("workspace_id", workspaceId)
       .order("joined_at");
     if (error) throw error;
 
-    const members = (data || []).map((row) => ({
-      userId: row.user_id,
-      email: ((row.user as unknown) as { email: string } | null)?.email ?? "",
-      role: row.role,
-      joinedAt: row.joined_at,
-    }));
+    const members = (data || []).map((row) => {
+      const user = (row.user as unknown) as { email: string; display_name: string | null } | null;
+      return {
+        userId: row.user_id,
+        email: user?.email ?? "",
+        displayName: user?.display_name ?? null,
+        role: row.role,
+        joinedAt: row.joined_at,
+      };
+    });
 
     return NextResponse.json({ members });
   } catch (err) {

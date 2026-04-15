@@ -11,6 +11,7 @@ import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import { ConfirmDialog } from "./confirm-dialog";
 import { RoleDropdown } from "./role-dropdown";
 import { colorForEmail } from "./facepile";
+import { userLabel, userInitials, userColor } from "@/lib/display";
 
 interface WorkspaceSettingsProps {
   open: boolean;
@@ -62,7 +63,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTarget, setTransferTarget] = useState<{ userId: string; email: string } | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
-  const [adminMembers, setAdminMembers] = useState<{ userId: string; email: string }[]>([]);
+  const [adminMembers, setAdminMembers] = useState<{ userId: string; email: string; displayName?: string | null }[]>([]);
   const isAdmin = workspace?.role === "admin";
 
   useEffect(() => {
@@ -289,7 +290,7 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
                         setAdminMembers(
                           d.members
                             .filter((m: { role: string; email: string }) => m.role === "admin" && m.email !== myEmail)
-                            .map((m: { userId: string; email: string }) => ({ userId: m.userId, email: m.email }))
+                            .map((m: { userId: string; email: string; displayName?: string | null }) => ({ userId: m.userId, email: m.email, displayName: m.displayName ?? null }))
                         );
                       }
                     }}
@@ -321,11 +322,16 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
                       >
                         <div
                           className="w-6 h-6 rounded-[5px] flex items-center justify-center text-[9px] font-bold text-white shrink-0"
-                          style={{ backgroundColor: colorForEmail(m.email) }}
+                          style={{ backgroundColor: userColor(m) }}
                         >
-                          {m.email.charAt(0).toUpperCase()}
+                          {userInitials(m)}
                         </div>
-                        <span className="text-[12px] text-text-primary truncate">{m.email}</span>
+                        <div className="flex-1 min-w-0 text-left">
+                          <p className="text-[12px] text-text-primary truncate">{userLabel(m)}</p>
+                          {m.displayName?.trim() && m.email && (
+                            <p className="text-[10px] text-text-disabled truncate">{m.email}</p>
+                          )}
+                        </div>
                         {transferTarget?.userId === m.userId && (
                           <HugeiconsIcon icon={Tick01Icon} size={12} color="var(--accent-green-primary)" className="ml-auto shrink-0" />
                         )}

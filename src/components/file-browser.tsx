@@ -45,6 +45,7 @@ import { FileDetailsModal } from "./file-details-modal";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
+import { userLabel, userInitials, userColor } from "@/lib/display";
 import { useUserKeys } from "@/hooks/use-user-keys";
 import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import HardDriveIcon from "@hugeicons/core-free-icons/HardDriveIcon";
@@ -135,24 +136,29 @@ function roleLabel(c: FileCollaboratorPreview): string {
 
 function CollaboratorAvatar({ c, size = 24 }: { c: FileCollaboratorPreview; size?: number }) {
   const textSize = size >= 28 ? "10px" : "9px";
+  const label = userLabel(c);
+  const hasName = Boolean(c.displayName?.trim());
   const content = (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[12px] text-text-primary font-medium truncate">{c.email || "Unknown"}</span>
+      <span className="text-[12px] text-text-primary font-medium truncate">{label}</span>
+      {hasName && c.email && (
+        <span className="text-[11px] text-text-tertiary truncate">{c.email}</span>
+      )}
       <span className="text-[11px] text-text-disabled">{roleLabel(c)}</span>
     </div>
   );
   return (
-    <Tooltip label={c.email || "Unknown"} content={content} side="bottom">
+    <Tooltip label={label} content={content} side="bottom">
       <div
         className="rounded-full border-2 border-bg-main flex items-center justify-center font-bold text-white"
         style={{
           width: size,
           height: size,
-          backgroundColor: colorForEmail(c.email),
+          backgroundColor: userColor(c),
           fontSize: textSize,
         }}
       >
-        {initialsFromEmail(c.email)}
+        {userInitials(c)}
       </div>
     </Tooltip>
   );
@@ -175,7 +181,7 @@ function CollaboratorStack({ collaborators }: { collaborators: FileCollaboratorP
     <div className="flex flex-col gap-1">
       {overflow.map((c) => (
         <div key={c.userId} className="flex flex-col">
-          <span className="text-[12px] text-text-primary truncate">{c.email || "Unknown"}</span>
+          <span className="text-[12px] text-text-primary truncate">{userLabel(c)}</span>
           <span className="text-[11px] text-text-disabled">{roleLabel(c)}</span>
         </div>
       ))}
@@ -269,10 +275,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       .then((r) => r.json())
       .then((d) => {
         if (d.members) {
-          setWorkspaceMembers(d.members.map((m: { email: string }) => ({
-            initials: m.email.charAt(0).toUpperCase(),
-            name: m.email,
-            bg: colorForEmail(m.email),
+          setWorkspaceMembers(d.members.map((m: { email: string; displayName?: string | null }) => ({
+            initials: userInitials(m),
+            name: userLabel(m),
+            bg: userColor(m),
           })));
         }
       })
@@ -350,6 +356,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     uploadProgress: f.uploadProgress,
     collaborators: f.collaborators,
     ownerEmail: f.ownerEmail,
+    ownerDisplayName: f.ownerDisplayName ?? null,
   }));
 
   const selectAll = () => setSelected(new Set(displayFiles.map((f) => f.id)));
@@ -1398,13 +1405,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 </div>
                 <div className="w-[110px] justify-end hidden md:flex">
                   {fileOps.activeWorkspace && file.ownerEmail ? (
-                    <Tooltip label={file.ownerEmail}>
+                    <Tooltip label={userLabel({ email: file.ownerEmail, displayName: file.ownerDisplayName })}>
                       <div className="flex items-center justify-end">
                         <div
                           className="w-6 h-6 rounded-[5px] flex items-center justify-center text-[9px] font-bold text-white"
-                          style={{ backgroundColor: colorForEmail(file.ownerEmail) }}
+                          style={{ backgroundColor: userColor({ email: file.ownerEmail }) }}
                         >
-                          {file.ownerEmail.charAt(0).toUpperCase()}
+                          {userInitials({ email: file.ownerEmail, displayName: file.ownerDisplayName })}
                         </div>
                       </div>
                     </Tooltip>

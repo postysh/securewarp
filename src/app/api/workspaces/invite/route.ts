@@ -5,7 +5,7 @@ import { supabase } from "@/lib/db/supabase";
 import { getUserByEmail } from "@/lib/db/users";
 import { grantFileAccess } from "@/lib/db/files";
 import { normalizeEmail } from "@/lib/auth/email";
-import { createNotification } from "@/lib/db/notifications";
+import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
 import { auditEvent } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
@@ -90,11 +90,12 @@ export async function POST(request: Request) {
       detail: `${parsed.data.role}:${workspaceId}`,
     });
 
+    const actorLabel = await resolveActorLabel(session.userId, session.email);
     createNotification({
       userId: recipient.id,
       type: "file_shared",
       title: `Invited to ${ws.name}`,
-      description: `${session.email} invited you to the ${ws.name} workspace`,
+      description: `${actorLabel} invited you to the ${ws.name} workspace`,
       fileId: ws.root_folder_id,
       actorUserId: session.userId,
     });

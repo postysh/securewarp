@@ -5,7 +5,7 @@ import { getFileById, grantFileAccess, getEffectivePermission } from "@/lib/db/f
 import { getPublicUserByEmail } from "@/lib/db/users";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
-import { createNotification } from "@/lib/db/notifications";
+import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
 import { supabase } from "@/lib/db/supabase";
 import { logError } from "@/lib/log";
 
@@ -105,11 +105,12 @@ export async function POST(request: Request) {
     });
 
     if (isNewShare) {
+      const actorLabel = await resolveActorLabel(session.userId, session.email);
       createNotification({
         userId: recipient.id,
         type: "file_shared",
         title: "File shared with you",
-        description: `${session.email} shared a file with you`,
+        description: `${actorLabel} shared a file with you`,
         fileId,
         actorUserId: session.userId,
       });

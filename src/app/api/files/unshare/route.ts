@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getOwnedFile, revokeFileAccess } from "@/lib/db/files";
 import { auditEvent } from "@/lib/audit";
-import { createNotification } from "@/lib/db/notifications";
+import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
 import { logError } from "@/lib/log";
 
 const UnshareSchema = z.object({
@@ -62,11 +62,12 @@ export async function POST(request: Request) {
       }
     } else if (!isSelfRemoval) {
       // Owner removed a collaborator — notify them
+      const actorLabel = await resolveActorLabel(session.userId, session.email);
       createNotification({
         userId: targetUserId,
         type: "file_unshared",
         title: "Access removed",
-        description: `${session.email} removed your access to a file`,
+        description: `${actorLabel} removed your access to a file`,
         fileId,
         actorUserId: session.userId,
       });

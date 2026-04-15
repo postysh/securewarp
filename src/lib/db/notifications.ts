@@ -1,6 +1,28 @@
 import "server-only";
 import { supabase } from "./supabase";
 
+/**
+ * Server-side equivalent of src/lib/display.ts#userLabel — resolves an
+ * actor user id to their displayName when set, falling back to the
+ * provided email. Used in notification description templates so the
+ * human-readable text baked into the row is prettier for users who've
+ * set a display name. Notifications created before a user set their
+ * name keep their baked email — acceptable staleness.
+ */
+export async function resolveActorLabel(
+  actorUserId: string | null | undefined,
+  fallbackEmail: string
+): Promise<string> {
+  if (!actorUserId) return fallbackEmail;
+  const { data } = await supabase
+    .from("users")
+    .select("display_name")
+    .eq("id", actorUserId)
+    .single();
+  const name = ((data as { display_name: string | null } | null)?.display_name ?? "").trim();
+  return name || fallbackEmail;
+}
+
 export type NotificationType =
   | "file_shared"
   | "file_unshared"
@@ -17,6 +39,7 @@ export interface NotificationRow {
   file_id: string | null;
   actor_user_id: string | null;
   actor_email?: string;
+  actor_display_name?: string | null;
   read: boolean;
   created_at: string;
 }
@@ -57,18 +80,19 @@ export async function getNotifications(
 ): Promise<NotificationRow[]> {
   const { data, error } = await supabase
     .from("notifications")
-    .select("*, actor:users!notifications_actor_user_id_fkey(email)")
+    .select("*, actor:users!notifications_actor_user_id_fkey(email, display_name)")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(`Failed to fetch notifications: ${error.message}`);
   return (data || []).map((row) => {
     const { actor, ...rest } = row as Record<string, unknown> & {
-      actor: { email: string } | null;
+      actor: { email: string; display_name: string | null } | null;
     };
     return {
       ...rest,
       actor_email: actor?.email ?? undefined,
+      actor_display_name: actor?.display_name ?? null,
     } as NotificationRow;
   });
 }

@@ -15,6 +15,7 @@ import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import File01Icon from "@hugeicons/core-free-icons/File01Icon";
 import { colorForEmail } from "./facepile";
+import { userLabel, userInitials, userColor } from "@/lib/display";
 import { Tooltip } from "./tooltip";
 
 interface ActivityPageProps {
@@ -25,7 +26,9 @@ interface ActivityEvent {
   id: string;
   type: string;
   actorEmail: string | null;
+  actorDisplayName: string | null;
   targetEmail: string | null;
+  targetDisplayName: string | null;
   targetFileId: string | null;
   targetIsFolder: boolean | null;
   encryptedMetadata: string | null;
@@ -57,8 +60,8 @@ const EVENT_CONFIG: Record<string, { label: string; icon: typeof Share01Icon; co
 };
 
 function buildDescription(e: ActivityEvent, fileName: string | null): string {
-  const actor = e.actorEmail?.split("@")[0] ?? "System";
-  const targetUser = e.targetEmail?.split("@")[0];
+  const actor = e.actorDisplayName?.trim() || e.actorEmail?.split("@")[0] || "System";
+  const targetUser = e.targetDisplayName?.trim() || e.targetEmail?.split("@")[0];
   const name = fileName ? `"${fileName}"` : (e.targetIsFolder === true ? "a folder" : e.targetIsFolder === false ? "a file" : "");
 
   if (e.type === "workspace.invite" && targetUser) {
@@ -242,12 +245,12 @@ export function WorkspaceActivityPage({ workspaceId }: ActivityPageProps) {
                 {/* Actor avatar */}
                 <div className="hidden md:flex w-[100px] justify-end">
                   {e.actorEmail ? (
-                    <Tooltip label={e.actorEmail}>
+                    <Tooltip label={userLabel({ email: e.actorEmail, displayName: e.actorDisplayName })}>
                       <div
                         className="w-6 h-6 rounded-[5px] flex items-center justify-center text-[9px] font-bold text-white"
-                        style={{ backgroundColor: colorForEmail(e.actorEmail) }}
+                        style={{ backgroundColor: userColor({ email: e.actorEmail }) }}
                       >
-                        {e.actorEmail.charAt(0).toUpperCase()}
+                        {userInitials({ email: e.actorEmail, displayName: e.actorDisplayName })}
                       </div>
                     </Tooltip>
                   ) : (

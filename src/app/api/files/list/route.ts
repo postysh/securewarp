@@ -77,21 +77,26 @@ export async function GET(request: Request) {
       labelsByFile.get(fid)!.push(label);
     }
 
-    // Resolve owner emails for workspace file lists
+    // Resolve owner identity for workspace file lists
     const ownerIds = [...new Set(files.map((f) => f.owner_id))];
     const { data: ownerRows } = ownerIds.length > 0
-      ? await supabase.from("users").select("id, email").in("id", ownerIds)
+      ? await supabase.from("users").select("id, email, display_name").in("id", ownerIds)
       : { data: [] };
     const ownerEmailMap = new Map((ownerRows || []).map((u) => [u.id, u.email as string]));
+    const ownerNameMap = new Map(
+      (ownerRows || []).map((u) => [u.id, (u.display_name as string | null) ?? null])
+    );
 
     const enriched = files.map((f) => ({
       ...f,
       owner_email: ownerEmailMap.get(f.owner_id) ?? null,
+      owner_display_name: ownerNameMap.get(f.owner_id) ?? null,
       is_starred: starredSet.has(f.id),
       file_labels: labelsByFile.get(f.id) ?? [],
       collaborators: (collaboratorMap.get(f.id) ?? []).map((c) => ({
         userId: c.user_id,
         email: c.email,
+        displayName: c.display_name,
         isOwner: c.is_owner,
         permissionLevel: c.permission_level,
       })),

@@ -10,6 +10,7 @@ import Link04Icon from "@hugeicons/core-free-icons/Link04Icon";
 import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
 import { useFilesContext, type DecryptedFile, type Collaborator, type PermissionLevel } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
+import { userLabel, userInitials, userColor } from "@/lib/display";
 import { RoleDropdown } from "./role-dropdown";
 import { ConfirmDialog } from "./confirm-dialog";
 
@@ -323,13 +324,14 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                 >
                   <div
                     className="w-7 h-7 rounded-[6px] flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-                    style={{ backgroundColor: colorForEmail(c.email) }}
+                    style={{ backgroundColor: userColor(c) }}
                   >
-                    {initialsFromEmail(c.email)}
+                    {userInitials(c)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[12px] text-text-primary truncate">{c.email || "Unknown user"}</p>
+                    <p className="text-[12px] text-text-primary truncate">{userLabel(c)}</p>
                     <p className="text-[10px] text-text-disabled truncate">
+                      {c.displayName?.trim() && c.email ? c.email + " · " : ""}
                       {c.isOwner ? "Owner" : c.permissionLevel === "viewer" ? "Can view" : "Can edit"}
                     </p>
                   </div>
