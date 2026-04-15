@@ -32,6 +32,7 @@ import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
 import { indexFile } from "@/lib/search/index-file";
 import { tokenizeQuery } from "@/lib/search/tokenize";
 import { hashTokens } from "@/lib/search/hash-token";
+import { readTextForIndex } from "@/lib/search/text-extract";
 
 export interface FileCollaboratorPreview {
   userId: string;
@@ -713,13 +714,19 @@ export function useFiles(keys: {
         body: JSON.stringify({ action: "finalize", fileId }),
       });
 
-      // 5. Update the encrypted search index. Filename only for now;
-      //    Phase 2 will extract body text for previewable types here.
-      //    Best-effort — failures don't block the upload.
+      // 5. Update the encrypted search index. For text-ish files
+      //    (plain text + code), read the body client-side and pass
+      //    it to the tokenizer so content is searchable too. Binary
+      //    files get filename-only. readTextForIndex handles the
+      //    MIME + extension check and the 2 MB size cap; it returns
+      //    null for anything not suitable. Best-effort — a failed
+      //    index call doesn't block the upload.
       if (keys.searchIndexKey) {
+        const textContent = await readTextForIndex(file);
         await indexFile({
           fileId,
           filename: file.name,
+          content: textContent,
           searchIndexKeyB64: keys.searchIndexKey,
         });
       }
