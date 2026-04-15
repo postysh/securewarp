@@ -2445,6 +2445,11 @@ export function useFiles(keys: {
             // chain we've already resolved.
             const hierMap = new Map<string, string>();
             const pushEntry = (f: Record<string, unknown>, name: string, type: string, size: number) => {
+              // Workspace roots are decrypted (so the inheritance
+              // chain has a starting point) but never shown in
+              // search results — they appear in the sidebar as the
+              // workspace switcher, not as a user-discoverable folder.
+              if (f.is_workspace_root) return;
               const wsId = (f.workspace_id as string | null) ?? null;
               index.push({
                 id: f.id as string,

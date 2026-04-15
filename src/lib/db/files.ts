@@ -769,12 +769,16 @@ export async function getAllAccessibleFiles(
       // PostgREST embedding — without an .eq filter on file_keys.user_id
       // we get rows whether or not the user has a key. We then exclude
       // rows we already have via the owned/shared queries.
+      // Include workspace ROOT rows too — the client needs them to
+      // seed the inheritance chain (without the root's priv hier key,
+      // descendants in shared subtrees can't be decrypted). Search
+      // filters out workspace roots from results downstream so they
+      // don't appear as user-visible "files" in the palette.
       const { data: wsFiles, error: wsErr } = await supabase
         .from("files")
         .select(LIST_SELECT)
         .in("workspace_id", wsIds)
         .eq("upload_complete", true)
-        .eq("is_workspace_root", false)
         .is("deleted_at", null)
         .limit(1000);
       if (wsErr) throw new Error(`Failed to fetch workspace files: ${wsErr.message}`);
