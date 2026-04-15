@@ -462,6 +462,12 @@ INSERT INTO app_settings (key, value, description) VALUES
    'When off, /api/auth/register returns 503. Useful to block signups during an abuse wave while keeping existing users logged in.'),
   ('uploads_enabled', 'true',
    'When off, /api/files/chunk-upload returns 503 so users can still log in and browse but can''t create new files. Use during R2 outages.');
+
+-- Phase 8: onboarding. `onboarded_at` gates the /welcome wizard. NULL
+-- means "show the wizard"; any timestamp means "skip it." Existing users
+-- get NULL by default, which is correct — they haven't been offered the
+-- display-name step yet and it's useful to prompt them once.
+ALTER TABLE users ADD COLUMN onboarded_at timestamptz;
 ```
 
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from

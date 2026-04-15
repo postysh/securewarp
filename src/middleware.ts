@@ -4,7 +4,7 @@ import { jwtVerify } from "jose";
 
 const SESSION_COOKIE = "securewarp_session";
 
-const protectedRoutes = ["/drive", "/admin"];
+const protectedRoutes = ["/drive", "/admin", "/welcome"];
 const authRoutes = ["/login", "/signup"];
 
 export async function middleware(request: NextRequest) {
@@ -43,5 +43,5 @@ export async function middleware(request: NextRequest) {
 // Web Crypto. The `middleware` convention is deprecated-but-supported in
 // Next 16; revisit if a future OpenNext version supports Node proxy.
 export const config = {
-  matcher: ["/drive/:path*", "/admin/:path*", "/login", "/signup"],
+  matcher: ["/drive/:path*", "/admin/:path*", "/welcome", "/login", "/signup"],
 };

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Sidebar } from "@/components/sidebar";
 import { FileBrowser } from "@/components/file-browser";
@@ -11,6 +12,7 @@ import { UserKeysContext, type UserKeys } from "@/hooks/use-user-keys";
 import { FilesContext, useFiles } from "@/hooks/use-files";
 
 export default function DriveClient() {
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("sidebar_open") !== "false";
@@ -42,6 +44,27 @@ export default function DriveClient() {
     window.addEventListener("securewarp-keys-updated", refresh);
     return () => window.removeEventListener("securewarp-keys-updated", refresh);
   }, []);
+
+  // Gate: returning users who never onboarded (pre-wizard accounts, or
+  // anyone who closed the tab mid-wizard) get bounced to /welcome. We
+  // only check once keys are present — an unlock-needed state shows
+  // AuthScreen below and should not trigger a redirect.
+  useEffect(() => {
+    if (!keys) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/profile");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.onboarded === false) router.replace("/welcome");
+      } catch {
+        // Profile fetch failure is non-fatal — drive stays rendered,
+        // user can retry onboarding from settings later.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [keys, router]);
 
   // Single useFiles instance shared between sidebar (for "Shared with me"
   // view toggle) and the file browser. Created here so its state outlives

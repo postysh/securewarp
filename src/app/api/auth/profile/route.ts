@@ -23,7 +23,7 @@ export async function GET() {
     }
     const { data, error } = await supabase
       .from("users")
-      .select("display_name, notification_prefs")
+      .select("display_name, notification_prefs, onboarded_at")
       .eq("id", session.userId)
       .single();
     if (error) throw error;
@@ -34,6 +34,7 @@ export async function GET() {
         file_unshared: true,
         permission_changed: true,
       },
+      onboarded: data?.onboarded_at != null,
     });
   } catch (err) {
     logError("auth.profile.get", err);

@@ -10,6 +10,7 @@ import Setting07Icon from "@hugeicons/core-free-icons/Setting07Icon";
 import { Tooltip } from "./tooltip";
 import { useFilesContext } from "@/hooks/use-files";
 import { WorkspaceSettings } from "./workspace-settings";
+import { buildWorkspaceFolder } from "@/lib/crypto/workspace-folder";
 
 interface Workspace {
   id: string;
@@ -375,32 +376,3 @@ function CreateWorkspaceModal({ onClose, onCreate }: {
   );
 }
 
-/**
- * Build the encrypted folder payload for the workspace root.
- * Uses the user's keys from sessionStorage.
- */
-async function buildWorkspaceFolder(name: string) {
-  const { generateSessionKey, encryptMetadata, generateHierarchicalKeypair, wrapSessionKeyToFile, wrapPrivateHierarchicalKeyForUser } = await import("@/lib/crypto/file-crypto");
-
-  const keysStr = sessionStorage.getItem("securewarp_keys");
-  if (!keysStr) throw new Error("Not signed in");
-  const keys = JSON.parse(keysStr) as { encryptionPublicKey: string; encryptionPrivateKey: string };
-
-  const sessionKey = generateSessionKey();
-  const hier = generateHierarchicalKeypair();
-  const encryptedMetadata = encryptMetadata({ name, type: "folder", size: 0 }, sessionKey);
-  const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(sessionKey, hier.publicKey, keys.encryptionPrivateKey);
-  const encryptedPrivateHierarchicalKey = wrapPrivateHierarchicalKeyForUser(hier.privateKey, keys.encryptionPublicKey, keys.encryptionPrivateKey);
-
-  sessionKey.fill(0);
-
-  return {
-    encryptedMetadata: JSON.stringify(encryptedMetadata),
-    parentId: null,
-    publicHierarchicalKey: hier.publicKey,
-    encryptedSessionKeyByFile,
-    sessionKeyNonce,
-    encryptedPrivateHierarchicalKey,
-    wrappedByPublicKey: keys.encryptionPublicKey,
-  };
-}

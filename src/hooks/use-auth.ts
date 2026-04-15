@@ -595,7 +595,11 @@ export function useAuth() {
 
   function dismissRecoveryKey() {
     setState((s) => ({ ...s, recoveryKey: null }));
-    router.push("/drive");
+    // Fresh signup lands on /welcome — the wizard handles display name +
+    // optional workspace and calls /api/auth/onboarding/complete, then
+    // bounces to /drive. Returning users (post-onboarding) never hit
+    // dismissRecoveryKey, so this path is only reached at first signup.
+    router.push("/welcome");
   }
 
   return {
