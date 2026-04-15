@@ -492,6 +492,10 @@ function IsolatedPreview({
       if (e.origin !== viewerOrigin) return;
       if (!e.data || typeof e.data !== "object") return;
       if ((e.data as { type?: unknown }).type !== "viewer-ready") return;
+      // viewer-ready means the iframe is alive — cancel the readiness
+      // timeout so a slow renderer (mammoth/exceljs) can't trigger the
+      // fallback after we've already shipped bytes successfully.
+      clearTimeout(timeout);
       try {
         // Re-fetch the blob to get raw bytes. The blob URL is
         // same-origin to the main app, so this is just a memory copy;
