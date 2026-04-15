@@ -47,9 +47,11 @@ export default function DocxViewerPage() {
       return;
     }
 
+    let bytesReceived = false;
     const handler = async (e: MessageEvent) => {
       if (!ALLOWED_PARENT_ORIGINS.includes(e.origin)) return;
       if (!isDocxMessage(e.data)) return;
+      bytesReceived = true;
       try {
         const mammoth = await import("mammoth");
         // Copy bytes into a fresh ArrayBuffer (mammoth's typings expect
@@ -72,15 +74,33 @@ export default function DocxViewerPage() {
         return "";
       }
     })();
-    if (ALLOWED_PARENT_ORIGINS.includes(parentOrigin)) {
+
+    // Retry viewer-ready until bytes arrive. If the iframe hydrates
+    // before the parent's message listener attaches (cache hits make
+    // this likely on subsequent opens), a single post is missed and
+    // the parent's 5s timeout fires the fallback. A short retry loop
+    // closes the race.
+    let attempts = 0;
+    const ping = () => {
+      if (bytesReceived || attempts >= 25) {
+        clearInterval(pingInterval);
+        return;
+      }
+      attempts++;
+      if (!ALLOWED_PARENT_ORIGINS.includes(parentOrigin)) return;
       try {
         window.parent.postMessage({ type: "viewer-ready" }, parentOrigin);
       } catch {
-        // Parent's 5s readiness timeout falls back to download.
+        // Parent's 5s timeout will fall back if nothing arrives.
       }
-    }
+    };
+    ping();
+    const pingInterval = setInterval(ping, 150);
 
-    return () => window.removeEventListener("message", handler);
+    return () => {
+      clearInterval(pingInterval);
+      window.removeEventListener("message", handler);
+    };
   }, []);
 
   return (

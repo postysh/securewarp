@@ -47,9 +47,11 @@ export default function XlsxViewerPage() {
       return;
     }
 
+    let bytesReceived = false;
     const handler = async (e: MessageEvent) => {
       if (!ALLOWED_PARENT_ORIGINS.includes(e.origin)) return;
       if (!isXlsxMessage(e.data)) return;
+      bytesReceived = true;
       try {
         const ExcelJS = (await import("exceljs")).default;
         const workbook = new ExcelJS.Workbook();
@@ -81,15 +83,31 @@ export default function XlsxViewerPage() {
         return "";
       }
     })();
-    if (ALLOWED_PARENT_ORIGINS.includes(parentOrigin)) {
+
+    // Retry viewer-ready until bytes arrive — closes a race where the
+    // iframe hydrates before the parent attaches its message listener
+    // (likely on cached subsequent opens).
+    let attempts = 0;
+    const ping = () => {
+      if (bytesReceived || attempts >= 25) {
+        clearInterval(pingInterval);
+        return;
+      }
+      attempts++;
+      if (!ALLOWED_PARENT_ORIGINS.includes(parentOrigin)) return;
       try {
         window.parent.postMessage({ type: "viewer-ready" }, parentOrigin);
       } catch {
-        // Falls back to download in the parent.
+        // Parent's 5s timeout will fall back if nothing arrives.
       }
-    }
+    };
+    ping();
+    const pingInterval = setInterval(ping, 150);
 
-    return () => window.removeEventListener("message", handler);
+    return () => {
+      clearInterval(pingInterval);
+      window.removeEventListener("message", handler);
+    };
   }, []);
 
   if (errored) return <Centered>Spreadsheet viewer unavailable.</Centered>;

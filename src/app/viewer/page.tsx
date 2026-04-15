@@ -60,9 +60,11 @@ export default function ViewerPage() {
       return;
     }
 
+    let bytesReceived = false;
     const handler = (e: MessageEvent) => {
       if (!ALLOWED_PARENT_ORIGINS.includes(e.origin)) return;
       if (!isPdfMessage(e.data)) return;
+      bytesReceived = true;
       try {
         // Revoke any prior blob URL before issuing a new one — this
         // page is generally single-shot but be safe against reuse.
@@ -93,16 +95,28 @@ export default function ViewerPage() {
         return "";
       }
     })();
-    if (ALLOWED_PARENT_ORIGINS.includes(parentOrigin)) {
+    // Retry viewer-ready until bytes arrive — closes a race where the
+    // iframe hydrates before the parent attaches its message listener
+    // (likely on cached subsequent opens).
+    let attempts = 0;
+    const ping = () => {
+      if (bytesReceived || attempts >= 25) {
+        clearInterval(pingInterval);
+        return;
+      }
+      attempts++;
+      if (!ALLOWED_PARENT_ORIGINS.includes(parentOrigin)) return;
       try {
         window.parent.postMessage({ type: "viewer-ready" }, parentOrigin);
       } catch {
-        // If the post fails the parent's 5s readiness timeout falls
-        // back to the same-origin inline render.
+        // Parent's 5s timeout will fall back to inline render.
       }
-    }
+    };
+    ping();
+    const pingInterval = setInterval(ping, 150);
 
     return () => {
+      clearInterval(pingInterval);
       window.removeEventListener("message", handler);
       if (blobUrlRef.current) {
         URL.revokeObjectURL(blobUrlRef.current);
