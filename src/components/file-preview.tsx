@@ -414,6 +414,13 @@ function PdfPreview({ blobUrl, name }: { blobUrl: string; name: string }) {
       name={name}
       viewerPath="/viewer"
       messageType="pdf-bytes"
+      // PDF intentionally omits the iframe `sandbox` attribute. The
+      // browser's built-in PDF viewer (Safari/PDFium, Firefox/PDF.js)
+      // renders the PDF inside a NESTED blob: iframe within the
+      // viewer page. Sandbox flags inherit to nested iframes and
+      // prevent the browser-internal viewer from engaging cleanly,
+      // leaving a blank panel. Origin isolation + viewer CSP remain
+      // in place — those are the load-bearing defenses.
       fallback={
         <iframe
           src={blobUrl}
@@ -450,6 +457,9 @@ function OfficePreview({
       name={name}
       viewerPath={`/viewer/${kind}`}
       messageType={`${kind}-bytes`}
+      // Office viewers render content directly (no nested iframe), so
+      // the sandbox doesn't break them and we get its defense in depth.
+      sandbox="allow-scripts allow-same-origin"
       fallback={
         <div className="text-center max-w-[320px] text-white/70 text-[13px]">
           Office preview requires the isolated viewer subdomain.
@@ -472,12 +482,14 @@ function IsolatedPreview({
   viewerPath,
   messageType,
   fallback,
+  sandbox,
 }: {
   blobUrl: string;
   name: string;
   viewerPath: string;
   messageType: string;
   fallback: React.ReactNode;
+  sandbox?: string;
 }) {
   const viewerOrigin = process.env.NEXT_PUBLIC_PDF_VIEWER_ORIGIN?.trim();
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -550,18 +562,12 @@ function IsolatedPreview({
       ref={iframeRef}
       src={`${viewerOrigin}${viewerPath}`}
       title={name}
-      // Defense in depth on top of origin isolation:
-      // - allow-scripts: viewer needs JS to run mammoth/exceljs/PDFium UI
-      // - allow-same-origin: viewer needs same-origin (its own subdomain)
-      //   to use sessionStorage internals and blob URLs in nested frames
-      // What's REMOVED by this sandbox set:
-      //   * top-level navigation, popups, downloads
-      //   * form submission, pointer lock, orientation lock
-      //   * presentation API, modal dialogs (alert/confirm/prompt)
-      //   * autoplay, the unprefixed Storage Access API
-      // The sandboxed frame's effective origin still matches the viewer
-      // host, so postMessage origin checks on both sides keep working.
-      sandbox="allow-scripts allow-same-origin"
+      // `sandbox` is opt-in per preview type. Set for Office viewers
+      // (defense in depth on top of origin isolation), omitted for
+      // PDF where the browser's built-in viewer renders into a
+      // nested blob iframe and inherits the sandbox restrictions —
+      // that breaks PDFium engagement and leaves a blank panel.
+      sandbox={sandbox}
       className="w-[95vw] h-[90vh] rounded-lg bg-white"
     />
   );
