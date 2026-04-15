@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { FloatingParticles } from "@/components/floating-particles";
 import { HugeiconsIcon } from "@hugeicons/react";
 import HardDriveIcon from "@hugeicons/core-free-icons/HardDriveIcon";
 import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
@@ -121,7 +122,28 @@ function LogoReveal({ text }: { text: string }) {
 
   const handleClick = () => {
     if (typeof window === "undefined") return;
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Clear any hash (e.g. #features) so refreshing the page doesn't
+    // restore the previous anchor and jump the viewport back down.
+    // Use replaceState instead of assigning location.hash to avoid
+    // pushing a history entry for the "go to top" action.
+    if (window.location.hash) {
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
+    // Try the modern smooth API; fall back to direct scrollTop if
+    // a browser or user preference (prefers-reduced-motion) ignores
+    // it. Also try both documentElement and body for cross-browser
+    // coverage — Safari historically needed one or the other.
+    try {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch {
+      window.scrollTo(0, 0);
+    }
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
   };
 
   return (
@@ -181,13 +203,62 @@ function mockCipher(seed: string, length = 24): string {
 }
 
 
+// Shared styles for the "Try it yourself" tiles so all four cards
+// line up in a 2×2 grid with the same chrome.
+const TILE_STYLE: React.CSSProperties = {
+  background: "#1a1a1a",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: 16,
+  padding: "24px 24px 22px",
+  display: "flex",
+  flexDirection: "column",
+};
+const TILE_LABEL_STYLE: React.CSSProperties = {
+  display: "block",
+  fontSize: 11,
+  fontFamily: "var(--font-geist-mono), monospace",
+  textTransform: "uppercase",
+  letterSpacing: 1.5,
+  color: "rgba(255,255,255,0.4)",
+  marginBottom: 8,
+};
+const TILE_FOOTER_STYLE: React.CSSProperties = {
+  fontSize: 11,
+  color: "rgba(255,255,255,0.4)",
+  marginTop: "auto",
+  paddingTop: 14,
+  lineHeight: 1.6,
+};
+
+// Small curated word list for the mock recovery-phrase demo. Not the
+// real BIP39 2048-word list — too big to ship on a landing page for
+// a feature that's just a visual demo. Every word here is still
+// present in the real list, so the phrase LOOKS legitimate.
+const MINI_WORDLIST = [
+  "abandon","ability","about","above","absent","absorb","abstract","absurd",
+  "abuse","access","accident","account","accuse","achieve","acid","acoustic",
+  "across","action","actor","actress","actual","adapt","add","addict",
+  "address","adjust","admit","adult","advance","advice","aerobic","affair",
+  "afford","afraid","again","age","agent","agree","ahead","aim",
+  "album","alcohol","alert","alien","alley","allow","almost","alone",
+  "alpha","already","also","alter","always","amateur","amazing","among",
+  "amount","amused","analyst","anchor","ancient","anger","angle","angry",
+  "animal","ankle","announce","annual","another","answer","antenna","antique",
+  "anxiety","any","apart","apology","appear","apple","approve","april",
+];
+
+function pickRandom<T>(arr: T[], count: number): T[] {
+  const out: T[] = [];
+  for (let i = 0; i < count; i++) {
+    out.push(arr[Math.floor(Math.random() * arr.length)]);
+  }
+  return out;
+}
+
 /**
- * Interactive "encrypt anything" widget. User types a word; it gets
- * HMAC-ish transformed with the same mockCipher as the dashboard
- * toggle, updating on every keystroke. Feels like real-time
- * encryption even though it's a deterministic hash for demo
- * purposes only. Seeds the input with a rotating placeholder so
- * first-time visitors see something happening before they type.
+ * Tile 1. Interactive "encrypt anything" widget. User types a word;
+ * it gets HMAC-ish transformed with the same mockCipher as the
+ * dashboard toggle, updating on every keystroke.
  */
 function EncryptPlayground() {
   const SAMPLES = [
@@ -218,120 +289,392 @@ function EncryptPlayground() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sampleIdx]);
 
-  const cipher = input.length === 0 ? "" : mockCipher(input, 40);
+  const cipher = input.length === 0 ? "" : mockCipher(input, 36);
 
   return (
-    <section style={{ padding: `${SECTION_PAD_Y}px 32px`, maxWidth: SECTION_MAX, margin: "0 auto" }}>
-      <div style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 32px" }}>
-        <span style={EYEBROW_STYLE}>Try it yourself</span>
-        <h2 style={H2_STYLE}>Type anything. Watch it disappear.</h2>
+    <div style={TILE_STYLE}>
+      <label style={TILE_LABEL_STYLE}>You type</label>
+      <input
+        value={input}
+        onChange={(e) => {
+          setUserTouched(true);
+          setInput(e.target.value.slice(0, 80));
+        }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder="Type a filename…"
+        style={{
+          width: "100%",
+          background: "rgba(255,255,255,0.04)",
+          border: `1px solid ${focused ? "rgba(110,210,170,0.4)" : "rgba(255,255,255,0.08)"}`,
+          borderRadius: 10,
+          padding: "10px 12px",
+          fontSize: 14,
+          color: "white",
+          outline: "none",
+          transition: "border-color 180ms ease",
+          fontFamily: "inherit",
+        }}
+      />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0 8px" }}>
+        <span style={{ height: 1, flex: 1, background: "rgba(255,255,255,0.08)" }} />
+        <span style={{ fontSize: 10, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", letterSpacing: 1.5, color: "rgba(255,255,255,0.4)" }}>
+          Encrypt in browser
+        </span>
+        <span style={{ height: 1, flex: 1, background: "rgba(255,255,255,0.08)" }} />
       </div>
+      <label style={TILE_LABEL_STYLE}>Our server stores</label>
       <div
         style={{
-          maxWidth: 720,
-          margin: "0 auto",
-          background: "#1a1a1a",
+          background: "rgba(255,255,255,0.03)",
           border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: 16,
-          padding: "28px 28px 24px",
+          borderRadius: 10,
+          padding: "10px 12px",
+          fontFamily: "var(--font-geist-mono), monospace",
+          fontSize: 12,
+          color: "rgba(255,255,255,0.55)",
+          wordBreak: "break-all",
+          lineHeight: 1.55,
+          minHeight: 60,
         }}
       >
-        {/* Input row */}
-        <label
+        {cipher || <span style={{ color: "rgba(255,255,255,0.3)" }}>—</span>}
+      </div>
+      <p style={TILE_FOOTER_STYLE}>
+        Your content, unreadable without the key that never leaves your device.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Tile 2. Password → key derivation visual. Types a password,
+ * watches it become a fixed-length "derived key". In reality we use
+ * Argon2id with per-user salt; this is a demo illustrating the
+ * concept without running a real 64 MB memory-hard hash on every
+ * keystroke.
+ */
+function PasswordKeyTile() {
+  const [pwd, setPwd] = useState("correct horse battery staple");
+  const [focused, setFocused] = useState(false);
+  const key = pwd.length === 0 ? "" : mockCipher("pw:" + pwd, 32);
+  const pretty = key.match(/.{1,4}/g)?.join(" ") ?? "";
+
+  return (
+    <div style={TILE_STYLE}>
+      <label style={TILE_LABEL_STYLE}>Your password</label>
+      <input
+        type="password"
+        value={pwd}
+        onChange={(e) => setPwd(e.target.value.slice(0, 64))}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder="••••••••"
+        style={{
+          width: "100%",
+          background: "rgba(255,255,255,0.04)",
+          border: `1px solid ${focused ? "rgba(110,210,170,0.4)" : "rgba(255,255,255,0.08)"}`,
+          borderRadius: 10,
+          padding: "10px 12px",
+          fontSize: 14,
+          color: "white",
+          outline: "none",
+          transition: "border-color 180ms ease",
+          fontFamily: "inherit",
+          letterSpacing: 2,
+        }}
+      />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0 8px" }}>
+        <span style={{ height: 1, flex: 1, background: "rgba(255,255,255,0.08)" }} />
+        <span style={{ fontSize: 10, fontFamily: "var(--font-geist-mono), monospace", textTransform: "uppercase", letterSpacing: 1.5, color: "rgba(255,255,255,0.4)" }}>
+          Argon2id · 64 MB · 3 iter
+        </span>
+        <span style={{ height: 1, flex: 1, background: "rgba(255,255,255,0.08)" }} />
+      </div>
+      <label style={TILE_LABEL_STYLE}>Derived key</label>
+      <div
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 10,
+          padding: "10px 12px",
+          fontFamily: "var(--font-geist-mono), monospace",
+          fontSize: 12,
+          color: "rgba(110,210,170,0.8)",
+          wordBreak: "break-all",
+          lineHeight: 1.55,
+          minHeight: 60,
+        }}
+      >
+        {pretty || <span style={{ color: "rgba(255,255,255,0.3)" }}>—</span>}
+      </div>
+      <p style={TILE_FOOTER_STYLE}>
+        Memory-hard hashing means even a leaked verifier is expensive to brute-force.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Tile 3. Share link anatomy. Shows a realistic-looking share URL
+ * with the `#key` fragment highlighted. Clicking "Regenerate" swaps
+ * both the path segment and the fragment so the viewer sees the
+ * structure is fresh per-share. The whole card makes a single point:
+ * browsers never send the part after `#` to any server, so the key
+ * for a shared link stays entirely client-side.
+ */
+function ShareLinkTile() {
+  // Start with a stable seed so SSR and first client render produce
+  // the same HTML; only randomize after mount. Math.random() in a
+  // useState initializer causes a hydration mismatch because it
+  // executes on the server with a different value than the client.
+  const [seed, setSeed] = useState("initial");
+  useEffect(() => {
+    setSeed(Math.random().toString(36).slice(2));
+  }, []);
+  const pathPart = mockCipher("path:" + seed, 12);
+  const fragment = mockCipher("key:" + seed, 20);
+
+  return (
+    <div style={TILE_STYLE}>
+      <label style={TILE_LABEL_STYLE}>A SecureWarp share link</label>
+      <div
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 10,
+          padding: "12px 14px",
+          fontFamily: "var(--font-geist-mono), monospace",
+          fontSize: 12,
+          color: "rgba(255,255,255,0.7)",
+          wordBreak: "break-all",
+          lineHeight: 1.55,
+          minHeight: 60,
+        }}
+      >
+        <span style={{ color: "rgba(255,255,255,0.4)" }}>https://securewarp.com/share/</span>
+        <span style={{ color: "rgba(255,255,255,0.8)" }}>{pathPart}</span>
+        <span style={{ color: "rgba(110,210,170,0.95)" }}>#</span>
+        <span
           style={{
-            display: "block",
-            fontSize: 11,
-            fontFamily: "var(--font-geist-mono), monospace",
-            textTransform: "uppercase",
-            letterSpacing: 1.5,
-            color: "rgba(255,255,255,0.4)",
-            marginBottom: 8,
+            color: "rgba(110,210,170,0.95)",
+            background: "rgba(110,210,170,0.08)",
+            padding: "1px 3px",
+            borderRadius: 3,
           }}
         >
-          You type
-        </label>
-        <input
-          value={input}
-          onChange={(e) => {
-            setUserTouched(true);
-            setInput(e.target.value.slice(0, 80));
-          }}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          placeholder="Type a filename, note, anything…"
+          {fragment}
+        </span>
+      </div>
+      {/* Breakdown: show which half of the URL crosses the wire and
+          which half stays in the user's browser. Fills the tile
+          with meaningful visual content instead of empty space and
+          doubles as a teaching moment on URL fragments. */}
+      <div
+        style={{
+          marginTop: 14,
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 10,
+        }}
+      >
+        <div
           style={{
-            width: "100%",
-            background: "rgba(255,255,255,0.04)",
-            border: `1px solid ${focused ? "rgba(110,210,170,0.4)" : "rgba(255,255,255,0.08)"}`,
+            padding: "10px 12px",
             borderRadius: 10,
-            padding: "12px 14px",
-            fontSize: 15,
-            color: "white",
-            outline: "none",
-            transition: "border-color 180ms ease",
-            fontFamily: "inherit",
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.08)",
           }}
-        />
-
-        {/* Arrow divider */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "18px 0 8px" }}>
-          <span style={{ height: 1, flex: 1, background: "rgba(255,255,255,0.08)" }} />
-          <span
+        >
+          <div
             style={{
               fontSize: 10,
               fontFamily: "var(--font-geist-mono), monospace",
               textTransform: "uppercase",
               letterSpacing: 1.5,
-              color: "rgba(255,255,255,0.4)",
+              color: "rgba(255,255,255,0.45)",
+              marginBottom: 6,
             }}
           >
-            Encrypt in browser
-          </span>
-          <span style={{ height: 1, flex: 1, background: "rgba(255,255,255,0.08)" }} />
+            Server sees
+          </div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", lineHeight: 1.5 }}>
+            Only the link&apos;s lookup id. Nothing derivable.
+          </div>
         </div>
-
-        {/* Ciphertext row */}
-        <label
+        <div
           style={{
-            display: "block",
-            fontSize: 11,
+            padding: "10px 12px",
+            borderRadius: 10,
+            background: "rgba(110,210,170,0.06)",
+            border: "1px solid rgba(110,210,170,0.2)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontFamily: "var(--font-geist-mono), monospace",
+              textTransform: "uppercase",
+              letterSpacing: 1.5,
+              color: "rgba(110,210,170,0.8)",
+              marginBottom: 6,
+            }}
+          >
+            Browser keeps
+          </div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>
+            The decryption key. Never sent to us.
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
+        <span
+          style={{
+            fontSize: 10,
             fontFamily: "var(--font-geist-mono), monospace",
             textTransform: "uppercase",
             letterSpacing: 1.5,
-            color: "rgba(255,255,255,0.4)",
-            marginBottom: 8,
+            color: "rgba(255,255,255,0.45)",
           }}
         >
-          Our server stores
-        </label>
-        <div
+          End-to-end encrypted
+        </span>
+        <button
+          type="button"
+          onClick={() => setSeed(Math.random().toString(36).slice(2))}
           style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 10,
-            padding: "12px 14px",
+            marginLeft: "auto",
+            background: "transparent",
+            border: "1px solid rgba(255,255,255,0.12)",
+            color: "rgba(255,255,255,0.7)",
+            padding: "4px 10px",
+            borderRadius: 6,
+            fontSize: 11,
             fontFamily: "var(--font-geist-mono), monospace",
-            fontSize: 13,
-            color: "rgba(255,255,255,0.55)",
-            wordBreak: "break-all",
-            lineHeight: 1.55,
-            minHeight: 44,
+            textTransform: "uppercase",
+            letterSpacing: 1,
+            cursor: "pointer",
           }}
         >
-          {cipher || <span style={{ color: "rgba(255,255,255,0.3)" }}>—</span>}
-        </div>
-        <p
+          Regenerate
+        </button>
+      </div>
+      <p style={TILE_FOOTER_STYLE}>
+        The key lives in the URL fragment. Browsers don&apos;t send fragments to servers.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Tile 4. Mock 24-word recovery phrase. Regenerates on button click
+ * with words pulled from the small curated subset above (so visitors
+ * can see the shape of a real BIP39 phrase without us shipping the
+ * full 2048-word list just for the demo).
+ */
+function RecoveryPhraseTile() {
+  // Stable deterministic starter set so SSR and first client render
+  // agree; randomize post-mount to avoid hydration mismatch.
+  const [words, setWords] = useState<string[]>(() => MINI_WORDLIST.slice(0, 24));
+  useEffect(() => {
+    setWords(pickRandom(MINI_WORDLIST, 24));
+  }, []);
+
+  return (
+    <div style={TILE_STYLE}>
+      <label style={TILE_LABEL_STYLE}>Your recovery phrase</label>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: 4,
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 10,
+          padding: 10,
+          fontFamily: "var(--font-geist-mono), monospace",
+          fontSize: 11,
+          lineHeight: 1.5,
+        }}
+      >
+        {words.map((w, i) => (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 4,
+              padding: "4px 6px",
+              borderRadius: 4,
+              background: "rgba(255,255,255,0.02)",
+              overflow: "hidden",
+            }}
+          >
+            <span style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", flexShrink: 0 }}>
+              {String(i + 1).padStart(2, "0")}
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.75)", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {w}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
+        <span
           style={{
-            fontSize: 12,
-            color: "rgba(255,255,255,0.4)",
-            marginTop: 14,
-            textAlign: "center",
-            lineHeight: 1.6,
+            fontSize: 10,
+            fontFamily: "var(--font-geist-mono), monospace",
+            textTransform: "uppercase",
+            letterSpacing: 1.5,
+            color: "rgba(255,255,255,0.45)",
           }}
         >
-          Demo transform. Real content is encrypted with XSalsa20-Poly1305
-          under a key that never leaves your device.
-        </p>
+          BIP39 · 256 bits
+        </span>
+        <button
+          type="button"
+          onClick={() => setWords(pickRandom(MINI_WORDLIST, 24))}
+          style={{
+            marginLeft: "auto",
+            background: "transparent",
+            border: "1px solid rgba(255,255,255,0.12)",
+            color: "rgba(255,255,255,0.7)",
+            padding: "4px 10px",
+            borderRadius: 6,
+            fontSize: 11,
+            fontFamily: "var(--font-geist-mono), monospace",
+            textTransform: "uppercase",
+            letterSpacing: 1,
+            cursor: "pointer",
+          }}
+        >
+          Regenerate
+        </button>
+      </div>
+      <p style={TILE_FOOTER_STYLE}>
+        Your second path in if you forget your password. We never see or store it.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Section wrapper that renders all four tiles in a 2×2 grid on
+ * wide screens, 1×4 on narrow.
+ */
+function TryItYourself() {
+  return (
+    <section style={{ padding: `${SECTION_PAD_Y}px 32px`, maxWidth: SECTION_MAX, margin: "0 auto" }}>
+      <div style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 48px" }}>
+        <span style={EYEBROW_STYLE}>Try it yourself</span>
+        <h2 style={H2_STYLE}>Four ways to feel zero-knowledge.</h2>
+      </div>
+      <div className="grid gap-5 grid-cols-1 md:grid-cols-2">
+        <EncryptPlayground />
+        <PasswordKeyTile />
+        <ShareLinkTile />
+        <RecoveryPhraseTile />
       </div>
     </section>
   );
@@ -346,16 +689,38 @@ export default function Home() {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   return (
-    <div style={{ fontFamily: "var(--font-chillax), var(--font-geist-sans), system-ui, sans-serif", background: "#111", minHeight: "100vh" }}>
+    <div style={{ fontFamily: "var(--font-chillax), var(--font-geist-sans), system-ui, sans-serif", background: "#111", minHeight: "100vh", position: "relative" }}>
+      {/* Ambient drifting particles behind everything. Fixed +
+          pointer-events-none in the component's own classes, so it
+          doesn't interfere with scrolling or clicks. Adds subtle
+          motion without competing with the content. */}
+      <FloatingParticles count={60} />
 
       {/* Floating nav pill */}
       <div style={{ position: "fixed", left: "50%", top: 20, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 0, background: "rgba(30,30,30,0.95)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderRadius: 12, padding: "6px 6px 6px 10px", zIndex: 99999 }}>
-        <span style={{ padding: "8px 16px 8px 6px", fontSize: 14, fontWeight: 600, color: "white", letterSpacing: 0.5 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 16px 8px 6px", fontSize: 14, fontWeight: 600, color: "white", letterSpacing: 0.5 }}>
           <LogoReveal text="SECUREWARP" />
+          <span
+            style={{
+              fontSize: 9,
+              fontFamily: "var(--font-geist-mono), monospace",
+              fontWeight: 600,
+              letterSpacing: 1.5,
+              color: "rgba(110,210,170,0.95)",
+              background: "rgba(110,210,170,0.12)",
+              border: "1px solid rgba(110,210,170,0.25)",
+              padding: "2px 6px",
+              borderRadius: 4,
+              lineHeight: 1,
+            }}
+            aria-label="Beta product"
+          >
+            BETA
+          </span>
         </span>
         <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.15)" }} />
-        <Link href="#features" style={{ padding: "8px 16px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Features</Link>
         <Link href="#" style={{ padding: "8px 16px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>About</Link>
+        <Link href="#features" style={{ padding: "8px 16px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Features</Link>
         <Link href="#" style={{ padding: "8px 16px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Support</Link>
         <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
         <Link href="/login" style={{ padding: "8px 14px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Log in</Link>
@@ -829,11 +1194,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Encrypt-anything interactive widget. Type a word, watch it
-          resolve into the same pseudo-ciphertext the server sees.
-          A tangible way to feel how zero-knowledge works without
-          writing a sentence of marketing copy. */}
-      <EncryptPlayground />
+      {/* Four interactive tiles: encrypt-anything, password→key,
+          share-link anatomy, and a mock recovery phrase. Each
+          demonstrates one concrete aspect of the zero-knowledge
+          model hands-on. */}
+      <TryItYourself />
 
       {/* Transparency block — honest inventory of what our servers
           can and cannot see. The whole point of a zero-knowledge
@@ -937,6 +1302,145 @@ export default function Home() {
           hide a metadata leak in fine print.
         </p>
       </section>
+
+      {/* Footer. Small, on-brand, no illustration; matches the rest
+          of the landing's rhythm with a SECTION_MAX container and
+          monospace eyebrows. Links are placeholders (#) for the
+          pages that don't exist yet. */}
+      <footer style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 48, padding: `48px 32px 32px` }}>
+        <div style={{ maxWidth: SECTION_MAX, margin: "0 auto" }}>
+          <div
+            style={{
+              display: "grid",
+              gap: 40,
+              gridTemplateColumns: "1.2fr 1fr 1fr 1fr",
+            }}
+            className="footer-grid"
+          >
+            {/* Brand block */}
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "white", letterSpacing: 0.5, fontFamily: "var(--font-geist-mono), monospace" }}>
+                  SECUREWARP
+                </span>
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontFamily: "var(--font-geist-mono), monospace",
+                    fontWeight: 600,
+                    letterSpacing: 1.5,
+                    color: "rgba(110,210,170,0.95)",
+                    background: "rgba(110,210,170,0.12)",
+                    border: "1px solid rgba(110,210,170,0.25)",
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    lineHeight: 1,
+                  }}
+                >
+                  BETA
+                </span>
+              </div>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, margin: 0, maxWidth: 280 }}>
+                The cloud drive that can&apos;t read your files. End-to-end encrypted. Zero-knowledge by design.
+              </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 18 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(110,210,170,0.9)", boxShadow: "0 0 8px rgba(110,210,170,0.6)" }} />
+                <span style={{ fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", color: "rgba(255,255,255,0.45)", letterSpacing: 0.5 }}>
+                  All systems operational
+                </span>
+              </div>
+            </div>
+
+            {/* Link columns */}
+            {[
+              {
+                heading: "Product",
+                links: [
+                  { label: "Features", href: "#features" },
+                  { label: "Pricing", href: "#" },
+                  { label: "Changelog", href: "#" },
+                  { label: "Roadmap", href: "#" },
+                ],
+              },
+              {
+                heading: "Company",
+                links: [
+                  { label: "About", href: "#" },
+                  { label: "Blog", href: "#" },
+                  { label: "Contact", href: "#" },
+                  { label: "Support", href: "#" },
+                ],
+              },
+              {
+                heading: "Legal",
+                links: [
+                  { label: "Privacy", href: "#" },
+                  { label: "Terms", href: "#" },
+                  { label: "Security", href: "#" },
+                  { label: "Threat model", href: "#" },
+                ],
+              },
+            ].map((col) => (
+              <div key={col.heading}>
+                <div style={EYEBROW_STYLE}>{col.heading}</div>
+                <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+                  {col.links.map((l) => (
+                    <li key={l.label}>
+                      <Link
+                        href={l.href}
+                        style={{
+                          fontSize: 13,
+                          color: "rgba(255,255,255,0.6)",
+                          textDecoration: "none",
+                          transition: "color 160ms ease",
+                        }}
+                      >
+                        {l.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          <div
+            style={{
+              marginTop: 48,
+              paddingTop: 20,
+              borderTop: "1px solid rgba(255,255,255,0.06)",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 16,
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: 12,
+              color: "rgba(255,255,255,0.35)",
+            }}
+          >
+            <span style={{ fontFamily: "var(--font-geist-mono), monospace" }}>
+              © {new Date().getFullYear()} SecureWarp. All rights reserved.
+            </span>
+            <span style={{ fontFamily: "var(--font-geist-mono), monospace", letterSpacing: 1 }}>
+              XSalsa20-Poly1305 · Argon2id · SRP-6a · BIP39
+            </span>
+          </div>
+        </div>
+
+        {/* Responsive: collapse the 4-column grid on small viewports. */}
+        <style>{`
+          @media (max-width: 768px) {
+            .footer-grid {
+              grid-template-columns: repeat(2, 1fr) !important;
+            }
+          }
+          @media (max-width: 480px) {
+            .footer-grid {
+              grid-template-columns: 1fr !important;
+            }
+          }
+        `}</style>
+      </footer>
     </div>
   );
 }
