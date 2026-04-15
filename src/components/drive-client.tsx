@@ -74,11 +74,7 @@ export default function DriveClient() {
       ? {
           encryptionPublicKey: keys.encryptionPublicKey,
           encryptionPrivateKey: keys.encryptionPrivateKey,
-          // searchIndexKey was added later but the destructuring here
-          // wasn't updated, so the hook never saw it. Without it,
-          // runBackfill aborted, no tokens were ever written, and
-          // /api/files/search was never called.
-          searchIndexKey: keys.searchIndexKey,
+          email: keys.email,
         }
       : null,
   );

@@ -29,24 +29,16 @@ import {
 import { decryptFileContent } from "@/lib/crypto/file-crypto";
 import { toBase64, fromBase64 } from "@/lib/crypto/utils";
 import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
-import { indexFile } from "@/lib/search/index-file";
-import { tokenizeQuery } from "@/lib/search/tokenize";
-import { hashTokens } from "@/lib/search/hash-token";
-import { readTextForIndex, isBackfillCandidate, extractTextFromBytes } from "@/lib/search/text-extract";
-
-interface SearchCacheEntry {
-  id: string;
-  name: string;
-  isFolder: boolean;
-  parentId: string | null;
-  workspaceId: string | null;
-  workspaceName: string | null;
-  // MIME type and size are needed by the content-backfill pass to
-  // decide whether a file is worth downloading and tokenizing.
-  // Folders carry type === "folder" and size 0.
-  type: string;
-  size: number;
-}
+import {
+  loadAll as loadSearchCache,
+  replaceAll as replaceSearchCache,
+  upsertOne as upsertSearchCache,
+  deleteOne as deleteSearchCache,
+  getBuiltAt as getSearchBuiltAt,
+  markBuilt as markSearchBuilt,
+  clearFor as clearSearchCache,
+  type SearchCacheEntry,
+} from "@/lib/search/local-cache";
 
 export interface FileCollaboratorPreview {
   userId: string;
@@ -137,11 +129,7 @@ interface UseFilesState {
 export function useFiles(keys: {
   encryptionPublicKey: string;
   encryptionPrivateKey: string;
-  // base64-encoded HMAC key for the encrypted search index. Optional
-  // because legacy sessionStorage blobs from before search shipped
-  // won't have it; consumers fall back to client-side substring
-  // matching when missing.
-  searchIndexKey?: string;
+  email: string;
 } | null) {
   const [state, setState] = useState<UseFilesState>({
     files: [],
@@ -728,22 +716,26 @@ export function useFiles(keys: {
         body: JSON.stringify({ action: "finalize", fileId }),
       });
 
-      // 5. Update the encrypted search index. For text-ish files
-      //    (plain text + code), read the body client-side and pass
-      //    it to the tokenizer so content is searchable too. Binary
-      //    files get filename-only. readTextForIndex handles the
-      //    MIME + extension check and the 2 MB size cap; it returns
-      //    null for anything not suitable. Best-effort — a failed
-      //    index call doesn't block the upload.
-      if (keys.searchIndexKey) {
-        const textContent = await readTextForIndex(file);
-        await indexFile({
-          fileId,
-          filename: file.name,
-          content: textContent,
-          searchIndexKeyB64: keys.searchIndexKey,
+      // 5. Update the local search cache so this file is discoverable
+      //    immediately. Best-effort — a failed cache write doesn't
+      //    block the upload, and the next cache rebuild will include
+      //    the file anyway.
+      try {
+        await upsertSearchCache(keys.email, keys.encryptionPrivateKey, {
+          id: fileId,
+          name: file.name,
+          isFolder: false,
+          type: file.type || "application/octet-stream",
+          size: file.size,
+          parentId,
+          workspaceId: state.activeWorkspace?.id ?? null,
+          workspaceName: state.activeWorkspace?.name ?? null,
+          breadcrumb: state.activeWorkspace
+            ? state.activeWorkspace.name
+            : "My Drive",
+          updatedAt: new Date().toISOString(),
         });
-      }
+      } catch { /* best-effort */ }
 
       updateProgress(100, "Done");
       await new Promise((r) => setTimeout(r, 400));
@@ -1069,13 +1061,24 @@ export function useFiles(keys: {
         return;
       }
 
-      // Index the folder's name so it appears in search results.
-      if (data.folderId && keys.searchIndexKey) {
-        await indexFile({
-          fileId: data.folderId,
-          filename: name,
-          searchIndexKeyB64: keys.searchIndexKey,
-        });
+      // Add folder to the local search cache.
+      if (data.folderId) {
+        try {
+          await upsertSearchCache(keys.email, keys.encryptionPrivateKey, {
+            id: data.folderId,
+            name,
+            isFolder: true,
+            type: "folder",
+            size: 0,
+            parentId,
+            workspaceId: state.activeWorkspace?.id ?? null,
+            workspaceName: state.activeWorkspace?.name ?? null,
+            breadcrumb: state.activeWorkspace
+              ? state.activeWorkspace.name
+              : "My Drive",
+            updatedAt: new Date().toISOString(),
+          });
+        } catch { /* best-effort */ }
       }
 
       await fetchFiles(parentId);
@@ -1165,14 +1168,23 @@ export function useFiles(keys: {
           return { ok: false, error: data.error || "Rename failed" };
         }
 
-        // Re-tokenize under the new name. Best-effort.
-        if (keys.searchIndexKey) {
-          await indexFile({
-            fileId: file.id,
-            filename: trimmed,
-            searchIndexKeyB64: keys.searchIndexKey,
+        // Update the local search cache with the new name.
+        try {
+          await upsertSearchCache(keys.email, keys.encryptionPrivateKey, {
+            id: file.id,
+            name: trimmed,
+            isFolder: file.isFolder,
+            type: file.type,
+            size: file.size,
+            parentId: file.parentId,
+            workspaceId: state.activeWorkspace?.id ?? null,
+            workspaceName: state.activeWorkspace?.name ?? null,
+            breadcrumb: state.activeWorkspace
+              ? state.activeWorkspace.name
+              : "My Drive",
+            updatedAt: new Date().toISOString(),
           });
-        }
+        } catch { /* best-effort */ }
 
         // Optimistic local update + invalidate cache so other views
         // pick up the new name on next navigation.
@@ -1334,6 +1346,9 @@ export function useFiles(keys: {
         setState((s) => ({ ...s, error: data.error }));
         return;
       }
+
+      // Remove from local search cache. Best-effort.
+      try { await deleteSearchCache(fileId); } catch { /* */ }
 
       await fetchFiles(state.currentFolder, state.viewMode);
     } catch (err) {
@@ -2289,379 +2304,269 @@ export function useFiles(keys: {
     setState((s) => ({ ...s, error: null }));
   }, []);
 
-  // ── Search index ─────────────────────────────────────────────────
-  // Lazily built on first search, cached for the session. Contains
-  // every file the user can access with decrypted names.
-  // Cache shape includes the workspace context so search results can
-  // show a badge ("from Engineering Team") instead of silently
-  // returning matches from elsewhere.
-  const searchIndexRef = useRef<SearchCacheEntry[] | null>(null);
-  // Holds the in-flight cache-build promise so concurrent search
-  // calls await the same build instead of seeing an empty cache. The
-  // previous boolean flag let the second call skip the build branch
-  // while the first was still resolving — observed as "first search
-  // finds everything, second search finds nothing" until one search
-  // happened to wait long enough for the cache to land.
+  // ── Search cache ─────────────────────────────────────────────────
+  // Local-first encrypted cache of decrypted filenames + workspace
+  // context, stored in IndexedDB on the user's device. Rebuilt from
+  // the server on demand when no cache exists; kept in sync by
+  // upload/rename/delete lifecycle hooks. No HMAC tokens, no backfill
+  // state machine, no server-side index — just "here's every file
+  // you can see, search it locally."
   const searchBuildPromiseRef = useRef<Promise<void> | null>(null);
-  const backfillRef = useRef<"unknown" | "running" | "done">("unknown");
 
-  // Backfill the encrypted search index for any files that exist
-  // pre-search. Runs once per session, lazily — kicked off the first
-  // time the user invokes search after the cache is built.
-  //
-  // Two passes:
-  //   1. Names — tokenize every cached file's filename. Cheap (no
-  //      bytes downloaded). Marked complete via search_indexed_at.
-  //   2. Content — for text/Office files under the size cap, download,
-  //      decrypt, tokenize body, re-index with content. Heavy (bytes
-  //      cross the network) but bounded: only previewable types, only
-  //      under 2MB text / 10MB office. Marked complete via
-  //      search_content_indexed_at.
-  //
-  // Both timestamps only flip on success so a partial run retries on
-  // next session.
-  const runBackfill = useCallback(async () => {
-    if (!keys?.searchIndexKey) {
-      // eslint-disable-next-line no-console
-      console.warn("[search.backfill] aborted: no searchIndexKey in session — sign out and back in to derive it");
-      return;
+  /**
+   * Build the local search cache from scratch. Fetches every
+   * accessible file + workspace, decrypts each row's name (walking
+   * the parent_keys_claim chain for workspace-inherited entries),
+   * computes a user-friendly breadcrumb, and writes the whole set
+   * to IndexedDB under the user's encryption key.
+   *
+   * Called on demand from searchFiles when no cache exists yet, or
+   * when it's older than the freshness threshold. Concurrent calls
+   * share a single in-flight promise to avoid redundant work.
+   */
+  const rebuildSearchCache = useCallback(async () => {
+    if (!keys) return;
+    const [filesRes, wsRes] = await Promise.all([
+      fetch("/api/files/list?all=true&includeWorkspaces=true"),
+      fetch("/api/workspaces"),
+    ]);
+    if (!filesRes.ok) return;
+    const data = await filesRes.json();
+    const wsData = wsRes.ok ? await wsRes.json() : { workspaces: [] };
+    const wsNameById = new Map<string, string>();
+    for (const ws of (wsData.workspaces ?? []) as { id: string; name: string }[]) {
+      wsNameById.set(ws.id, ws.name);
     }
-    if (backfillRef.current !== "unknown") return;
-    backfillRef.current = "running";
-    try {
-      const statusRes = await fetch("/api/files/search/status");
-      let namesDone = false;
-      let contentDone = false;
-      if (statusRes.ok) {
-        const status = await statusRes.json();
-        namesDone = !!status.indexedAt;
-        contentDone = !!status.contentIndexedAt;
-      }
-      // eslint-disable-next-line no-console
-      console.log("[search.backfill] starting", {
-        cacheSize: searchIndexRef.current?.length ?? 0,
-        namesDone,
-        contentDone,
+
+    type Raw = Record<string, unknown>;
+    const rows: Raw[] = data.files ?? [];
+    // Key maps feed both metadata decryption and breadcrumb resolution.
+    const hierMap = new Map<string, string>(); // fileId → priv hier key
+    const nameById = new Map<string, string>(); // fileId → decrypted name
+    const entries: SearchCacheEntry[] = [];
+
+    const addEntry = (f: Raw, name: string, type: string, size: number) => {
+      nameById.set(f.id as string, name);
+      // Workspace roots are decrypted so children can inherit their
+      // hier key, but they don't surface as searchable results — they
+      // represent the workspace itself, not a user-discoverable folder.
+      if (f.is_workspace_root) return;
+      entries.push({
+        id: f.id as string,
+        name,
+        isFolder: f.is_folder as boolean,
+        type,
+        size,
+        parentId: (f.parent_id as string | null) ?? null,
+        workspaceId: (f.workspace_id as string | null) ?? null,
+        workspaceName: f.workspace_id
+          ? wsNameById.get(f.workspace_id as string) ?? null
+          : null,
+        breadcrumb: "", // filled in the final pass once all names are known
+        updatedAt: (f.updated_at as string | null) ?? new Date().toISOString(),
       });
-      if (namesDone && contentDone) {
-        backfillRef.current = "done";
-        // eslint-disable-next-line no-console
-        console.log("[search.backfill] both passes already complete");
-        return;
-      }
-      const cache = searchIndexRef.current ?? [];
+    };
 
-      // Pass 1: filenames (skip if already done).
-      if (!namesDone) {
-        // eslint-disable-next-line no-console
-        console.log("[search.backfill] pass1 names: indexing", { count: cache.length });
-        const PARALLEL = 6;
-        let cursor = 0;
-        const workers = Array.from({ length: PARALLEL }, async () => {
-          while (cursor < cache.length) {
-            const i = cursor++;
-            await indexFile({
-              fileId: cache[i].id,
-              filename: cache[i].name,
-              searchIndexKeyB64: keys.searchIndexKey!,
-            });
-          }
-        });
-        await Promise.all(workers);
-        const statusPostRes = await fetch("/api/files/search/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ which: "names" }),
-        });
-        // eslint-disable-next-line no-console
-        console.log("[search.backfill] pass1 names: done", {
-          statusUpdate: statusPostRes.status,
-        });
+    // Pass 1: directly-keyed files. Everything the user has their
+    // own wrap for; decrypts with just encryptionPrivateKey.
+    const pending: Raw[] = [];
+    for (const f of rows) {
+      const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
+      if (!encPrivHier) {
+        pending.push(f);
+        continue;
       }
-
-      // Pass 2: content for text/Office files. Lower parallelism
-      // because each call downloads + decrypts + tokenizes a file —
-      // CPU and bandwidth are the bottleneck, not request count.
-      if (!contentDone) {
-        const candidates = cache.filter(
-          (f) =>
-            !f.isFolder &&
-            isBackfillCandidate(f.type, f.name, f.size),
+      try {
+        const privHier = unwrapPrivateHierarchicalKey(
+          encPrivHier,
+          (f.wrapped_by_public_key as string) || "",
+          keys.encryptionPrivateKey,
         );
-        const CONTENT_PARALLEL = 2;
-        let cIdx = 0;
-        const cWorkers = Array.from({ length: CONTENT_PARALLEL }, async () => {
-          while (cIdx < candidates.length) {
-            const i = cIdx++;
-            const entry = candidates[i];
-            try {
-              const res = await previewFile(entry.id);
-              if (!res.ok) continue;
-              const blobRes = await fetch(res.blobUrl);
-              const buf = await blobRes.arrayBuffer();
-              const bytes = new Uint8Array(buf);
-              const text = await extractTextFromBytes(bytes, res.type, entry.name);
-              try { bytes.fill(0); } catch { /* detached */ }
-              URL.revokeObjectURL(res.blobUrl);
-              if (text) {
-                await indexFile({
-                  fileId: entry.id,
-                  filename: entry.name,
-                  content: text,
-                  searchIndexKeyB64: keys.searchIndexKey!,
-                });
-              }
-            } catch {
-              // Skip this file; the next sign-in will retry the whole
-              // pass since contentIndexedAt only flips to non-null
-              // after the loop completes.
-            }
-          }
-        });
-        await Promise.all(cWorkers);
-        await fetch("/api/files/search/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ which: "content" }),
-        });
+        const sk = unwrapSessionKeyFromFile(
+          f.encrypted_session_key_by_file as string,
+          f.session_key_nonce as string,
+          (f.owner_public_key as string) || "",
+          privHier,
+        );
+        const encMeta = typeof f.encrypted_metadata === "string"
+          ? JSON.parse(f.encrypted_metadata as string)
+          : f.encrypted_metadata;
+        const meta = decryptMetadata(
+          encMeta as Parameters<typeof decryptMetadata>[0],
+          sk,
+        );
+        sk.fill(0);
+        addEntry(
+          f,
+          meta.name,
+          typeof meta.type === "string" ? meta.type : "",
+          typeof meta.size === "number" ? meta.size : 0,
+        );
+        if (f.is_folder || f.is_workspace_root) hierMap.set(f.id as string, privHier);
+      } catch {
+        // Undecryptable with direct key; may be solvable via inheritance.
+        pending.push(f);
       }
-
-      backfillRef.current = "done";
-    } catch {
-      // Leave backfillRef at "running" so a later searchFiles call
-      // doesn't re-enter; next session will retry whichever pass(es)
-      // still have null timestamps.
     }
-  }, [keys, previewFile]);
 
+    // Pass 2..N: inherited files (workspace members on shared
+    // subtrees). For each pending file, look up its parent's priv
+    // hier in hierMap; unwrap parent_keys_claim to get this file's
+    // session key + own priv hier; decrypt metadata; cache hier for
+    // grandchildren. Iterate until no progress.
+    let safety = 0;
+    while (pending.length > 0 && safety < 20) {
+      safety++;
+      const stillPending: Raw[] = [];
+      let progressed = false;
+      for (const f of pending) {
+        const parentId = f.parent_id as string | null;
+        const claim = f.parent_keys_claim as string | null;
+        const claimBy = f.parent_keys_claim_wrapped_by as string | null;
+        const parentHier = parentId ? hierMap.get(parentId) : null;
+        if (!parentHier || !claim || !claimBy) {
+          stillPending.push(f);
+          continue;
+        }
+        try {
+          const unwrapped = unwrapParentKeysClaim(claim, claimBy, parentHier);
+          const encMeta = typeof f.encrypted_metadata === "string"
+            ? JSON.parse(f.encrypted_metadata as string)
+            : f.encrypted_metadata;
+          const meta = decryptMetadata(
+            encMeta as Parameters<typeof decryptMetadata>[0],
+            unwrapped.sessionKey,
+          );
+          unwrapped.sessionKey.fill(0);
+          addEntry(
+            f,
+            meta.name,
+            typeof meta.type === "string" ? meta.type : "",
+            typeof meta.size === "number" ? meta.size : 0,
+          );
+          if (f.is_folder) hierMap.set(f.id as string, unwrapped.childPrivateHierarchicalKey);
+          progressed = true;
+        } catch {
+          stillPending.push(f);
+        }
+      }
+      pending.length = 0;
+      pending.push(...stillPending);
+      if (!progressed) break;
+    }
+
+    // Breadcrumb pass: walk each entry's parent chain so the result
+    // card can show "My Drive → Projects" or "Acme Team →
+    // Engineering → Q4". Chain stops when we hit null (personal
+    // root) or a workspace root (surfaced as workspaceName).
+    const buildBreadcrumb = (entry: SearchCacheEntry): string => {
+      const parts: string[] = [];
+      let currentId: string | null = entry.parentId;
+      let depth = 0;
+      while (currentId && depth < 32) {
+        const parentName = nameById.get(currentId);
+        if (!parentName) break;
+        // Find the parent row to decide whether it's a workspace root
+        // (stop point) or a regular folder (keep walking).
+        const parentRow = rows.find((r) => (r.id as string) === currentId);
+        if (!parentRow) break;
+        if (parentRow.is_workspace_root) {
+          // Reached the workspace root — use the workspace display
+          // name at the left of the breadcrumb and stop walking.
+          break;
+        }
+        parts.unshift(parentName);
+        currentId = (parentRow.parent_id as string | null) ?? null;
+        depth++;
+      }
+      const root = entry.workspaceName ?? "My Drive";
+      return parts.length > 0 ? `${root} → ${parts.join(" → ")}` : root;
+    };
+    for (const entry of entries) {
+      entry.breadcrumb = buildBreadcrumb(entry);
+    }
+
+    await replaceSearchCache(keys.email, keys.encryptionPrivateKey, entries);
+    await markSearchBuilt(keys.email);
+    // eslint-disable-next-line no-console
+    console.log("[search.cache] built", {
+      email: keys.email,
+      total: entries.length,
+      workspaces: entries.filter((e) => e.workspaceId).length,
+    });
+  }, [keys]);
+
+  /**
+   * Search the local cache. Filename substring match on decrypted
+   * names, plus breadcrumb substring so typing a folder name surfaces
+   * everything inside it too. Server sees nothing.
+   *
+   * Ensures the cache exists on first call (builds if missing); all
+   * subsequent calls hit the pre-built cache instantly.
+   */
   const searchFiles = useCallback(
-    async (query: string): Promise<{ id: string; name: string; isFolder: boolean; parentId: string | null; workspaceId: string | null; workspaceName: string | null }[]> => {
+    async (
+      query: string,
+    ): Promise<
+      {
+        id: string;
+        name: string;
+        isFolder: boolean;
+        parentId: string | null;
+        workspaceId: string | null;
+        workspaceName: string | null;
+        breadcrumb: string;
+      }[]
+    > => {
       if (!keys) return [];
 
-      const trimmed = query.trim();
-      // Build the metadata cache on first use so we can decrypt the
-      // names of result files without a separate roundtrip per match.
-      // Subsequent concurrent searches AWAIT the in-flight build
-      // promise instead of skipping it — that prevents the
-      // "first search finds everything, second finds nothing" race.
-      if (!searchIndexRef.current) {
-        if (!searchBuildPromiseRef.current) {
-          searchBuildPromiseRef.current = (async () => {
-            try {
-          // Fetch the file list and the workspace list in parallel.
-          // `includeWorkspaces=true` is critical here — without it the
-          // search cache would only contain personal-drive files and
-          // every workspace match would be silently dropped during the
-          // result-projection step.
-          const [filesRes, wsRes] = await Promise.all([
-            fetch("/api/files/list?all=true&includeWorkspaces=true"),
-            fetch("/api/workspaces"),
-          ]);
-          const data = await filesRes.json();
-          const wsData = wsRes.ok ? await wsRes.json() : { workspaces: [] };
-          const wsNameById = new Map<string, string>();
-          for (const ws of (wsData.workspaces ?? []) as { id: string; name: string }[]) {
-            wsNameById.set(ws.id, ws.name);
-          }
-          if (filesRes.ok) {
-            const index: SearchCacheEntry[] = [];
-            // hierMap holds decrypted private hier keys for folders
-            // we've successfully unwrapped this build. Lets the
-            // inheritance pass below decrypt children whose parent
-            // chain we've already resolved.
-            const hierMap = new Map<string, string>();
-            const pushEntry = (f: Record<string, unknown>, name: string, type: string, size: number) => {
-              // Workspace roots are decrypted (so the inheritance
-              // chain has a starting point) but never shown in
-              // search results — they appear in the sidebar as the
-              // workspace switcher, not as a user-discoverable folder.
-              if (f.is_workspace_root) return;
-              const wsId = (f.workspace_id as string | null) ?? null;
-              index.push({
-                id: f.id as string,
-                name,
-                isFolder: f.is_folder as boolean,
-                parentId: (f.parent_id as string | null) ?? null,
-                workspaceId: wsId,
-                workspaceName: wsId ? (wsNameById.get(wsId) ?? null) : null,
-                type,
-                size,
-              });
-            };
-
-            // Pass 1: directly-keyed files (the user has their own
-            // file_keys row → encrypted_private_hierarchical_key set).
-            const pending: Record<string, unknown>[] = [];
-            for (const f of data.files as Record<string, unknown>[]) {
-              const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
-              if (!encPrivHier) {
-                pending.push(f);
-                continue;
-              }
-              try {
-                const privHier = unwrapPrivateHierarchicalKey(
-                  encPrivHier,
-                  (f.wrapped_by_public_key as string) || "",
-                  keys.encryptionPrivateKey,
-                );
-                const sk = unwrapSessionKeyFromFile(
-                  f.encrypted_session_key_by_file as string,
-                  f.session_key_nonce as string,
-                  (f.owner_public_key as string) || "",
-                  privHier,
-                );
-                const encMeta = typeof f.encrypted_metadata === "string"
-                  ? JSON.parse(f.encrypted_metadata as string)
-                  : f.encrypted_metadata;
-                const meta = decryptMetadata(encMeta as Parameters<typeof decryptMetadata>[0], sk);
-                sk.fill(0);
-                pushEntry(
-                  f,
-                  meta.name,
-                  typeof meta.type === "string" ? meta.type : "",
-                  typeof meta.size === "number" ? meta.size : 0,
-                );
-                if (f.is_folder) hierMap.set(f.id as string, privHier);
-              } catch {
-                // skip undecryptable
-              }
-            }
-
-            // Pass 2..N: inherited files (workspace members on shared
-            // subtrees). For each pending file, look up its parent's
-            // priv hier in hierMap; unwrap parent_keys_claim to get
-            // this file's session key + own priv hier; decrypt
-            // metadata; cache hier for grandchildren. Iterate until no
-            // progress (handles arbitrary subtree depths).
-            let safety = 0;
-            while (pending.length > 0 && safety < 20) {
-              safety++;
-              const stillPending: Record<string, unknown>[] = [];
-              let progressed = false;
-              for (const f of pending) {
-                const parentId = f.parent_id as string | null;
-                const claim = f.parent_keys_claim as string | null;
-                const claimBy = f.parent_keys_claim_wrapped_by as string | null;
-                const parentHier = parentId ? hierMap.get(parentId) : null;
-                if (!parentHier || !claim || !claimBy) {
-                  stillPending.push(f);
-                  continue;
-                }
-                try {
-                  const unwrapped = unwrapParentKeysClaim(claim, claimBy, parentHier);
-                  const encMeta = typeof f.encrypted_metadata === "string"
-                    ? JSON.parse(f.encrypted_metadata as string)
-                    : f.encrypted_metadata;
-                  const meta = decryptMetadata(
-                    encMeta as Parameters<typeof decryptMetadata>[0],
-                    unwrapped.sessionKey,
-                  );
-                  unwrapped.sessionKey.fill(0);
-                  pushEntry(
-                    f,
-                    meta.name,
-                    typeof meta.type === "string" ? meta.type : "",
-                    typeof meta.size === "number" ? meta.size : 0,
-                  );
-                  if (f.is_folder) hierMap.set(f.id as string, unwrapped.childPrivateHierarchicalKey);
-                  progressed = true;
-                } catch {
-                  // skip undecryptable
-                }
-              }
-              pending.length = 0;
-              pending.push(...stillPending);
-              if (!progressed) break; // no parent in hierMap; give up on the rest
-            }
-
-            searchIndexRef.current = index;
-          }
-            } catch {
-              // Cache build failed; we can still serve empty queries.
-            }
-          })();
+      // Build the cache on first access. Concurrent callers await the
+      // same in-flight promise so we never double-fetch.
+      if (!searchBuildPromiseRef.current) {
+        const existing = await getSearchBuiltAt(keys.email);
+        if (!existing) {
+          searchBuildPromiseRef.current = rebuildSearchCache();
         }
+      }
+      if (searchBuildPromiseRef.current) {
         await searchBuildPromiseRef.current;
       }
 
-      // Kick off backfill in the background once the cache is up.
-      // Non-blocking — current search proceeds with whatever the
-      // index already has; future searches benefit once it finishes.
-      if (searchIndexRef.current && backfillRef.current === "unknown") {
-        void runBackfill();
-      }
+      const entries = await loadSearchCache(keys.email, keys.encryptionPrivateKey);
+      const trimmed = query.trim().toLowerCase();
+      if (!trimmed) return entries.slice(0, 20);
 
-      // Empty query returns the cached recent items directly.
-      if (!trimmed) return (searchIndexRef.current ?? []).slice(0, 20);
-
-      const cache = searchIndexRef.current ?? [];
-      const q = trimmed.toLowerCase();
-
-      // ─── Filename matches via in-memory substring on the decrypted
-      // cache. Always runs. Fast, complete, deterministic — does not
-      // depend on backfill state. Handles every accessible file
-      // including workspaces. This is the primary search path and
-      // what users see by default.
-      const filenameMatches: SearchCacheEntry[] = [];
-      const seen = new Set<string>();
-      for (const row of cache) {
-        if (row.name.toLowerCase().includes(q)) {
-          filenameMatches.push(row);
-          seen.add(row.id);
-        }
-      }
-
-      // ─── Encrypted content matches via the server-side index. ADDS
-      // results that aren't filename hits but contain the query inside
-      // the file body (text/Office content). Best-effort: if the
-      // index hasn't been populated yet (pre-backfill, indexing
-      // failed, etc.) we just return the filename matches.
-      //
-      // Query semantics: only the WHOLE-WORD tokens are required.
-      // Trigrams are excluded from the query because AND-semantics
-      // over trigrams generates false negatives ("test" trigrams not
-      // present in "Tests"-tokenized files even though substring
-      // matches). Substring matching is already handled above by the
-      // cache filter. Encrypted index covers content, and content
-      // queries are typed as whole words.
-      if (keys.searchIndexKey) {
-        const allQueryTokens = tokenizeQuery(trimmed);
-        const wholeWordTokens = allQueryTokens.filter((t) => t.startsWith("w:"));
-        if (wholeWordTokens.length > 0) {
-          let key: Uint8Array | null = null;
-          try {
-            key = fromBase64(keys.searchIndexKey);
-            const hashed = hashTokens(wholeWordTokens, key);
-            const res = await fetch("/api/files/search", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ tokens: hashed }),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              const matchedIds = new Set(data.fileIds as string[]);
-              for (const row of cache) {
-                if (matchedIds.has(row.id) && !seen.has(row.id)) {
-                  filenameMatches.push(row);
-                  seen.add(row.id);
-                }
-              }
-            }
-          } catch {
-            // Network error — return the filename matches we already
-            // have. The encrypted side is additive, not load-bearing.
-          } finally {
-            if (key) {
-              try { key.fill(0); } catch { /* detached */ }
-            }
-          }
-        }
-      }
-
-      return filenameMatches.slice(0, 50);
+      const matched = entries.filter(
+        (e) =>
+          e.name.toLowerCase().includes(trimmed) ||
+          e.breadcrumb.toLowerCase().includes(trimmed),
+      );
+      return matched.slice(0, 50);
     },
-    [keys]
+    [keys, rebuildSearchCache],
   );
+
+  // Rebuild the cache when the signed-in user changes. Wipes any
+  // prior user's entries before triggering a fresh build so the
+  // palette never leaks names across accounts on a shared device.
+  useEffect(() => {
+    if (!keys) return;
+    searchBuildPromiseRef.current = null;
+    void (async () => {
+      const builtAt = await getSearchBuiltAt(keys.email);
+      if (!builtAt) {
+        searchBuildPromiseRef.current = rebuildSearchCache();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keys?.email]);
+
+  // When the user explicitly signs out, wipe the cache for their
+  // email so a subsequent session on the same device starts clean.
+  const clearSearchIndex = useCallback(async () => {
+    if (!keys) return;
+    try { await clearSearchCache(keys.email); } catch { /* */ }
+  }, [keys]);
 
   /**
    * Export all owned files as a zip archive. Fetches every file,
@@ -2866,6 +2771,8 @@ export function useFiles(keys: {
     invalidateCache,
     loadMore,
     searchFiles,
+    rebuildSearchCache,
+    clearSearchIndex,
     exportAllAsZip,
     prefetchFolder,
   };

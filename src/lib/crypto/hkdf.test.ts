@@ -5,15 +5,13 @@ import { toBase64 } from "./utils";
 describe("splitMasterKey", () => {
   const masterKey = new Uint8Array(32).fill(7);
 
-  it("derives four distinct 32-byte keys", () => {
-    const { srpKey, passwordDerivedSecret, unlockCacheKey, searchIndexKey } =
-      splitMasterKey(masterKey);
+  it("derives three distinct 32-byte keys", () => {
+    const { srpKey, passwordDerivedSecret, unlockCacheKey } = splitMasterKey(masterKey);
     expect(srpKey.length).toBe(32);
     expect(passwordDerivedSecret.length).toBe(32);
     expect(unlockCacheKey.length).toBe(32);
-    expect(searchIndexKey.length).toBe(32);
-    const all = [srpKey, passwordDerivedSecret, unlockCacheKey, searchIndexKey].map(toBase64);
-    expect(new Set(all).size).toBe(4);
+    const all = [srpKey, passwordDerivedSecret, unlockCacheKey].map(toBase64);
+    expect(new Set(all).size).toBe(3);
   });
 
   it("is deterministic for the same master key", () => {
@@ -22,7 +20,6 @@ describe("splitMasterKey", () => {
     expect(toBase64(first.srpKey)).toBe(toBase64(second.srpKey));
     expect(toBase64(first.passwordDerivedSecret)).toBe(toBase64(second.passwordDerivedSecret));
     expect(toBase64(first.unlockCacheKey)).toBe(toBase64(second.unlockCacheKey));
-    expect(toBase64(first.searchIndexKey)).toBe(toBase64(second.searchIndexKey));
   });
 
   it("produces different output for different master keys", () => {
@@ -32,6 +29,5 @@ describe("splitMasterKey", () => {
     expect(toBase64(a.srpKey)).not.toBe(toBase64(b.srpKey));
     expect(toBase64(a.passwordDerivedSecret)).not.toBe(toBase64(b.passwordDerivedSecret));
     expect(toBase64(a.unlockCacheKey)).not.toBe(toBase64(b.unlockCacheKey));
-    expect(toBase64(a.searchIndexKey)).not.toBe(toBase64(b.searchIndexKey));
   });
 });

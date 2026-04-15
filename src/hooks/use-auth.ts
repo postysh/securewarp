@@ -66,10 +66,9 @@ export function useAuth() {
       const argon2Salt = randomBytes(16);
       const masterKey = await deriveMainKey(password, argon2Salt);
 
-      // 2. Split into SRP key + password-derived secret + unlock cache key + search index key
+      // 2. Split into SRP key + password-derived secret + unlock cache key
       setStep("Splitting keys...");
-      const { srpKey, passwordDerivedSecret, unlockCacheKey, searchIndexKey } =
-        splitMasterKey(masterKey);
+      const { srpKey, passwordDerivedSecret, unlockCacheKey } = splitMasterKey(masterKey);
 
       // 3. Generate SRP registration data
       setStep("Creating authentication verifier...");
@@ -115,9 +114,7 @@ export function useAuth() {
       }
 
       // Store keys in sessionStorage (in-memory for this tab).
-      // searchIndexKey is held as base64 so it survives the JSON
-      // round-trip; the typed-array original is zeroed below.
-      const keys = { ...keypairs, email, searchIndexKey: toBase64(searchIndexKey) };
+      const keys = { ...keypairs, email };
       sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
       window.dispatchEvent(new Event("securewarp-keys-updated"));
 
@@ -136,7 +133,6 @@ export function useAuth() {
         unlockCacheKey,
       });
       unlockCacheKey.fill(0);
-      searchIndexKey.fill(0);
 
       // Success — store keys and recovery key for display
       setState({
@@ -179,8 +175,7 @@ export function useAuth() {
       const masterKey = await deriveMainKey(password, argon2SaltBytes);
 
       // 4. Split into SRP key + password-derived secret + unlock cache key + search index key
-      const { srpKey, passwordDerivedSecret, unlockCacheKey, searchIndexKey } =
-        splitMasterKey(masterKey);
+      const { srpKey, passwordDerivedSecret, unlockCacheKey } = splitMasterKey(masterKey);
 
       // 5. Derive client session + proof (M1)
       setStep("Verifying identity...");
@@ -231,15 +226,12 @@ export function useAuth() {
       const privateKeys = decryptUserData(encryptedData, passwordDerivedSecret);
 
       // Store decrypted keys in sessionStorage for the drive page.
-      // searchIndexKey is held as base64; the typed-array original is
-      // zeroed below.
       const keys = {
         encryptionPublicKey: verifyData.publicEncryptionKey,
         encryptionPrivateKey: privateKeys.encryptionPrivateKey,
         signingPublicKey: verifyData.publicSigningKey,
         signingPrivateKey: privateKeys.signingPrivateKey,
         email,
-        searchIndexKey: toBase64(searchIndexKey),
       };
       sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
       window.dispatchEvent(new Event("securewarp-keys-updated"));
@@ -260,7 +252,6 @@ export function useAuth() {
         unlockCacheKey,
       });
       unlockCacheKey.fill(0);
-      searchIndexKey.fill(0);
 
       // Success — navigate to drive
       setState({ loading: false, error: null, step: null, recoveryKey: null, userKeys: keys, suspended: null });
@@ -319,7 +310,6 @@ export function useAuth() {
         srpKey: newSrpKey,
         passwordDerivedSecret: newPds,
         unlockCacheKey: newUnlockCacheKey,
-        searchIndexKey: newSearchIndexKey,
       } = splitMasterKey(newMasterKey);
       const { srpSalt: newSrpSalt, srpVerifier: newSrpVerifier } = generateRegistrationData(newSrpKey);
 
@@ -373,7 +363,6 @@ export function useAuth() {
         signingPublicKey: "recovered",
         signingPrivateKey: privateKeys.signingPrivateKey,
         email,
-        searchIndexKey: toBase64(newSearchIndexKey),
       };
       sessionStorage.setItem("securewarp_keys", JSON.stringify(recoveredKeys));
       window.dispatchEvent(new Event("securewarp-keys-updated"));
@@ -395,7 +384,6 @@ export function useAuth() {
         unlockCacheKey: newUnlockCacheKey,
       });
       newUnlockCacheKey.fill(0);
-      newSearchIndexKey.fill(0);
 
       // Success — show new recovery key
       setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: recoveredKeys, suspended: null });
@@ -425,7 +413,6 @@ export function useAuth() {
         srpKey: newSrpKey,
         passwordDerivedSecret: newPds,
         unlockCacheKey: newUnlockCacheKey,
-        searchIndexKey: newSearchIndexKey,
       } = splitMasterKey(newMasterKey);
       const { srpSalt: newSrpSalt, srpVerifier: newSrpVerifier } = generateRegistrationData(newSrpKey);
 
@@ -483,20 +470,6 @@ export function useAuth() {
       });
       newUnlockCacheKey.fill(0);
 
-      // Refresh sessionStorage with the new searchIndexKey so existing
-      // tabs use the new HMAC key for subsequent index/search calls.
-      // Since the search-token HMACs derived under the OLD password
-      // would no longer match queries under the new password, the
-      // user needs to reindex on next sign-in via the backfill flow.
-      const updatedSessionKeys = {
-        ...keypairs,
-        email,
-        searchIndexKey: toBase64(newSearchIndexKey),
-      };
-      sessionStorage.setItem("securewarp_keys", JSON.stringify(updatedSessionKeys));
-      window.dispatchEvent(new Event("securewarp-keys-updated"));
-      newSearchIndexKey.fill(0);
-
       setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: { ...keypairs, email }, suspended: null });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Password change failed";
@@ -533,7 +506,7 @@ export function useAuth() {
       setStep("Deriving master key…");
       const argon2SaltBytes = fromBase64(meta.argon2Salt);
       const masterKey = await deriveMainKey(password, argon2SaltBytes);
-      const { unlockCacheKey, searchIndexKey } = splitMasterKey(masterKey);
+      const { unlockCacheKey } = splitMasterKey(masterKey);
 
       setStep("Unsealing…");
       let payload;
@@ -546,11 +519,9 @@ export function useAuth() {
       const keys: UserKeys = {
         ...payload,
         email: meta.email,
-        searchIndexKey: toBase64(searchIndexKey),
       };
       sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
       window.dispatchEvent(new Event("securewarp-keys-updated"));
-      searchIndexKey.fill(0);
 
       // Check if the server session is still valid. If the JWT
       // expired, run a full SRP handshake (without Turnstile) to

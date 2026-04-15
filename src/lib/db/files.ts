@@ -763,14 +763,6 @@ export async function getAllAccessibleFiles(
       .select("workspace_id")
       .eq("user_id", userId);
     const wsIds = (memberships ?? []).map((m) => m.workspace_id as string);
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify({
-      ctx: "search.list.inherited",
-      stage: "memberships",
-      userId,
-      memberOfCount: wsIds.length,
-      wsIds,
-    }));
     if (wsIds.length > 0) {
       const knownIds = new Set(combined.map((f) => f.id));
       // Same LIST_SELECT but the file_keys join becomes a left join via
@@ -789,32 +781,10 @@ export async function getAllAccessibleFiles(
         .eq("upload_complete", true)
         .is("deleted_at", null)
         .limit(1000);
-      if (wsErr) {
-        // eslint-disable-next-line no-console
-        console.log(JSON.stringify({
-          ctx: "search.list.inherited",
-          stage: "fetch_error",
-          userId,
-          error: wsErr.message,
-        }));
-        throw new Error(`Failed to fetch workspace files: ${wsErr.message}`);
-      }
-      const allFetched = wsFiles ?? [];
-      const inheritedRows = allFetched
+      if (wsErr) throw new Error(`Failed to fetch workspace files: ${wsErr.message}`);
+      const inheritedRows = (wsFiles ?? [])
         .map((r) => shapeRow(r as unknown as FileJoinRow))
         .filter((f) => !knownIds.has(f.id));
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify({
-        ctx: "search.list.inherited",
-        stage: "fetched",
-        userId,
-        wsIds,
-        rawCount: allFetched.length,
-        knownCount: knownIds.size,
-        inheritedCount: inheritedRows.length,
-        rawIds: allFetched.map((r) => (r as unknown as { id: string }).id),
-        inheritedIds: inheritedRows.map((r) => r.id),
-      }));
       combined = [...combined, ...inheritedRows];
     }
   }
