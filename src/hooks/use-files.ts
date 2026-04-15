@@ -2321,7 +2321,11 @@ export function useFiles(keys: {
   // Both timestamps only flip on success so a partial run retries on
   // next session.
   const runBackfill = useCallback(async () => {
-    if (!keys?.searchIndexKey) return;
+    if (!keys?.searchIndexKey) {
+      // eslint-disable-next-line no-console
+      console.warn("[search.backfill] aborted: no searchIndexKey in session — sign out and back in to derive it");
+      return;
+    }
     if (backfillRef.current !== "unknown") return;
     backfillRef.current = "running";
     try {
@@ -2333,14 +2337,24 @@ export function useFiles(keys: {
         namesDone = !!status.indexedAt;
         contentDone = !!status.contentIndexedAt;
       }
+      // eslint-disable-next-line no-console
+      console.log("[search.backfill] starting", {
+        cacheSize: searchIndexRef.current?.length ?? 0,
+        namesDone,
+        contentDone,
+      });
       if (namesDone && contentDone) {
         backfillRef.current = "done";
+        // eslint-disable-next-line no-console
+        console.log("[search.backfill] both passes already complete");
         return;
       }
       const cache = searchIndexRef.current ?? [];
 
       // Pass 1: filenames (skip if already done).
       if (!namesDone) {
+        // eslint-disable-next-line no-console
+        console.log("[search.backfill] pass1 names: indexing", { count: cache.length });
         const PARALLEL = 6;
         let cursor = 0;
         const workers = Array.from({ length: PARALLEL }, async () => {
@@ -2354,10 +2368,14 @@ export function useFiles(keys: {
           }
         });
         await Promise.all(workers);
-        await fetch("/api/files/search/status", {
+        const statusPostRes = await fetch("/api/files/search/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ which: "names" }),
+        });
+        // eslint-disable-next-line no-console
+        console.log("[search.backfill] pass1 names: done", {
+          statusUpdate: statusPostRes.status,
         });
       }
 

@@ -37,14 +37,29 @@ export async function indexFile(params: {
       ? tokenizeFile(params.filename, params.content ?? null)
       : tokenizeFilename(params.filename);
     const hashes = hashTokens(tokens, key);
-    await fetch("/api/files/search/index", {
+    const res = await fetch("/api/files/search/index", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fileId: params.fileId, tokens: hashes }),
     });
+    if (!res.ok) {
+      let detail: unknown = null;
+      try { detail = await res.json(); } catch { /* non-json */ }
+      // eslint-disable-next-line no-console
+      console.error("[search.index.client] non-OK response", {
+        fileId: params.fileId,
+        status: res.status,
+        detail,
+      });
+    } else {
+      // Verbose but invaluable for verifying the pipeline end-to-end.
+      // Comment out once stable.
+      // eslint-disable-next-line no-console
+      console.log("[search.index.client] indexed", { fileId: params.fileId, tokens: hashes.length });
+    }
   } catch (err) {
-    // Search index is best-effort; never break the calling flow.
-    console.warn("indexFile failed", err);
+    // eslint-disable-next-line no-console
+    console.error("[search.index.client] threw", { fileId: params.fileId, err });
   } finally {
     if (key) {
       try {

@@ -43,19 +43,27 @@ function parseTokenHash(b64: string): Buffer | null {
   }
 }
 
+function log(stage: string, payload: Record<string, unknown>): void {
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify({ ctx: "search.index", stage, ...payload }));
+}
+
 export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) {
+      log("unauthorized", {});
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await request.json();
     const parsed = REQ_SCHEMA.safeParse(body);
     if (!parsed.success) {
+      log("bad_request", { userId: session.userId, error: parsed.error.message });
       return NextResponse.json({ error: "Bad request" }, { status: 400 });
     }
     const { fileId, tokens } = parsed.data;
+    log("received", { userId: session.userId, fileId, tokenCount: tokens.length });
 
     // Validate caller has access to the file via the same logic the
     // file list endpoint uses: direct file_keys row OR ownership OR
@@ -63,27 +71,44 @@ export async function POST(request: Request) {
     // (Phase 3 parent_keys_claim chain). Without the inherited check,
     // workspace members couldn't index any file inside a workspace
     // folder they didn't directly create — which is most files.
-    const { data: keyRow } = await supabase
+    const { data: keyRow, error: keyErr } = await supabase
       .from("file_keys")
       .select("file_id")
       .eq("file_id", fileId)
       .eq("user_id", session.userId)
       .maybeSingle();
+    if (keyErr) {
+      log("key_lookup_error", { userId: session.userId, fileId, error: keyErr.message });
+    }
 
+    let accessPath: string = keyRow ? "direct_key" : "";
     if (!keyRow) {
-      const { data: fileRow } = await supabase
+      const { data: fileRow, error: fileErr } = await supabase
         .from("files")
         .select("owner_id")
         .eq("id", fileId)
         .maybeSingle();
+      if (fileErr) {
+        log("file_lookup_error", { userId: session.userId, fileId, error: fileErr.message });
+      }
       const isOwner = fileRow?.owner_id === session.userId;
-      if (!isOwner) {
+      if (isOwner) {
+        accessPath = "owner";
+      } else {
         const inheritedPerm = await getEffectivePermission(fileId, session.userId);
         if (!inheritedPerm) {
+          log("access_denied", {
+            userId: session.userId,
+            fileId,
+            fileExists: !!fileRow,
+            ownerId: fileRow?.owner_id,
+          });
           return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
+        accessPath = "inherited";
       }
     }
+    log("access_granted", { userId: session.userId, fileId, via: accessPath });
 
     // Validate every token first — one bad entry rejects the whole
     // batch so we never leave a half-indexed file.
@@ -102,15 +127,17 @@ export async function POST(request: Request) {
     //   (a) the table isn't read by anyone but the same user, and
     //   (b) a search query racing this would just miss this file
     //       transiently — no correctness issue, no leak.
-    const { error: delErr } = await supabase
+    const { error: delErr, count: delCount } = await supabase
       .from("file_search_tokens")
-      .delete()
+      .delete({ count: "exact" })
       .eq("user_id", session.userId)
       .eq("file_id", fileId);
     if (delErr) {
+      log("delete_error", { userId: session.userId, fileId, error: delErr.message });
       logError("search.index.delete", delErr);
-      return NextResponse.json({ error: "Index update failed" }, { status: 500 });
+      return NextResponse.json({ error: "Index update failed", detail: delErr.message }, { status: 500 });
     }
+    log("delete_ok", { userId: session.userId, fileId, removed: delCount ?? null });
 
     if (hashBuffers.length > 0) {
       const rows = hashBuffers.map((h) => ({
@@ -124,19 +151,32 @@ export async function POST(request: Request) {
       // PostgREST request body cap.
       const CHUNK = 1000;
       for (let i = 0; i < rows.length; i += CHUNK) {
-        const { error: insErr } = await supabase
+        const { error: insErr, count: insCount } = await supabase
           .from("file_search_tokens")
-          .insert(rows.slice(i, i + CHUNK));
+          .insert(rows.slice(i, i + CHUNK), { count: "exact" });
         if (insErr) {
+          log("insert_error", {
+            userId: session.userId,
+            fileId,
+            chunkIndex: i,
+            chunkSize: Math.min(CHUNK, rows.length - i),
+            errorCode: (insErr as { code?: string }).code,
+            errorMessage: insErr.message,
+            errorDetails: (insErr as { details?: string }).details,
+            errorHint: (insErr as { hint?: string }).hint,
+          });
           logError("search.index.insert", insErr);
-          return NextResponse.json({ error: "Index update failed" }, { status: 500 });
+          return NextResponse.json({ error: "Index update failed", detail: insErr.message }, { status: 500 });
         }
+        log("insert_ok", { userId: session.userId, fileId, inserted: insCount ?? null });
       }
     }
 
+    log("done", { userId: session.userId, fileId, totalInserted: hashBuffers.length });
     return NextResponse.json({ ok: true, count: hashBuffers.length });
   } catch (err) {
+    log("uncaught", { error: (err as Error).message, stack: (err as Error).stack });
     logError("search.index", err);
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal error", detail: (err as Error).message }, { status: 500 });
   }
 }
