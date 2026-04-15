@@ -73,29 +73,47 @@ export function CommandPalette({ open, onClose, onAction, onOpenFile }: CommandP
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
+  // Sequence counter so stale responses don't overwrite newer
+  // results. If the user types fast enough that a slow cache-build
+  // is in flight for an older query, we ignore its results when it
+  // finally resolves.
+  const searchSeqRef = useRef(0);
+
   const doSearch = useCallback(
     async (q: string) => {
+      const mySeq = ++searchSeqRef.current;
       if (!q.trim()) {
         setSearchResults([]);
         setSearching(false);
         return;
       }
-      setSearching(true);
-      const results = await fileOps.searchFiles(q);
-      setSearchResults(
-        results.map((f) => ({
-          id: f.id,
-          label: f.name,
-          icon: f.isFolder ? Folder01Icon : File01Icon,
-          iconColor: f.isFolder ? "var(--accent-blue-primary)" : "var(--icon-secondary)",
-          section: "files" as const,
-          isFolder: f.isFolder,
-          workspaceName: f.workspaceName,
-        }))
-      );
-      setSearching(false);
+      // Only show "Decrypting…" if the search takes meaningfully
+      // longer than a frame — otherwise it flickers on every
+      // keystroke. The in-memory path is synchronous-fast; the
+      // spinner only surfaces during the initial cache build.
+      const spinnerTimer = setTimeout(() => {
+        if (searchSeqRef.current === mySeq) setSearching(true);
+      }, 120);
+      try {
+        const results = await fileOps.searchFiles(q);
+        if (searchSeqRef.current !== mySeq) return;
+        setSearchResults(
+          results.map((f) => ({
+            id: f.id,
+            label: f.name,
+            icon: f.isFolder ? Folder01Icon : File01Icon,
+            iconColor: f.isFolder ? "var(--accent-blue-primary)" : "var(--icon-secondary)",
+            section: "files" as const,
+            isFolder: f.isFolder,
+            workspaceName: f.workspaceName,
+          })),
+        );
+      } finally {
+        clearTimeout(spinnerTimer);
+        if (searchSeqRef.current === mySeq) setSearching(false);
+      }
     },
-    [fileOps]
+    [fileOps],
   );
 
   const handleQueryChange = (value: string) => {

@@ -188,6 +188,27 @@ export function useFiles(keys: {
   // refreshes in background. Cleared on key change (login swap).
   const fileListCache = useRef<Map<string, DecryptedFile[]>>(new Map());
 
+  // In-memory mirror of the decrypted search-cache entries. Populated
+  // once after the IndexedDB cache is built or rehydrated; kept in
+  // sync with upload/rename/delete mutations. Searches query this
+  // ref SYNCHRONOUSLY — no async IndexedDB read per keystroke, no
+  // flicker between debounce firing and results resolving.
+  const searchEntriesRef = useRef<SearchCacheEntry[] | null>(null);
+  // Tiny helper so each mutation site is one line instead of four.
+  const syncSearchMirror = (entry: SearchCacheEntry) => {
+    const current = searchEntriesRef.current;
+    if (!current) return;
+    const idx = current.findIndex((e) => e.id === entry.id);
+    if (idx >= 0) current[idx] = entry;
+    else current.push(entry);
+  };
+  const removeFromSearchMirror = (fileId: string) => {
+    const current = searchEntriesRef.current;
+    if (!current) return;
+    const idx = current.findIndex((e) => e.id === fileId);
+    if (idx >= 0) current.splice(idx, 1);
+  };
+
   useEffect(() => {
     // Wipe on key change (which covers logout → login swap) and on
     // unmount. Plaintext private hierarchical keys live here and must
@@ -720,8 +741,8 @@ export function useFiles(keys: {
       //    immediately. Best-effort — a failed cache write doesn't
       //    block the upload, and the next cache rebuild will include
       //    the file anyway.
-      try {
-        await upsertSearchCache(keys.email, keys.encryptionPrivateKey, {
+      {
+        const searchEntry: SearchCacheEntry = {
           id: fileId,
           name: file.name,
           isFolder: false,
@@ -734,8 +755,12 @@ export function useFiles(keys: {
             ? state.activeWorkspace.name
             : "My Drive",
           updatedAt: new Date().toISOString(),
-        });
-      } catch { /* best-effort */ }
+        };
+        try {
+          await upsertSearchCache(keys.email, keys.encryptionPrivateKey, searchEntry);
+        } catch { /* best-effort */ }
+        syncSearchMirror(searchEntry);
+      }
 
       updateProgress(100, "Done");
       await new Promise((r) => setTimeout(r, 400));
@@ -1063,22 +1088,24 @@ export function useFiles(keys: {
 
       // Add folder to the local search cache.
       if (data.folderId) {
+        const searchEntry: SearchCacheEntry = {
+          id: data.folderId,
+          name,
+          isFolder: true,
+          type: "folder",
+          size: 0,
+          parentId,
+          workspaceId: state.activeWorkspace?.id ?? null,
+          workspaceName: state.activeWorkspace?.name ?? null,
+          breadcrumb: state.activeWorkspace
+            ? state.activeWorkspace.name
+            : "My Drive",
+          updatedAt: new Date().toISOString(),
+        };
         try {
-          await upsertSearchCache(keys.email, keys.encryptionPrivateKey, {
-            id: data.folderId,
-            name,
-            isFolder: true,
-            type: "folder",
-            size: 0,
-            parentId,
-            workspaceId: state.activeWorkspace?.id ?? null,
-            workspaceName: state.activeWorkspace?.name ?? null,
-            breadcrumb: state.activeWorkspace
-              ? state.activeWorkspace.name
-              : "My Drive",
-            updatedAt: new Date().toISOString(),
-          });
+          await upsertSearchCache(keys.email, keys.encryptionPrivateKey, searchEntry);
         } catch { /* best-effort */ }
+        syncSearchMirror(searchEntry);
       }
 
       await fetchFiles(parentId);
@@ -1169,8 +1196,8 @@ export function useFiles(keys: {
         }
 
         // Update the local search cache with the new name.
-        try {
-          await upsertSearchCache(keys.email, keys.encryptionPrivateKey, {
+        {
+          const searchEntry: SearchCacheEntry = {
             id: file.id,
             name: trimmed,
             isFolder: file.isFolder,
@@ -1183,8 +1210,12 @@ export function useFiles(keys: {
               ? state.activeWorkspace.name
               : "My Drive",
             updatedAt: new Date().toISOString(),
-          });
-        } catch { /* best-effort */ }
+          };
+          try {
+            await upsertSearchCache(keys.email, keys.encryptionPrivateKey, searchEntry);
+          } catch { /* best-effort */ }
+          syncSearchMirror(searchEntry);
+        }
 
         // Optimistic local update + invalidate cache so other views
         // pick up the new name on next navigation.
@@ -1349,6 +1380,7 @@ export function useFiles(keys: {
 
       // Remove from local search cache. Best-effort.
       try { await deleteSearchCache(fileId); } catch { /* */ }
+      removeFromSearchMirror(fileId);
 
       await fetchFiles(state.currentFolder, state.viewMode);
     } catch (err) {
@@ -2488,6 +2520,7 @@ export function useFiles(keys: {
 
     await replaceSearchCache(keys.email, keys.encryptionPrivateKey, entries);
     await markSearchBuilt(keys.email);
+    searchEntriesRef.current = entries;
     // eslint-disable-next-line no-console
     console.log("[search.cache] built", {
       email: keys.email,
@@ -2502,7 +2535,8 @@ export function useFiles(keys: {
    * everything inside it too. Server sees nothing.
    *
    * Ensures the cache exists on first call (builds if missing); all
-   * subsequent calls hit the pre-built cache instantly.
+   * subsequent calls are purely synchronous reads from the in-memory
+   * mirror — no async gap between keystrokes, no flicker.
    */
   const searchFiles = useCallback(
     async (
@@ -2522,26 +2556,48 @@ export function useFiles(keys: {
 
       // Build the cache on first access. Concurrent callers await the
       // same in-flight promise so we never double-fetch.
-      if (!searchBuildPromiseRef.current) {
-        const existing = await getSearchBuiltAt(keys.email);
-        if (!existing) {
-          searchBuildPromiseRef.current = rebuildSearchCache();
+      if (!searchEntriesRef.current) {
+        if (!searchBuildPromiseRef.current) {
+          const existing = await getSearchBuiltAt(keys.email);
+          if (existing) {
+            // IndexedDB has a prior build from another tab/session —
+            // hydrate the in-memory mirror from it.
+            searchBuildPromiseRef.current = (async () => {
+              const loaded = await loadSearchCache(keys.email, keys.encryptionPrivateKey);
+              searchEntriesRef.current = loaded;
+            })();
+          } else {
+            searchBuildPromiseRef.current = rebuildSearchCache();
+          }
         }
-      }
-      if (searchBuildPromiseRef.current) {
         await searchBuildPromiseRef.current;
       }
 
-      const entries = await loadSearchCache(keys.email, keys.encryptionPrivateKey);
+      const entries = searchEntriesRef.current ?? [];
       const trimmed = query.trim().toLowerCase();
       if (!trimmed) return entries.slice(0, 20);
 
-      const matched = entries.filter(
-        (e) =>
-          e.name.toLowerCase().includes(trimmed) ||
-          e.breadcrumb.toLowerCase().includes(trimmed),
-      );
-      return matched.slice(0, 50);
+      // Simple relevance ranking so the most obvious match appears
+      // first instead of being buried mid-list. Priority order:
+      //   1. Name starts with the query
+      //   2. Name contains the query (middle-match)
+      //   3. Breadcrumb contains the query (file lives in a matching folder)
+      // Ties broken by recency (updatedAt desc).
+      const scored = [] as { entry: SearchCacheEntry; score: number }[];
+      for (const e of entries) {
+        const lname = e.name.toLowerCase();
+        const lbread = e.breadcrumb.toLowerCase();
+        let score = 0;
+        if (lname.startsWith(trimmed)) score = 3;
+        else if (lname.includes(trimmed)) score = 2;
+        else if (lbread.includes(trimmed)) score = 1;
+        if (score > 0) scored.push({ entry: e, score });
+      }
+      scored.sort((a, b) => {
+        if (a.score !== b.score) return b.score - a.score;
+        return b.entry.updatedAt.localeCompare(a.entry.updatedAt);
+      });
+      return scored.slice(0, 50).map((s) => s.entry);
     },
     [keys, rebuildSearchCache],
   );
