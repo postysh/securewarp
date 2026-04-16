@@ -37,6 +37,7 @@ const ShareModal = dynamic(() => import("./share-modal").then((m) => ({ default:
 const RenameModal = dynamic(() => import("./rename-modal").then((m) => ({ default: m.RenameModal })), { ssr: false });
 const MoveModal = dynamic(() => import("./move-modal").then((m) => ({ default: m.MoveModal })), { ssr: false });
 const FilePreview = dynamic(() => import("./file-preview").then((m) => ({ default: m.FilePreview })), { ssr: false });
+const StorageQuotaModal = dynamic(() => import("./storage-quota-modal").then((m) => ({ default: m.StorageQuotaModal })), { ssr: false });
 import { ConfirmDialog } from "./confirm-dialog";
 import { WorkspaceSettings } from "./workspace-settings";
 import { WorkspaceInviteModal } from "./workspace-invite-modal";
@@ -234,6 +235,20 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [purgeTarget, setPurgeTarget] = useState<DecryptedFile | null>(null);
   const [purgeBusy, setPurgeBusy] = useState(false);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
+  const [quotaModalOpen, setQuotaModalOpen] = useState(false);
+
+  // Intercept quota/storage errors and open the dedicated modal
+  // instead of showing the generic inline banner.
+  useEffect(() => {
+    if (
+      fileOps.error &&
+      (fileOps.error.toLowerCase().includes("quota") ||
+        fileOps.error.toLowerCase().includes("storage"))
+    ) {
+      setQuotaModalOpen(true);
+      fileOps.clearError();
+    }
+  }, [fileOps.error, fileOps.clearError]);
   const [moveTarget, setMoveTarget] = useState<DecryptedFile | null>(null);
   // Rubber band drag selection
   const [rubberBand, setRubberBand] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
@@ -802,7 +817,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       )}
 
       {/* Error banner */}
-      {fileOps.error && (
+      {fileOps.error && !fileOps.error.toLowerCase().includes("quota") && !fileOps.error.toLowerCase().includes("storage") && (
         <div className="mx-5 mt-2 flex items-center justify-between px-3 py-2 rounded-lg bg-accent-red/10 border border-accent-red/20 animate-fade-in">
           <span className="text-[12px] text-accent-red">{fileOps.error}</span>
           <button onClick={() => fileOps.clearError()} className="text-[11px] text-accent-red/60 hover:text-accent-red transition-colors cursor-pointer ml-3 shrink-0">Dismiss</button>
@@ -1871,6 +1886,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         onClose={() => setPreviewFileId(null)}
         onNavigate={setPreviewFileId}
       />
+      <StorageQuotaModal open={quotaModalOpen} onClose={() => setQuotaModalOpen(false)} />
       <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
       <FileDetailsModal file={detailsTarget} onClose={() => setDetailsTarget(null)} />
