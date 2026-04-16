@@ -72,10 +72,22 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const updatePos = useCallback(() => {
     if (!btnRef.current) return;
     const rect = btnRef.current.getBoundingClientRect();
+    const MENU_H = 220;
+    const MENU_W = 200;
+    const MARGIN = 8;
+    const vh = window.innerHeight;
+
     if (collapsed) {
-      setPos({ top: rect.bottom - 200, left: rect.right + 8 });
+      // Collapsed: open to the right, bottom-aligned with the button.
+      let top = rect.bottom - MENU_H;
+      if (top < MARGIN) top = MARGIN;
+      if (top + MENU_H > vh - MARGIN) top = vh - MARGIN - MENU_H;
+      setPos({ top, left: Math.min(rect.right + MARGIN, window.innerWidth - MENU_W - MARGIN) });
     } else {
-      setPos({ top: rect.top - 208, left: rect.left });
+      // Expanded: open above the button, left-aligned with it.
+      let top = rect.top - MENU_H - MARGIN;
+      if (top < MARGIN) top = MARGIN;
+      setPos({ top, left: rect.left });
     }
   }, [collapsed]);
 

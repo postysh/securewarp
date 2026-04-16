@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     const actorLabel = await resolveActorLabel(session.userId, session.email);
     createNotification({
       userId: recipient.id,
-      type: "file_shared",
+      type: "collaborator_joined",
       title: `Invited to ${ws.name}`,
       description: `${actorLabel} invited you to the ${ws.name} workspace`,
       fileId: ws.root_folder_id,

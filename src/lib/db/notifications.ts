@@ -28,7 +28,8 @@ export type NotificationType =
   | "file_unshared"
   | "permission_changed"
   | "collaborator_joined"
-  | "collaborator_left";
+  | "collaborator_left"
+  | "workspace_transferred";
 
 export interface NotificationRow {
   id: string;

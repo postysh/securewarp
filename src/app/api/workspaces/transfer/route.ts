@@ -76,7 +76,7 @@ export async function POST(request: Request) {
     const actorLabel = await resolveActorLabel(session.userId, session.email);
     createNotification({
       userId: newOwnerId,
-      type: "file_shared",
+      type: "workspace_transferred",
       title: "Workspace ownership transferred",
       description: `${actorLabel} transferred workspace ownership to you`,
       actorUserId: session.userId,

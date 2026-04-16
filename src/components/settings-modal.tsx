@@ -98,8 +98,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     file_shared: true,
     file_unshared: true,
     permission_changed: true,
+    collaborator_joined: true,
+    workspace_transferred: true,
   });
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [sidebarDefault, setSidebarDefault] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("sidebar_open") !== "false" : true
+  );
   const [exporting, setExporting] = useState(false);
   const [exportStep, setExportStep] = useState<string | null>(null);
   const userKeys = useUserKeys();
@@ -487,26 +492,116 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         );
       case "appearance":
         return (
-          <div>
-            <SettingRow label="Theme" description="Choose your preferred color scheme">
+          <div className="space-y-6">
+            {/* Theme picker — visual preview cards */}
+            <div>
+              <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-3">Theme</p>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  {
+                    id: "light",
+                    label: "Light",
+                    icon: Sun01Icon,
+                    sidebar: "#f5f5f5",
+                    bg: "#fbfbfb",
+                    card: "#ffffff",
+                    text: "#111111",
+                    border: "rgba(0,0,0,0.1)",
+                    accent: "#04a45c",
+                  },
+                  {
+                    id: "dark",
+                    label: "Dark",
+                    icon: Moon02Icon,
+                    sidebar: "#111111",
+                    bg: "#1a1a1a",
+                    card: "#222222",
+                    text: "#ffffff",
+                    border: "rgba(255,255,255,0.08)",
+                    accent: "#04a45c",
+                  },
+                ].map((t) => {
+                  const active = t.id === theme;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        if (t.id !== theme) toggleTheme();
+                      }}
+                      className="cursor-pointer text-left transition-all"
+                      style={{
+                        borderRadius: 12,
+                        border: active
+                          ? "2px solid var(--accent-green-primary)"
+                          : "2px solid var(--border-secondary)",
+                        padding: 3,
+                        background: "var(--bg-field-default)",
+                      }}
+                    >
+                      {/* Mini mockup */}
+                      <div
+                        style={{
+                          borderRadius: 8,
+                          overflow: "hidden",
+                          display: "flex",
+                          height: 72,
+                          background: t.sidebar,
+                        }}
+                      >
+                        {/* Sidebar preview */}
+                        <div style={{ width: 44, padding: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+                          <div style={{ width: 14, height: 14, borderRadius: 4, background: t.accent }} />
+                          <div style={{ height: 3, borderRadius: 2, background: t.border, marginTop: 4 }} />
+                          <div style={{ height: 3, borderRadius: 2, background: t.border }} />
+                          <div style={{ height: 3, borderRadius: 2, background: t.border, width: "70%" }} />
+                        </div>
+                        {/* Content preview */}
+                        <div style={{ flex: 1, background: t.bg, padding: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+                          <div style={{ height: 3, borderRadius: 2, background: t.border, width: "60%" }} />
+                          <div style={{ flex: 1, borderRadius: 4, background: t.card, border: `1px solid ${t.border}` }} />
+                        </div>
+                      </div>
+                      {/* Label */}
+                      <div className="flex items-center gap-1.5 px-2 py-2">
+                        <HugeiconsIcon icon={t.icon} size={13} color={active ? "var(--accent-green-primary)" : "var(--icon-tertiary)"} />
+                        <span
+                          className="text-[12px] font-medium"
+                          style={{ color: active ? "var(--accent-green-primary)" : "var(--text-secondary)" }}
+                        >
+                          {t.label}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Sidebar default */}
+            <SettingRow label="Sidebar" description="Default sidebar state on page load">
               <div className="flex items-center gap-1 rounded-[8px] bg-bg-field p-0.5">
                 {[
-                  { id: "light", icon: Sun01Icon, label: "Light" },
-                  { id: "dark", icon: Moon02Icon, label: "Dark" },
-                  { id: "system", icon: ComputerIcon, label: "System" },
-                ].map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => { if (opt.id === "light" && theme === "dark") toggleTheme(); if (opt.id === "dark" && theme === "light") toggleTheme(); }}
-                    className={`flex items-center gap-1.5 h-[26px] px-2.5 rounded-[6px] text-[11px] font-medium transition-colors cursor-pointer ${
-                      (opt.id === theme) ? "bg-bg-l3 text-text-primary" : "text-text-tertiary hover:text-text-secondary"
-                    }`}
-                    style={(opt.id === theme) ? { boxShadow: "var(--shadow-l1)" } : {}}
-                  >
-                    <HugeiconsIcon icon={opt.icon} size={12} />
-                    {opt.label}
-                  </button>
-                ))}
+                  { id: "expanded", label: "Expanded" },
+                  { id: "collapsed", label: "Collapsed" },
+                ].map((opt) => {
+                  const active = opt.id === "expanded" ? sidebarDefault : !sidebarDefault;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => {
+                        const expanded = opt.id === "expanded";
+                        localStorage.setItem("sidebar_open", String(expanded));
+                        setSidebarDefault(expanded);
+                      }}
+                      className={`h-[26px] px-2.5 rounded-[6px] text-[11px] font-medium transition-colors cursor-pointer ${
+                        active ? "bg-bg-l3 text-text-primary" : "text-text-tertiary hover:text-text-secondary"
+                      }`}
+                      style={active ? { boxShadow: "var(--shadow-l1)" } : {}}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
             </SettingRow>
           </div>
@@ -531,6 +626,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </SettingRow>
             <SettingRow label="Permission changed" description="When your permission level is updated">
               <Toggle checked={notifPrefs.permission_changed !== false} onChange={() => togglePref("permission_changed")} />
+            </SettingRow>
+            <SettingRow label="Collaborator joined" description="When someone joins a workspace you are in">
+              <Toggle checked={notifPrefs.collaborator_joined !== false} onChange={() => togglePref("collaborator_joined")} />
+            </SettingRow>
+            <SettingRow label="Workspace transferred" description="When ownership of a workspace is transferred to you">
+              <Toggle checked={notifPrefs.workspace_transferred !== false} onChange={() => togglePref("workspace_transferred")} />
             </SettingRow>
           </div>
         );
