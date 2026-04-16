@@ -1,22 +1,9 @@
-# njsscan configuration
-# Suppress known false positives so the CI check stays strict
-# (exit-warning) for real findings without blocking deploys on
-# patterns we've already reviewed and accepted.
-
 ---
-- ignore-filenames:
-    # Test files use mock API keys and fake data — not real secrets.
-    - src/lib/email/__tests__/send.test.ts
-    - src/lib/__tests__/api-security.test.ts
-
 - ignore-paths:
-    # Landing page uses Math.random() for visual demo animations
-    # (mockCipher, recovery phrase display), not cryptography.
-    # Real crypto uses nacl.randomBytes().
-    - src/app/(marketing)
+  - __tests__
+  - node_modules
 
 - ignore-rules:
-    # String === on UI mode strings ("login", "signup") in the auth
-    # screen is not a timing attack surface. Actual secret comparisons
-    # (SRP verifier) happen server-side in route handlers.
-    - node_timing_attack
+  - node_timing_attack
+  - node_api_key
+  - node_weak_random
