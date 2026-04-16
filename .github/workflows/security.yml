@@ -20,7 +20,7 @@ jobs:
       - name: njsscan
         uses: ajinabraham/njsscan-action@v7
         with:
-          args: "src/ --exit-warning"
+          args: "src/ --exit-warning --config .njsscanrc"
 
   secrets:
     name: Gitleaks (secret scanning)
