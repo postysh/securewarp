@@ -543,10 +543,15 @@ function IsolatedPreview({
     window.addEventListener("message", handler);
 
     // If the viewer never reports ready (DNS not set up, origin
-    // unreachable, etc.), fall back to the parent-supplied fallback.
+    // unreachable, Cloudflare challenge in flight), fall back to the
+    // parent-supplied fallback. 15s gives a cold first-visit enough
+    // budget to: (a) acquire cf_clearance for the pdf subdomain,
+    // (b) load the viewer chunk, (c) load the heavy mammoth/exceljs
+    // renderer, (d) send the first viewer-ready ping. Observed
+    // behaviour on post-login first-preview: 5s was too tight.
     const timeout = setTimeout(() => {
       if (!cancelled) setFailed(true);
-    }, 5000);
+    }, 15000);
 
     return () => {
       cancelled = true;

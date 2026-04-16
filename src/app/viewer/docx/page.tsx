@@ -102,9 +102,12 @@ export default function DocxViewerPage() {
     // this likely on subsequent opens), a single post is missed and
     // the parent's 5s timeout fires the fallback. A short retry loop
     // closes the race.
+    // 100 attempts × 150ms ≈ 15s window, matching the parent's
+    // readiness timeout. First-visit-after-login pays for Cloudflare
+    // challenges on the pdf subdomain AND a cold mammoth bundle.
     let attempts = 0;
     const ping = () => {
-      if (bytesReceived || attempts >= 25) {
+      if (bytesReceived || attempts >= 100) {
         clearInterval(pingInterval);
         return;
       }

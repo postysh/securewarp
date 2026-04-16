@@ -111,9 +111,12 @@ export default function ViewerPage() {
     // Retry viewer-ready until bytes arrive — closes a race where the
     // iframe hydrates before the parent attaches its message listener
     // (likely on cached subsequent opens).
+    // 100 attempts × 150ms ≈ 15s window, matching the parent's
+    // readiness timeout. First-visit-after-login pays for Cloudflare
+    // challenges on the pdf subdomain.
     let attempts = 0;
     const ping = () => {
-      if (bytesReceived || attempts >= 25) {
+      if (bytesReceived || attempts >= 100) {
         clearInterval(pingInterval);
         return;
       }
