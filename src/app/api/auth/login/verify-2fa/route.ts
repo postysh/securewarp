@@ -56,10 +56,15 @@ export async function POST(request: Request) {
 
     // Rate limit 2FA attempts separately. A 6-digit TOTP has 1M
     // possible values; without a rate limit an attacker with a valid
-    // srpSessionId could brute-force the code.
-    if (!(await checkRateLimit(`2fa:${user.id}`, 5, 5 * 60 * 1000))) {
+    // srpSessionId could brute-force the code. 3 attempts per
+    // srpSessionId then the session is burned.
+    const rlKey = `2fa:${srpSessionId}`;
+    if (!(await checkRateLimit(rlKey, 3, 5 * 60 * 1000))) {
+      // Burn the SRP session so the attacker can't wait for the
+      // rate-limit window to reset and try again.
+      await deleteSrpSession(srpSessionId);
       return NextResponse.json(
-        { error: "Too many attempts. Try again in a few minutes." },
+        { error: "Too many attempts. Please sign in again." },
         { status: 429 },
       );
     }
@@ -83,6 +88,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid code." }, { status: 403 });
     }
 
+    // Replay protection: reject codes that were already used within
+    // the current time step. Stores the Unix timestamp of the last
+    // successful verification; any code whose time step overlaps with
+    // or predates the last-used stamp is rejected.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const lastUsed = (user.totp_last_used_at as number | null) ?? 0;
+    if (nowSec - lastUsed < 30) {
+      return NextResponse.json(
+        { error: "Code already used. Wait for a new code." },
+        { status: 403 },
+      );
+    }
+
+    // Stamp last-used for replay protection BEFORE creating the
+    // session. Must be awaited (not fire-and-forget) so two concurrent
+    // requests can't both read the old timestamp before either writes.
+    const { supabase: sb } = await import("@/lib/db/supabase");
+    await sb.from("users").update({ totp_last_used_at: nowSec }).eq("id", user.id);
+
     // 2FA passed. Clean up, create session, the works.
     await deleteSrpSession(srpSessionId);
     await createSession({ userId: user.id, email: user.email });
@@ -97,7 +121,7 @@ export async function POST(request: Request) {
     })();
 
     await resetRateLimit(`login:${user.email}`);
-    await resetRateLimit(`2fa:${user.id}`);
+    await resetRateLimit(rlKey);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

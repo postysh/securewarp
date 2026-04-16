@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 import * as OTPAuth from "otpauth";
 
@@ -40,6 +41,15 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Two factor authentication is not enabled." },
         { status: 409 },
+      );
+    }
+
+    // Rate limit: 5 attempts per 5 min. Prevents brute-forcing the
+    // 6-digit code from a stolen session.
+    if (!(await checkRateLimit(`2fa-disable:${session.userId}`, 5, 5 * 60 * 1000))) {
+      return NextResponse.json(
+        { error: "Too many attempts. Try again in a few minutes." },
+        { status: 429 },
       );
     }
 

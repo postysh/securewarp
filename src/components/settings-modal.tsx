@@ -439,7 +439,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                       const res = await fetch("/api/auth/2fa/verify-setup", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ secret: totpSetup.secret, code: totpCode }),
+                        body: JSON.stringify({ code: totpCode }),
                       });
                       if (res.ok) {
                         setTotpEnabled(true);

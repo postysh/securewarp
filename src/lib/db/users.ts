@@ -21,6 +21,10 @@ export interface UserRow {
   last_login_at?: string | null;
   // TOTP 2FA. Null = not enabled; base32 secret string = enabled.
   totp_secret?: string | null;
+  // Pending TOTP secret from /2fa/setup before user confirms.
+  totp_pending_secret?: string | null;
+  // Unix timestamp of last successful TOTP verification (replay protection).
+  totp_last_used_at?: number | null;
 }
 
 export async function createUser(data: {
@@ -131,6 +135,8 @@ export async function updateUserAuth(
       // phone is a common reason to use recovery in the first place).
       // They can re-enable it after recovering.
       totp_secret: null,
+      totp_pending_secret: null,
+      totp_last_used_at: null,
     })
     .eq("id", userId);
 

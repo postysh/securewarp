@@ -327,29 +327,34 @@ export function useAuth() {
       sessionStorage.setItem("securewarp_keys", JSON.stringify(pending.keys));
       window.dispatchEvent(new Event("securewarp-keys-updated"));
 
-      saveLockCache({
-        email: pending.email,
-        argon2Salt: pending.argon2Salt,
-        keys: {
-          encryptionPublicKey: pending.keys.encryptionPublicKey,
-          encryptionPrivateKey: pending.keys.encryptionPrivateKey,
-          signingPublicKey: pending.keys.signingPublicKey,
-          signingPrivateKey: pending.keys.signingPrivateKey,
-        },
-        unlockCacheKey: pending.unlockCacheKey,
-      });
-      pending.unlockCacheKey.fill(0);
+      // Only re-save the lock cache if we have a real unlockCacheKey.
+      // The unlock→2FA path passes an empty key because the original
+      // was zeroed after unsealing — but the lock cache blob from the
+      // previous login is still intact, so skipping the re-save is
+      // safe. Sealing under an empty key would corrupt the blob and
+      // break the next tab reopen.
+      if (pending.unlockCacheKey.length > 0) {
+        saveLockCache({
+          email: pending.email,
+          argon2Salt: pending.argon2Salt,
+          keys: {
+            encryptionPublicKey: pending.keys.encryptionPublicKey,
+            encryptionPrivateKey: pending.keys.encryptionPrivateKey,
+            signingPublicKey: pending.keys.signingPublicKey,
+            signingPrivateKey: pending.keys.signingPrivateKey,
+          },
+          unlockCacheKey: pending.unlockCacheKey,
+        });
+        pending.unlockCacheKey.fill(0);
+      }
 
-      setState({
-        loading: false,
-        error: null,
-        step: null,
-        recoveryKey: null,
-        userKeys: pending.keys,
-        suspended: null,
-        pending2FA: null,
-      });
-      router.push("/drive");
+      // Full page navigation, not router.push. The client-side
+      // navigation races with the setState({pending2FA: null}) re-
+      // render: React shows the login form for a frame before the
+      // navigation kicks in, and the user sees a "loop." A real
+      // navigation ensures the cookie from verify-2fa is fully
+      // committed and sessionStorage is read fresh on the new page.
+      window.location.replace("/drive");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Verification failed";
       setError(message);
@@ -615,8 +620,10 @@ export function useAuth() {
         ...payload,
         email: meta.email,
       };
-      sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
-      window.dispatchEvent(new Event("securewarp-keys-updated"));
+      // Don't write keys to sessionStorage yet. If the JWT is expired
+      // and 2FA is enabled, we need to wait for the TOTP code before
+      // committing keys. Writing early leaks decrypted private keys
+      // to sessionStorage while the 2FA prompt is still pending.
 
       // Check if the server session is still valid. If the JWT
       // expired, run a full SRP handshake (without Turnstile) to
@@ -659,8 +666,38 @@ export function useAuth() {
         if (!verifyRes.ok) throw new Error(verifyData.error || "Session refresh failed");
 
         verifyServerProof(clientPublicEphemeral, clientSession, verifyData.serverProof);
-        // JWT is now set via the verify endpoint's createSession call
+
+        // If 2FA is enabled, the verify endpoint didn't create a
+        // session. Pause here and prompt for the TOTP code, same as
+        // the regular login flow. The keys are already unsealed from
+        // the lock cache; they'll be committed to sessionStorage
+        // after the code verifies.
+        if (verifyData.requires2FA) {
+          setState({
+            loading: false,
+            error: null,
+            step: null,
+            recoveryKey: null,
+            userKeys: null,
+            suspended: null,
+            pending2FA: {
+              srpSessionId: verifyData.srpSessionId ?? initData.srpSessionId,
+              keys,
+              email: meta.email,
+              argon2Salt: meta.argon2Salt,
+              unlockCacheKey: new Uint8Array(0),
+            },
+          });
+          return;
+        }
+        // No 2FA — JWT is now set via the verify endpoint's createSession call.
       }
+
+      // Safe to commit keys now — either the JWT was still valid
+      // (no 2FA needed on tab reopen) or the SRP re-auth completed
+      // without requiring 2FA.
+      sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
+      window.dispatchEvent(new Event("securewarp-keys-updated"));
 
       setState({
         loading: false,
@@ -671,7 +708,7 @@ export function useAuth() {
         suspended: null,
         pending2FA: null,
       });
-      router.push("/drive");
+      window.location.replace("/drive");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Unlock failed";
       setError(message.includes("Wrong") ? "Wrong password" : message);

@@ -7,14 +7,19 @@ import * as OTPAuth from "otpauth";
 
 /**
  * POST — confirm the user scanned the QR code correctly by verifying
- * a TOTP code against the provided secret. On success, persists the
- * secret to `users.totp_secret` and 2FA is officially enabled.
+ * a TOTP code against the SERVER-STORED pending secret. On success,
+ * promotes the pending secret to `users.totp_secret` and clears the
+ * pending column. 2FA is now officially enabled.
  *
- * Body: { secret: string (base32), code: string (6 digits) }
+ * The secret is read from `users.totp_pending_secret` (set by /setup),
+ * NOT from the request body. This prevents an attacker with a stolen
+ * session from calling this endpoint with a secret they generated
+ * themselves plus a matching code.
+ *
+ * Body: { code: string (6 digits) }
  */
 
 const BODY = z.object({
-  secret: z.string().min(16).max(64),
   code: z.string().length(6),
 });
 
@@ -31,8 +36,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { secret, code } = parsed.data;
+    // Read the pending secret the server generated in /setup.
+    const { data: user } = await supabase
+      .from("users")
+      .select("totp_pending_secret")
+      .eq("id", session.userId)
+      .single();
 
+    if (!user?.totp_pending_secret) {
+      return NextResponse.json(
+        { error: "No pending setup. Start from Settings." },
+        { status: 400 },
+      );
+    }
+
+    const secret = user.totp_pending_secret as string;
     const totp = new OTPAuth.TOTP({
       issuer: "SecureWarp",
       label: session.userId,
@@ -42,8 +60,7 @@ export async function POST(request: Request) {
       secret: OTPAuth.Secret.fromBase32(secret),
     });
 
-    // Allow ±1 window (±30s) for clock drift.
-    const delta = totp.validate({ token: code, window: 1 });
+    const delta = totp.validate({ token: parsed.data.code, window: 1 });
     if (delta === null) {
       return NextResponse.json(
         { error: "Invalid code. Make sure your authenticator is synced." },
@@ -51,10 +68,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Persist the secret — 2FA is now active on this account.
+    // Promote: pending → active, clear pending.
     const { error } = await supabase
       .from("users")
-      .update({ totp_secret: secret })
+      .update({ totp_secret: secret, totp_pending_secret: null })
       .eq("id", session.userId);
 
     if (error) {
