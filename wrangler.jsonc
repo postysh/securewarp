@@ -69,7 +69,15 @@
   // activating it prematurely just means PDFs fail to preview.
   "vars": {
     "EMAIL_FROM": "SecureWarp <noreply@mail.securewarp.com>",
-    "EMAIL_REPLY_TO": "",
+    // Default Reply-To for every transactional email. Users who hit
+    // "Reply" on a welcome or support-ack land in the human support
+    // inbox (Fastmail-hosted hello@) instead of bouncing off the
+    // noreply@ subdomain which has no MX record. Individual sendEmail
+    // calls can override via payload.replyTo — e.g. support-received
+    // sets it to the end user's address so hitting reply from the
+    // admin inbox goes straight to them.
+    "EMAIL_REPLY_TO": "hello@securewarp.com",
+    "SUPPORT_INBOX": "hello@securewarp.com",
     "NEXT_PUBLIC_PDF_VIEWER_ORIGIN": "https://pdf.securewarp.com",
   },
 

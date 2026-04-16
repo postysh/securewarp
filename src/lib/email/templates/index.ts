@@ -11,13 +11,19 @@
  */
 
 import { welcomeTemplate, type WelcomeData } from "./welcome";
+import { supportReceivedTemplate, type SupportReceivedData } from "./support-received";
+import { supportAckTemplate, type SupportAckData } from "./support-ack";
 
 export const Templates = {
   welcome: welcomeTemplate,
+  "support-received": supportReceivedTemplate,
+  "support-ack": supportAckTemplate,
 } as const;
 
 export type TemplateName = keyof typeof Templates;
 
 export type TemplateData = {
   welcome: WelcomeData;
+  "support-received": SupportReceivedData;
+  "support-ack": SupportAckData;
 };

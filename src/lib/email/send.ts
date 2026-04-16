@@ -27,6 +27,15 @@ export type EmailPayload = {
     to: string;
     template: K;
     data: TemplateData[K];
+    /**
+     * Optional per-message Reply-To override. The global
+     * EMAIL_REPLY_TO env var still applies when this is unset. Set
+     * explicitly for flows where "reply to this email" must target
+     * the end user, not the generic support inbox — e.g. a support
+     * message received by admin needs Reply-To pointing at the user
+     * so hitting reply in the admin's mail client sends back to them.
+     */
+    replyTo?: string;
   };
 }[TemplateName];
 
@@ -37,7 +46,7 @@ export interface SendResult {
 }
 
 export async function sendEmail(payload: EmailPayload): Promise<SendResult> {
-  const { to, template, data } = payload;
+  const { to, template, data, replyTo: perCallReplyTo } = payload;
   const renderFn = Templates[template] as (d: unknown) => {
     subject: string;
     html: string;
@@ -47,7 +56,9 @@ export async function sendEmail(payload: EmailPayload): Promise<SendResult> {
 
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM || "SecureWarp <onboarding@resend.dev>";
-  const replyTo = process.env.EMAIL_REPLY_TO;
+  // Per-call override takes precedence. Falls back to the global env
+  // var so existing templates keep their prior behaviour.
+  const replyTo = perCallReplyTo || process.env.EMAIL_REPLY_TO;
 
   if (!apiKey) {
     // eslint-disable-next-line no-console

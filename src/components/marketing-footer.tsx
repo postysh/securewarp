@@ -97,9 +97,7 @@ export function MarketingFooter() {
               heading: "Company",
               links: [
                 { label: "About", href: "/about" },
-                { label: "Blog", href: "#" },
-                { label: "Contact", href: "#" },
-                { label: "Support", href: "#" },
+                { label: "Support", href: "/support" },
               ],
             },
             {
@@ -107,8 +105,6 @@ export function MarketingFooter() {
               links: [
                 { label: "Privacy", href: "#" },
                 { label: "Terms", href: "#" },
-                { label: "Security", href: "#" },
-                { label: "Threat model", href: "#" },
               ],
             },
           ].map((col) => (
