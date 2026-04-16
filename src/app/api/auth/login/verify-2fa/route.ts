@@ -88,37 +88,37 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid code." }, { status: 403 });
     }
 
-    // Replay protection: reject codes that were already used within
-    // the current time step. Stores the Unix timestamp of the last
-    // successful verification; any code whose time step overlaps with
-    // or predates the last-used stamp is rejected.
+    // Atomic replay protection via Postgres CAS. A plain read-then-
+    // write has a TOCTOU race where two concurrent requests can both
+    // read the old timestamp, both pass the < 30 check, and both
+    // succeed. Instead, do a conditional UPDATE that only sets the new
+    // stamp if the old one is far enough in the past. If the UPDATE
+    // touches 0 rows, another request already consumed this window.
     const nowSec = Math.floor(Date.now() / 1000);
-    const lastUsed = (user.totp_last_used_at as number | null) ?? 0;
-    if (nowSec - lastUsed < 30) {
+    const { supabase: sb } = await import("@/lib/db/supabase");
+    const { data: updated, error: casErr } = await sb
+      .from("users")
+      .update({ totp_last_used_at: nowSec })
+      .eq("id", user.id)
+      .or(`totp_last_used_at.is.null,totp_last_used_at.lt.${nowSec - 30}`)
+      .select("id");
+    if (casErr) {
+      logError("2fa.replay-check", casErr);
+      return NextResponse.json({ error: "Verification failed" }, { status: 500 });
+    }
+    if (!updated || updated.length === 0) {
       return NextResponse.json(
         { error: "Code already used. Wait for a new code." },
         { status: 403 },
       );
     }
 
-    // Stamp last-used for replay protection BEFORE creating the
-    // session. Must be awaited (not fire-and-forget) so two concurrent
-    // requests can't both read the old timestamp before either writes.
-    const { supabase: sb } = await import("@/lib/db/supabase");
-    await sb.from("users").update({ totp_last_used_at: nowSec }).eq("id", user.id);
-
     // 2FA passed. Clean up, create session, the works.
     await deleteSrpSession(srpSessionId);
     await createSession({ userId: user.id, email: user.email });
     auditEvent({ event: "auth.login.success", actorUserId: user.id, detail: "2fa" });
 
-    void (async () => {
-      const { supabase } = await import("@/lib/db/supabase");
-      await supabase
-        .from("users")
-        .update({ last_login_at: new Date().toISOString() })
-        .eq("id", user.id);
-    })();
+    await sb.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", user.id);
 
     await resetRateLimit(`login:${user.email}`);
     await resetRateLimit(rlKey);

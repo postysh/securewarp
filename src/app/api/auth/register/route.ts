@@ -54,9 +54,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
     }
 
-    // Check if user already exists — don't reveal email existence
+    // Check if user already exists — don't reveal email existence.
+    // Add a baseline delay so the "already exists" path takes roughly
+    // the same time as the "create new user" path. Without this, an
+    // attacker can distinguish the two by response latency (~200ms vs
+    // ~800ms) even though the error message is generic.
+    const startMs = Date.now();
     const existing = await getUserByEmail(email);
     if (existing) {
+      const elapsed = Date.now() - startMs;
+      const pad = Math.max(0, 500 - elapsed);
+      await new Promise((r) => setTimeout(r, pad));
       return NextResponse.json(
         { error: "Unable to create account. Please try a different email or sign in." },
         { status: 400 }

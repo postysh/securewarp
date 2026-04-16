@@ -23,7 +23,7 @@ export async function GET() {
     }
     const { data, error } = await supabase
       .from("users")
-      .select("display_name, notification_prefs, onboarded_at, totp_secret")
+      .select("display_name, notification_prefs, onboarded_at, totp_secret, srp_salt, argon2_salt")
       .eq("id", session.userId)
       .single();
     if (error) throw error;
@@ -36,6 +36,11 @@ export async function GET() {
       },
       onboarded: data?.onboarded_at != null,
       totpEnabled: Boolean(data?.totp_secret),
+      // Salts are NOT secrets — the server sends them during login
+      // anyway. Exposed here so change-password can re-derive the
+      // old verifier from the old password without a full SRP handshake.
+      srpSalt: data?.srp_salt ?? null,
+      argon2Salt: data?.argon2_salt ?? null,
     });
   } catch (err) {
     logError("auth.profile.get", err);

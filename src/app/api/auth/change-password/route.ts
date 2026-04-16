@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession, revokeAllSessions, createSession } from "@/lib/auth/session";
-import { updateUserAuth } from "@/lib/db/users";
+import { getUserById, updateUserAuth } from "@/lib/db/users";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 const ChangePasswordSchema = z.object({
+  // Old verifier proves the caller knows the current password without
+  // sending the password itself. The client derives the old verifier
+  // from the old password via the same SRP registration path, and the
+  // server compares against the stored value. A session-stealer who
+  // doesn't know the password can't produce a matching verifier.
+  oldSrpVerifier: z.string().min(1),
   newSrpSalt: z.string().min(1),
   newSrpVerifier: z.string().min(1),
   newArgon2Salt: z.string().min(1),
@@ -33,6 +39,20 @@ export async function POST(request: Request) {
 
     if (!(await checkRateLimit(`change-pw:${session.userId}`, 5))) {
       return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
+    }
+
+    // Verify the old password by comparing the submitted verifier
+    // against the one stored at registration/last-password-change.
+    // Constant-time comparison isn't critical here (verifiers are
+    // already public to the server), but we use string equality
+    // which is fine for this threat model (stolen session, not
+    // timing oracle).
+    const user = await getUserById(session.userId);
+    if (!user || user.srp_verifier !== data.oldSrpVerifier) {
+      return NextResponse.json(
+        { error: "Current password is incorrect." },
+        { status: 403 },
+      );
     }
 
     await updateUserAuth(session.userId, {

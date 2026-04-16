@@ -73,6 +73,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>("account");
   const { theme, toggle: toggleTheme } = useTheme();
   const [changingPassword, setChangingPassword] = useState(false);
+  const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [pwStatus, setPwStatus] = useState<string | null>(null);
@@ -244,18 +245,20 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 <div className="mt-3 space-y-2 animate-fade-in">
                   {pwStatus && <p className="text-[11px] text-accent-green">{pwStatus}</p>}
                   {auth.error && <p className="text-[11px] text-accent-red">{auth.error}</p>}
+                  <input type="password" placeholder="Current password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
                   <input type="password" placeholder="New password (min 8 characters)" value={newPw} onChange={(e) => setNewPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
                   <input type="password" placeholder="Confirm new password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
                   {newPw && confirmPw && newPw !== confirmPw && <p className="text-[11px] text-accent-red">Passwords don&apos;t match</p>}
                   <div className="flex gap-2 pt-1">
-                    <button onClick={() => { setChangingPassword(false); setNewPw(""); setConfirmPw(""); setPwStatus(null); }} className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">Cancel</button>
+                    <button onClick={() => { setChangingPassword(false); setOldPw(""); setNewPw(""); setConfirmPw(""); setPwStatus(null); }} className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">Cancel</button>
                     <button
-                      disabled={!newPw || newPw.length < 8 || newPw !== confirmPw || auth.loading}
+                      disabled={!oldPw || !newPw || newPw.length < 8 || newPw !== confirmPw || auth.loading}
                       onClick={async () => {
                         setPwStatus("Changing password...");
-                        await auth.changePassword("", newPw, email);
+                        await auth.changePassword(oldPw, newPw, email);
                         if (!auth.error) {
                           setPwStatus("Password changed. New recovery key generated.");
+                          setOldPw("");
                           setNewPw("");
                           setConfirmPw("");
                           setChangingPassword(false);

@@ -119,25 +119,28 @@ export async function updateUserAuth(
     encryptedUserData: string;
     recoveryKeyHash?: string;
     recoveryEncryptedData?: string;
+    // When true, clears TOTP 2FA fields. Used by recovery (lost
+    // phone) but NOT by change-password (user still has their
+    // authenticator).
+    clearTotp?: boolean;
   }
 ): Promise<void> {
+  const updates: Record<string, unknown> = {
+    srp_salt: data.srpSalt,
+    srp_verifier: data.srpVerifier,
+    argon2_salt: data.argon2Salt,
+    encrypted_user_data: data.encryptedUserData,
+    recovery_key_hash: data.recoveryKeyHash || null,
+    recovery_encrypted_data: data.recoveryEncryptedData || null,
+  };
+  if (data.clearTotp) {
+    updates.totp_secret = null;
+    updates.totp_pending_secret = null;
+    updates.totp_last_used_at = null;
+  }
   const { error } = await supabase
     .from("users")
-    .update({
-      srp_salt: data.srpSalt,
-      srp_verifier: data.srpVerifier,
-      argon2_salt: data.argon2Salt,
-      encrypted_user_data: data.encryptedUserData,
-      recovery_key_hash: data.recoveryKeyHash || null,
-      recovery_encrypted_data: data.recoveryEncryptedData || null,
-      // Recovery resets the password and keys. Clear 2FA too — the
-      // user might not have access to their old authenticator (lost
-      // phone is a common reason to use recovery in the first place).
-      // They can re-enable it after recovering.
-      totp_secret: null,
-      totp_pending_secret: null,
-      totp_last_used_at: null,
-    })
+    .update(updates)
     .eq("id", userId);
 
   if (error) throw new Error(`Failed to update user auth: ${error.message}`);

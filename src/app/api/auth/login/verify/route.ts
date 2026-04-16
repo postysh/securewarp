@@ -121,10 +121,10 @@ export async function POST(request: Request) {
     await createSession({ userId: user.id, email: user.email });
     auditEvent({ event: "auth.login.success", actorUserId: user.id });
 
-    void (async () => {
-      const { supabase } = await import("@/lib/db/supabase");
-      await supabase.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", user.id);
-    })();
+    // Await instead of fire-and-forget — on Cloudflare Workers,
+    // dangling promises get killed when the isolate tears down.
+    const { supabase: sb } = await import("@/lib/db/supabase");
+    await sb.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", user.id);
 
     await resetRateLimit(`login:${user.email}`);
 

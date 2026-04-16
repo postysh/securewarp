@@ -57,6 +57,7 @@ export async function GET(
       )
       .eq("parent_id", parsedQuery.data.parentId)
       .eq("upload_complete", true)
+      .is("deleted_at", null)
       .order("is_folder", { ascending: false })
       .order("created_at", { ascending: false });
     if (error) throw error;

@@ -164,6 +164,7 @@ export async function POST(request: Request) {
         encryptedUserData: data.newEncryptedUserData,
         recoveryKeyHash: data.newRecoveryKeyHash,
         recoveryEncryptedData: data.newRecoveryEncryptedData,
+        clearTotp: true,
       });
 
       // Create session

@@ -496,13 +496,41 @@ export function useAuth() {
     setState({ loading: true, error: null, step: "Verifying old password...", recoveryKey: null, userKeys: state.userKeys, suspended: null, pending2FA: null });
 
     try {
-      // Get current argon2 salt from session storage keys
+      // Get current keys from sessionStorage
       const storedKeys = sessionStorage.getItem("securewarp_keys");
       if (!storedKeys) {
         setError("Session expired. Please log in again.");
         return;
       }
       const currentKeys = JSON.parse(storedKeys);
+
+      // Fetch the current srpSalt + argon2Salt so we can re-derive
+      // the old verifier from the old password. The server checks the
+      // old verifier to prove the caller knows the current password —
+      // a stolen session alone can't produce it.
+      setStep("Verifying identity...");
+      const profileRes = await fetch("/api/auth/profile");
+      if (!profileRes.ok) {
+        setError("Could not verify identity. Please try again.");
+        return;
+      }
+      const profile = await profileRes.json();
+      if (!profile.srpSalt || !profile.argon2Salt) {
+        setError("Missing auth data. Please sign out and in again.");
+        return;
+      }
+
+      // Derive old SRP verifier from old password
+      const oldArgon2SaltBytes = fromBase64(profile.argon2Salt);
+      const oldMasterKey = await deriveMainKey(oldPassword, oldArgon2SaltBytes);
+      const { srpKey: oldSrpKey } = splitMasterKey(oldMasterKey);
+      const { deriveClientSession: _unused, ...srpClientMod } = await import("@/lib/srp/client");
+      void _unused;
+      // Re-derive the verifier using the stored srpSalt
+      const srpClient = await import("secure-remote-password/client");
+      const oldSrpKeyHex = (await import("@/lib/crypto/utils")).toHex(oldSrpKey);
+      const oldPrivateKey = srpClient.derivePrivateKey(profile.srpSalt, "securewarp-user", oldSrpKeyHex);
+      const oldSrpVerifier = srpClient.deriveVerifier(oldPrivateKey);
 
       // Derive new credentials from new password
       setStep("Deriving new master key...");
@@ -537,6 +565,7 @@ export function useAuth() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          oldSrpVerifier,
           newSrpSalt,
           newSrpVerifier,
           newArgon2Salt: toBase64(newArgon2Salt),

@@ -38,7 +38,7 @@ export async function POST() {
     // Rate limit setup calls so an attacker with a stolen session
     // can't spam /setup to overwrite pending_secret and disrupt a
     // legitimate setup in progress.
-    if (!(await checkRateLimit(`2fa-setup:${session.userId}`, 3, 5 * 60 * 1000))) {
+    if (!(await checkRateLimit(`2fa-setup:${session.userId}`, 5, 5 * 60 * 1000))) {
       return NextResponse.json(
         { error: "Too many setup attempts. Try again in a few minutes." },
         { status: 429 },
