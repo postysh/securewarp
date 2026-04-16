@@ -6,4 +6,4 @@
 - ignore-rules:
   - node_timing_attack
   - node_api_key
-  - node_weak_random
+  - node_insecure_random_generator
