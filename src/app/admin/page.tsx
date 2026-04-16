@@ -14,6 +14,9 @@ import SecurityLockIcon from "@hugeicons/core-free-icons/SecurityLockIcon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import ArrowRight02Icon from "@hugeicons/core-free-icons/ArrowRight02Icon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
+import Key02Icon from "@hugeicons/core-free-icons/Key02Icon";
+import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
 import { AdminSidebarToggle } from "./layout";
 
 type Stats = {
@@ -24,6 +27,11 @@ type Stats = {
   suspendedUsers: number;
   totalFiles: number;
   totalBytes: number;
+  // Security
+  totpEnabled: number;
+  activeSessions: number;
+  failedLogins7d: number;
+  rateLimitHits: number;
 };
 
 type Overview = {
@@ -77,6 +85,13 @@ export default function AdminOverviewPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [securityEvents, setSecurityEvents] = useState<Array<{
+    id: string;
+    occurredAt: string;
+    event: string;
+    actorUserId: string | null;
+    detail: string | null;
+  }> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -84,11 +99,13 @@ export default function AdminOverviewPage() {
       fetch("/api/admin/stats").then((r) => (r.ok ? r.json() : Promise.reject(r))),
       fetch("/api/admin/overview").then((r) => (r.ok ? r.json() : Promise.reject(r))),
       fetch("/api/admin/health").then((r) => (r.ok ? r.json() : Promise.reject(r))),
+      fetch("/api/admin/audit?source=security&q=fail").then((r) => (r.ok ? r.json() : { entries: [] })),
     ])
-      .then(([s, o, h]) => {
+      .then(([s, o, h, audit]) => {
         setStats(s);
         setOverview(o);
         setHealth(h);
+        setSecurityEvents((audit.entries ?? []).slice(0, 8));
       })
       .catch(() => setError("Failed to load dashboard"));
   }, []);
@@ -171,6 +188,43 @@ export default function AdminOverviewPage() {
                 accent="var(--accent-yellow-primary)"
                 label="Storage"
                 value={stats ? formatBytes(stats.totalBytes) : null}
+              />
+            </div>
+          </section>
+
+          {/* Security stats */}
+          <section className="mb-6">
+            <h3 className="text-[11px] font-mono uppercase text-text-disabled tracking-wider mb-3">Security</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard
+                icon={Shield01Icon}
+                accent="var(--accent-green-primary)"
+                label="2FA enabled"
+                value={stats ? stats.totpEnabled.toLocaleString() : null}
+                sub={
+                  stats
+                    ? `${((stats.totpEnabled / Math.max(stats.totalUsers, 1)) * 100).toFixed(0)}% adoption`
+                    : null
+                }
+              />
+              <StatCard
+                icon={Key02Icon}
+                accent="var(--accent-blue-primary)"
+                label="Active sessions"
+                value={stats ? stats.activeSessions.toLocaleString() : null}
+              />
+              <StatCard
+                icon={SecurityLockIcon}
+                accent="var(--accent-orange-primary)"
+                label="Failed logins · 7d"
+                value={stats ? stats.failedLogins7d.toLocaleString() : null}
+              />
+              <StatCard
+                icon={Alert02Icon}
+                accent="var(--accent-red-primary)"
+                label="Rate limit hits"
+                value={stats ? stats.rateLimitHits.toLocaleString() : null}
+                sub="active blocks"
               />
             </div>
           </section>
@@ -291,6 +345,46 @@ export default function AdminOverviewPage() {
                       </div>
                       <div className="text-[11px] text-text-tertiary shrink-0 tabular-nums">
                         {formatRelative(a.occurredAt)}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+
+            {/* Recent security events */}
+            <Panel
+              title="Security events"
+              icon={Alert02Icon}
+              href="/admin/audit"
+              hrefLabel="Full log"
+            >
+              {!securityEvents ? (
+                <SkeletonRows />
+              ) : securityEvents.length === 0 ? (
+                <EmptyRow text="No security events this week." />
+              ) : (
+                <ul>
+                  {securityEvents.map((ev) => (
+                    <li
+                      key={ev.id}
+                      className="flex items-center justify-between gap-3 px-4 h-[44px] border-b border-border-tertiary last:border-b-0"
+                    >
+                      <div className="min-w-0 flex items-center gap-3">
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${
+                          ev.event.includes("fail") ? "bg-accent-red" : "bg-accent-yellow"
+                        }`} />
+                        <div className="text-[12px] text-text-secondary truncate font-mono">
+                          {ev.event}
+                        </div>
+                        {ev.detail && (
+                          <div className="text-[11px] text-text-disabled truncate hidden md:block">
+                            {ev.detail}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-text-tertiary shrink-0 tabular-nums">
+                        {formatRelative(ev.occurredAt)}
                       </div>
                     </li>
                   ))}

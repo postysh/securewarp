@@ -25,6 +25,10 @@ export async function GET() {
       suspendedUsersQ,
       totalFilesQ,
       storageRowsQ,
+      totpEnabledQ,
+      activeSessionsQ,
+      failedLogins7dQ,
+      rateLimitHitsQ,
     ] = await Promise.all([
       supabase.from("users").select("id", { count: "exact", head: true }),
       supabase.from("users").select("id", { count: "exact", head: true }).gte("created_at", sevenDaysAgo),
@@ -33,6 +37,11 @@ export async function GET() {
       supabase.from("users").select("id", { count: "exact", head: true }).not("suspended_at", "is", null),
       supabase.from("files").select("id", { count: "exact", head: true }).eq("upload_complete", true).is("deleted_at", null),
       supabase.from("files").select("size_bytes").eq("upload_complete", true).is("deleted_at", null),
+      // Security stats
+      supabase.from("users").select("id", { count: "exact", head: true }).not("totp_secret", "is", null),
+      supabase.from("sessions").select("jti", { count: "exact", head: true }).gt("expires_at", new Date().toISOString()),
+      supabase.from("security_audit").select("id", { count: "exact", head: true }).in("event", ["auth.login.fail", "auth.2fa.fail"]).gte("occurred_at", sevenDaysAgo),
+      supabase.from("rate_limits").select("id", { count: "exact", head: true }).gte("reset_at", new Date().toISOString()),
     ]);
 
     // Client-side SUM — fine at small scale. If this ever exceeds a few
@@ -50,6 +59,11 @@ export async function GET() {
       suspendedUsers: suspendedUsersQ.count ?? 0,
       totalFiles: totalFilesQ.count ?? 0,
       totalBytes,
+      // Security stats
+      totpEnabled: totpEnabledQ.count ?? 0,
+      activeSessions: activeSessionsQ.count ?? 0,
+      failedLogins7d: failedLogins7dQ.count ?? 0,
+      rateLimitHits: rateLimitHitsQ.count ?? 0,
     });
   } catch (err) {
     logError("admin.stats", err);
