@@ -99,10 +99,38 @@ export default function DriveClient() {
     );
   }
 
+  // Preload the isolated viewer subdomain in a hidden iframe so the
+  // first real preview doesn't have to fight through Cloudflare's bot
+  // challenge + cold chunk download while the user is staring at a
+  // loading state. By the time they click a file, cf_clearance is set
+  // and the viewer's JS is in the HTTP cache. The iframe is zero-size,
+  // invisible, and pointer-events:none so it doesn't affect layout or
+  // accessibility. Its src points at the base /viewer route (smallest
+  // page — just the PDF viewer shell, no mammoth/exceljs loaded) which
+  // is enough to clear the Cloudflare challenge and cache the shared
+  // chunks that all three viewer routes import.
+  const viewerOrigin = process.env.NEXT_PUBLIC_PDF_VIEWER_ORIGIN?.trim();
+
   return (
     <ThemeProvider>
       <UserKeysContext.Provider value={keys}>
         <FilesContext.Provider value={fileOps}>
+          {viewerOrigin && (
+            <iframe
+              src={`${viewerOrigin}/viewer`}
+              aria-hidden
+              tabIndex={-1}
+              style={{
+                position: "absolute",
+                width: 0,
+                height: 0,
+                border: 0,
+                opacity: 0,
+                pointerEvents: "none",
+                overflow: "hidden",
+              }}
+            />
+          )}
           <div className="flex h-full bg-bg-side">
             {/* Desktop sidebar — inline */}
             <div className="relative z-20 h-full hidden md:block">
