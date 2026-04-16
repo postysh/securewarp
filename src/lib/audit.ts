@@ -11,6 +11,7 @@ import { logError } from "./log";
 export type AuditEventType =
   | "auth.login.success"
   | "auth.login.fail"
+  | "auth.2fa.fail"
   | "auth.register"
   | "auth.password_change"
   | "auth.recovery.verify.success"

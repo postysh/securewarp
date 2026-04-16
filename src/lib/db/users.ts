@@ -19,6 +19,8 @@ export interface UserRow {
   suspended_at?: string | null;
   suspended_reason?: string | null;
   last_login_at?: string | null;
+  // TOTP 2FA. Null = not enabled; base32 secret string = enabled.
+  totp_secret?: string | null;
 }
 
 export async function createUser(data: {
@@ -124,6 +126,11 @@ export async function updateUserAuth(
       encrypted_user_data: data.encryptedUserData,
       recovery_key_hash: data.recoveryKeyHash || null,
       recovery_encrypted_data: data.recoveryEncryptedData || null,
+      // Recovery resets the password and keys. Clear 2FA too — the
+      // user might not have access to their old authenticator (lost
+      // phone is a common reason to use recovery in the first place).
+      // They can re-enable it after recovering.
+      totp_secret: null,
     })
     .eq("id", userId);
 

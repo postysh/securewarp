@@ -283,6 +283,13 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                   Back to sign in
                 </button>
               </>
+            ) : auth.pending2FA ? (
+              /* ── 2FA code entry ──────────────────────────────────── */
+              <TwoFactorPrompt
+                error={auth.error}
+                loading={auth.loading}
+                onSubmit={(code) => auth.verify2FA(code)}
+              />
             ) : (
               <>
             <h2 className="text-[22px] font-semibold text-text-primary tracking-[-0.02em] mb-1">
@@ -598,5 +605,71 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
         document.body
       )}
     </div>
+  );
+}
+
+
+function TwoFactorPrompt({
+  error,
+  loading,
+  onSubmit,
+}: {
+  error: string | null;
+  loading: boolean;
+  onSubmit: (code: string) => void;
+}) {
+  const [code, setCode] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (code.length === 6 && !loading) onSubmit(code);
+  };
+
+  return (
+    <>
+      <h2 className="text-[22px] font-semibold text-text-primary tracking-[-0.02em] mb-1">
+        Two factor authentication
+      </h2>
+      <p className="text-text-tertiary text-[13px] mb-7">
+        Enter the 6 digit code from your authenticator app.
+      </p>
+
+      {error && (
+        <div className="mb-4 p-3 rounded-lg bg-accent-red/10 border border-accent-red/20 text-[12px] text-accent-red">
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-[11px] font-medium text-text-disabled uppercase tracking-wider mb-1.5 font-mono">
+            Verification code
+          </label>
+          <input
+            ref={inputRef}
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="000000"
+            className="w-full h-[40px] rounded-[10px] bg-bg-field border border-border-secondary px-3.5 text-[14px] text-text-primary placeholder:text-text-disabled focus:border-accent-green focus:outline-none transition-colors font-mono text-center text-[20px] tracking-[0.3em]"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={code.length !== 6 || loading}
+          className="w-full h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-default"
+        >
+          {loading ? "Verifying..." : "Verify"}
+        </button>
+      </form>
+    </>
   );
 }

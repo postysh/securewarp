@@ -518,6 +518,15 @@ ALTER TABLE users ADD COLUMN search_content_indexed_at timestamptz;
 ALTER TABLE file_search_tokens ENABLE ROW LEVEL SECURITY;
 ```
 
+#### TOTP two factor authentication
+
+```sql
+-- Nullable: null = 2FA not enabled; base32 secret = enabled.
+-- Checked at login verify time; stored plaintext since the server
+-- needs the secret to validate TOTP codes.
+ALTER TABLE users ADD COLUMN totp_secret text;
+```
+
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from
 `rate_limits` and `used_recovery_tokens`:
 

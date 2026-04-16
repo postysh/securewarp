@@ -63,8 +63,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Delete the one-time SRP session
-    await deleteSrpSession(srpSessionId);
+    // NOTE: the SRP session is NOT deleted here yet. If 2FA is enabled
+    // we need it to persist for the verify-2fa follow-up. It's deleted
+    // either in the non-2FA path below or in /login/verify-2fa after
+    // the TOTP check succeeds. Orphaned sessions expire via TTL.
 
     // Suspension check — deliberately AFTER the SRP proof verifies so we
     // don't expose account-state to unauthenticated callers (no email
@@ -86,26 +88,44 @@ export async function POST(request: Request) {
       );
     }
 
+    // ── 2FA gate ───────────────────────────────────────────────────
+    // If the user has TOTP enabled, don't issue a session yet. Return
+    // the SRP server proof + encrypted data so the client can verify
+    // M2 and prepare keys, but include `requires2FA: true` to tell
+    // the client to prompt for a TOTP code before proceeding. The
+    // session is only created in /login/verify-2fa after the code
+    // checks out.
+    //
+    // The srpSessionId is re-used as a short-lived token binding the
+    // SRP proof to the 2FA step. We DON'T delete it here if 2FA is
+    // required — it stays alive for the 2FA follow-up. The session
+    // row has its own TTL so orphans expire automatically.
+    if (user.totp_secret) {
+      // Rate limit still applies — reset only after full auth
+      // (including 2FA). Don't reset here.
+      return NextResponse.json({
+        requires2FA: true,
+        srpSessionId,
+        serverProof,
+        encryptedUserData: user.encrypted_user_data,
+        publicEncryptionKey: user.public_encryption_key,
+        publicSigningKey: user.public_signing_key,
+      });
+    }
+
+    // No 2FA — proceed to full session.
+    // Delete the one-time SRP session now that auth is complete.
+    await deleteSrpSession(srpSessionId);
+
     // Create JWT session
     await createSession({ userId: user.id, email: user.email });
     auditEvent({ event: "auth.login.success", actorUserId: user.id });
 
-    // Stamp last_login_at for the admin dashboard's "active users" metric.
-    // Fire-and-forget: a failed stamp must never break the login flow — the
-    // auth was already successful, this is just telemetry. Import inline to
-    // avoid pulling supabase into any client-side code paths that transitively
-    // import this route for type-checking.
     void (async () => {
       const { supabase } = await import("@/lib/db/supabase");
       await supabase.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", user.id);
     })();
 
-    // Successful login — clear the rate limit bucket so genuine
-    // users can come back an hour from now without waiting. An
-    // attacker who's mid-spray never hits this path because their
-    // SRP proof doesn't verify. `user.email` is already normalized
-    // at registration (see registerUser) so it matches the key
-    // used in /login/init.
     await resetRateLimit(`login:${user.email}`);
 
     return NextResponse.json({

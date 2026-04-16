@@ -23,7 +23,7 @@ export async function GET() {
     }
     const { data, error } = await supabase
       .from("users")
-      .select("display_name, notification_prefs, onboarded_at")
+      .select("display_name, notification_prefs, onboarded_at, totp_secret")
       .eq("id", session.userId)
       .single();
     if (error) throw error;
@@ -35,6 +35,7 @@ export async function GET() {
         permission_changed: true,
       },
       onboarded: data?.onboarded_at != null,
+      totpEnabled: Boolean(data?.totp_secret),
     });
   } catch (err) {
     logError("auth.profile.get", err);

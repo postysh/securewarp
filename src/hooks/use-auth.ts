@@ -39,6 +39,16 @@ interface AuthState {
   // Set when the server returns 403 with suspended=true. AuthScreen
   // swaps to a dedicated "account suspended" view when present.
   suspended: { reason: string | null } | null;
+  // Set when login/verify returns requires2FA=true. Holds the
+  // pending state so the client can prompt for the TOTP code then
+  // call verify2FA() to complete the login.
+  pending2FA: {
+    srpSessionId: string;
+    keys: UserKeys;
+    email: string;
+    argon2Salt: string;
+    unlockCacheKey: Uint8Array;
+  } | null;
 }
 
 export function useAuth() {
@@ -50,6 +60,7 @@ export function useAuth() {
     recoveryKey: null,
     userKeys: null,
     suspended: null,
+    pending2FA: null,
   });
 
   const setStep = (step: string) => setState((s) => ({ ...s, step, error: null }));
@@ -58,7 +69,7 @@ export function useAuth() {
     setState((s) => ({ ...s, suspended: { reason }, loading: false, step: null, error: null }));
 
   async function signup(email: string, password: string, turnstileToken?: string) {
-    setState({ loading: true, error: null, step: "Generating encryption keys...", recoveryKey: null, userKeys: null, suspended: null });
+    setState({ loading: true, error: null, step: "Generating encryption keys...", recoveryKey: null, userKeys: null, suspended: null, pending2FA: null });
 
     try {
       // 1. Generate Argon2 salt and derive master key
@@ -137,7 +148,7 @@ export function useAuth() {
       // Success — store keys and recovery key for display
       setState({
         loading: false, error: null, step: null, recoveryKey,
-        userKeys: keys, suspended: null,
+        userKeys: keys, suspended: null, pending2FA: null,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Signup failed";
@@ -146,7 +157,7 @@ export function useAuth() {
   }
 
   async function login(email: string, password: string, turnstileToken?: string) {
-    setState({ loading: true, error: null, step: "Initializing...", recoveryKey: null, userKeys: null, suspended: null });
+    setState({ loading: true, error: null, step: "Initializing...", recoveryKey: null, userKeys: null, suspended: null, pending2FA: null });
 
     try {
       // 1. Generate client ephemeral
@@ -225,36 +236,57 @@ export function useAuth() {
 
       const privateKeys = decryptUserData(encryptedData, passwordDerivedSecret);
 
-      // Store decrypted keys in sessionStorage for the drive page.
-      const keys = {
+      const keys: UserKeys = {
         encryptionPublicKey: verifyData.publicEncryptionKey,
         encryptionPrivateKey: privateKeys.encryptionPrivateKey,
         signingPublicKey: verifyData.publicSigningKey,
         signingPrivateKey: privateKeys.signingPrivateKey,
         email,
       };
+
+      // ── 2FA gate ──────────────────────────────────────────────
+      // If the server said requires2FA, pause here. Store the
+      // pending state so the UI can prompt for the TOTP code, then
+      // resume via verify2FA(). The keys and unlockCacheKey are held
+      // in state (not persisted yet) so they can be committed after
+      // the code checks out.
+      if (verifyData.requires2FA) {
+        setState({
+          loading: false,
+          error: null,
+          step: null,
+          recoveryKey: null,
+          userKeys: null,
+          suspended: null,
+          pending2FA: {
+            srpSessionId: verifyData.srpSessionId,
+            keys,
+            email,
+            argon2Salt,
+            unlockCacheKey,
+          },
+        });
+        return;
+      }
+
+      // No 2FA — finalize immediately.
       sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
       window.dispatchEvent(new Event("securewarp-keys-updated"));
 
-      // Refresh the local lock cache using the unlock-cache key derived
-      // in step 4 above. Password may have changed since the last
-      // saved blob (or no blob existed on this device yet), so we
-      // always overwrite. Zero the key immediately after.
       saveLockCache({
         email,
         argon2Salt,
         keys: {
-          encryptionPublicKey: verifyData.publicEncryptionKey,
-          encryptionPrivateKey: privateKeys.encryptionPrivateKey,
-          signingPublicKey: verifyData.publicSigningKey,
-          signingPrivateKey: privateKeys.signingPrivateKey,
+          encryptionPublicKey: keys.encryptionPublicKey,
+          encryptionPrivateKey: keys.encryptionPrivateKey,
+          signingPublicKey: keys.signingPublicKey,
+          signingPrivateKey: keys.signingPrivateKey,
         },
         unlockCacheKey,
       });
       unlockCacheKey.fill(0);
 
-      // Success — navigate to drive
-      setState({ loading: false, error: null, step: null, recoveryKey: null, userKeys: keys, suspended: null });
+      setState({ loading: false, error: null, step: null, recoveryKey: null, userKeys: keys, suspended: null, pending2FA: null });
       router.push("/drive");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Login failed";
@@ -262,8 +294,70 @@ export function useAuth() {
     }
   }
 
+  /**
+   * Complete the login after the user enters a valid TOTP code.
+   * Called only when `state.pending2FA` is set (i.e. SRP passed but
+   * the server returned `requires2FA: true`). Posts the code +
+   * srpSessionId to the server; on success, finalizes sessionStorage
+   * + lock cache exactly as the non-2FA path does.
+   */
+  async function verify2FA(code: string) {
+    const pending = state.pending2FA;
+    if (!pending) {
+      setError("No pending 2FA session.");
+      return;
+    }
+    setState((s) => ({ ...s, loading: true, error: null, step: "Verifying code..." }));
+    try {
+      const res = await fetch("/api/auth/login/verify-2fa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          srpSessionId: pending.srpSessionId,
+          code,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Verification failed");
+        return;
+      }
+
+      // Finalize: same as the non-2FA success path.
+      sessionStorage.setItem("securewarp_keys", JSON.stringify(pending.keys));
+      window.dispatchEvent(new Event("securewarp-keys-updated"));
+
+      saveLockCache({
+        email: pending.email,
+        argon2Salt: pending.argon2Salt,
+        keys: {
+          encryptionPublicKey: pending.keys.encryptionPublicKey,
+          encryptionPrivateKey: pending.keys.encryptionPrivateKey,
+          signingPublicKey: pending.keys.signingPublicKey,
+          signingPrivateKey: pending.keys.signingPrivateKey,
+        },
+        unlockCacheKey: pending.unlockCacheKey,
+      });
+      pending.unlockCacheKey.fill(0);
+
+      setState({
+        loading: false,
+        error: null,
+        step: null,
+        recoveryKey: null,
+        userKeys: pending.keys,
+        suspended: null,
+        pending2FA: null,
+      });
+      router.push("/drive");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Verification failed";
+      setError(message);
+    }
+  }
+
   async function recover(email: string, recoveryWordsRaw: string, newPassword: string, turnstileToken?: string) {
-    setState({ loading: true, error: null, step: "Verifying recovery key...", recoveryKey: null, userKeys: null, suspended: null });
+    setState({ loading: true, error: null, step: "Verifying recovery key...", recoveryKey: null, userKeys: null, suspended: null, pending2FA: null });
 
     try {
       // Clean the recovery input — strip numbers, punctuation, extra whitespace, newlines
@@ -386,7 +480,7 @@ export function useAuth() {
       newUnlockCacheKey.fill(0);
 
       // Success — show new recovery key
-      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: recoveredKeys, suspended: null });
+      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: recoveredKeys, suspended: null, pending2FA: null });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Recovery failed";
       setError(message);
@@ -394,7 +488,7 @@ export function useAuth() {
   }
 
   async function changePassword(oldPassword: string, newPassword: string, email: string) {
-    setState({ loading: true, error: null, step: "Verifying old password...", recoveryKey: null, userKeys: state.userKeys, suspended: null });
+    setState({ loading: true, error: null, step: "Verifying old password...", recoveryKey: null, userKeys: state.userKeys, suspended: null, pending2FA: null });
 
     try {
       // Get current argon2 salt from session storage keys
@@ -470,7 +564,7 @@ export function useAuth() {
       });
       newUnlockCacheKey.fill(0);
 
-      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: { ...keypairs, email }, suspended: null });
+      setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: { ...keypairs, email }, suspended: null, pending2FA: null });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Password change failed";
       setError(message);
@@ -496,6 +590,7 @@ export function useAuth() {
       recoveryKey: null,
       userKeys: null,
       suspended: null,
+      pending2FA: null,
     });
 
     try {
@@ -574,6 +669,7 @@ export function useAuth() {
         recoveryKey: null,
         userKeys: keys,
         suspended: null,
+        pending2FA: null,
       });
       router.push("/drive");
     } catch (err: unknown) {
@@ -606,6 +702,7 @@ export function useAuth() {
     ...state,
     signup,
     login,
+    verify2FA,
     unlock,
     recover,
     changePassword,

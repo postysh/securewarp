@@ -79,6 +79,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
+  // 2FA setup state
+  const [totpSetup, setTotpSetup] = useState<{ uri: string; secret: string } | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [totpStatus, setTotpStatus] = useState<string | null>(null);
+  const [totpEnabled, setTotpEnabled] = useState<boolean | null>(null);
+  const [disableCode, setDisableCode] = useState("");
   const [storageUsage, setStorageUsage] = useState<{
     usedBytes: number; maxBytes: number;
     filesBytes: number; filesCount: number;
@@ -128,6 +134,18 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       }
     }
   }, [open, profileLoaded]);
+
+  // Fetch 2FA status when security tab opens.
+  useEffect(() => {
+    if (open && activeTab === "security" && totpEnabled === null) {
+      fetch("/api/auth/profile")
+        .then((r) => r.json())
+        .then((d) => {
+          setTotpEnabled(Boolean(d.totpEnabled));
+        })
+        .catch(() => {});
+    }
+  }, [open, activeTab, totpEnabled]);
 
   useEffect(() => {
     if (open && activeTab === "storage" && !storageUsage) {
@@ -318,7 +336,149 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </div>
               </div>
             )}
-            <SettingRow label="Zero-knowledge architecture" description="Your data is encrypted client-side before it reaches our servers">
+            <SettingRow
+              label="Two factor authentication"
+              description={
+                totpEnabled
+                  ? "TOTP is active. You need your authenticator app to sign in."
+                  : "Add a second layer of protection with an authenticator app."
+              }
+            >
+              {totpEnabled === null ? (
+                <span className="text-[11px] text-text-disabled">Loading...</span>
+              ) : totpEnabled && !totpSetup ? (
+                /* Disable flow */
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={disableCode}
+                    onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="Enter code"
+                    className="w-[100px] h-[28px] px-2 rounded-[6px] bg-bg-field border border-border-secondary text-[12px] font-mono text-center text-text-primary focus:border-accent-green focus:outline-none"
+                  />
+                  <button
+                    disabled={disableCode.length !== 6}
+                    onClick={async () => {
+                      setTotpStatus(null);
+                      const res = await fetch("/api/auth/2fa/disable", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ code: disableCode }),
+                      });
+                      if (res.ok) {
+                        setTotpEnabled(false);
+                        setDisableCode("");
+                        setTotpStatus("Two factor authentication disabled.");
+                      } else {
+                        const d = await res.json().catch(() => ({}));
+                        setTotpStatus(d.error || "Failed to disable.");
+                      }
+                    }}
+                    className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-accent-red border border-accent-red/30 hover:bg-accent-red/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
+                  >
+                    Disable
+                  </button>
+                </div>
+              ) : !totpSetup ? (
+                /* Enable — start setup */
+                <button
+                  onClick={async () => {
+                    setTotpStatus(null);
+                    const res = await fetch("/api/auth/2fa/setup", { method: "POST" });
+                    if (res.ok) {
+                      const d = await res.json();
+                      setTotpSetup({ uri: d.uri, secret: d.secret });
+                    } else {
+                      const d = await res.json().catch(() => ({}));
+                      setTotpStatus(d.error || "Setup failed.");
+                    }
+                  }}
+                  className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer"
+                >
+                  Enable
+                </button>
+              ) : null}
+            </SettingRow>
+
+            {/* 2FA setup flow — show QR + verify */}
+            {totpSetup && (
+              <div className="py-4 space-y-4 animate-fade-in">
+                <div className="flex flex-col items-center gap-3">
+                  <p className="text-[12px] text-text-secondary text-center">
+                    Scan this QR code with your authenticator app, then enter the 6 digit code below.
+                  </p>
+                  {/* QR code rendered as an image from the otpauth URI.
+                      We use a Google Charts API fallback since it's simpler
+                      than bundling a QR renderer. The URI contains no
+                      secrets beyond the TOTP secret itself (which is
+                      already displayed below as text). */}
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(totpSetup.uri)}`}
+                    alt="TOTP QR code"
+                    width={180}
+                    height={180}
+                    className="rounded-lg"
+                    style={{ imageRendering: "pixelated" }}
+                  />
+                  <div className="text-center">
+                    <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-1">Manual entry key</p>
+                    <p className="text-[12px] font-mono text-text-secondary select-all break-all">
+                      {totpSetup.secret}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                    className="flex-1 h-[36px] px-3 rounded-[8px] bg-bg-field border border-border-secondary text-[14px] font-mono text-center tracking-[0.2em] text-text-primary focus:border-accent-green focus:outline-none"
+                  />
+                  <button
+                    disabled={totpCode.length !== 6}
+                    onClick={async () => {
+                      setTotpStatus(null);
+                      const res = await fetch("/api/auth/2fa/verify-setup", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ secret: totpSetup.secret, code: totpCode }),
+                      });
+                      if (res.ok) {
+                        setTotpEnabled(true);
+                        setTotpSetup(null);
+                        setTotpCode("");
+                        setTotpStatus("Two factor authentication enabled.");
+                      } else {
+                        const d = await res.json().catch(() => ({}));
+                        setTotpStatus(d.error || "Invalid code.");
+                      }
+                    }}
+                    className="h-[36px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-40 disabled:cursor-default"
+                  >
+                    Verify
+                  </button>
+                  <button
+                    onClick={() => { setTotpSetup(null); setTotpCode(""); }}
+                    className="h-[36px] px-3 rounded-[8px] text-[12px] text-text-tertiary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {totpStatus && (
+              <div className="py-2">
+                <p className="text-[12px] text-accent-green">{totpStatus}</p>
+              </div>
+            )}
+
+            <SettingRow label="Zero knowledge architecture" description="Your data is encrypted client side before it reaches our servers">
               <div className="flex items-center gap-2">
                 <span className="flex items-center gap-1 text-[11px] text-accent-green"><HugeiconsIcon icon={Shield01Icon} size={12} /> Active</span>
               </div>
