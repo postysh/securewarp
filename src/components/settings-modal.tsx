@@ -414,19 +414,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <p className="text-[12px] text-text-secondary text-center">
                     Scan this QR code with your authenticator app, then enter the 6 digit code below.
                   </p>
-                  {/* QR code rendered as an image from the otpauth URI.
-                      We use a Google Charts API fallback since it's simpler
-                      than bundling a QR renderer. The URI contains no
-                      secrets beyond the TOTP secret itself (which is
-                      already displayed below as text). */}
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(totpSetup.uri)}`}
-                    alt="TOTP QR code"
-                    width={180}
-                    height={180}
-                    className="rounded-lg"
-                    style={{ imageRendering: "pixelated" }}
-                  />
+                  <QrImage data={totpSetup.uri} />
                   <div className="text-center">
                     <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-1">Manual entry key</p>
                     <p className="text-[12px] font-mono text-text-secondary select-all break-all">
@@ -801,5 +789,33 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         <RecoveryKeyModal open={true} onClose={auth.dismissRecoveryKey} recoveryKey={auth.recoveryKey} />
       )}
     </>
+  );
+}
+
+/**
+ * Client-side QR code. Generates a data: URI so the TOTP secret
+ * never leaves the browser (no external API call, no CSP issue).
+ */
+function QrImage({ data }: { data: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    import("qrcode").then((QRCode) => {
+      QRCode.toDataURL(data, { width: 180, margin: 1 }).then((url: string) => {
+        if (!cancelled) setSrc(url);
+      });
+    });
+    return () => { cancelled = true; };
+  }, [data]);
+
+  if (!src) return <div style={{ width: 180, height: 180, borderRadius: 8, background: "var(--bg-field-default)" }} />;
+  return (
+    <img
+      src={src}
+      alt="TOTP QR code"
+      width={180}
+      height={180}
+      className="rounded-lg"
+    />
   );
 }
