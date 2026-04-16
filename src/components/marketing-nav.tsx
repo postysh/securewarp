@@ -1,83 +1,170 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useRef, useCallback } from "react"
-import Link from "next/link"
-import { HugeiconsIcon } from "@hugeicons/react"
-import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon"
+import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
-export function MarketingNav() {
-  const [scrolled, setScrolled] = useState(false)
-  const timeout = useRef<ReturnType<typeof setTimeout>>(null)
-
-  const onScroll = useCallback(() => {
-    const y = window.scrollY
-    if (y > 20 && !scrolled) {
-      if (timeout.current) clearTimeout(timeout.current)
-      setScrolled(true)
-    } else if (y <= 5 && scrolled) {
-      if (timeout.current) clearTimeout(timeout.current)
-      timeout.current = setTimeout(() => setScrolled(false), 150)
-    }
-  }, [scrolled])
+/**
+ * Decrypt-style reveal for the SECUREWARP logo. Each slot starts as
+ * `*`, cycles through random glyphs briefly, then locks to the real
+ * letter left-to-right. Monospace + tabular-nums keeps every slot
+ * the same pixel width so the nav pill doesn't jitter.
+ *
+ * After the reveal completes the logo becomes a button that
+ * smooth-scrolls to the top and clears any `#hash` from the URL so
+ * refreshing the page doesn't jump back to the last anchor.
+ */
+function LogoReveal({ text }: { text: string }) {
+  const [display, setDisplay] = useState<string[]>(() => text.split("").map(() => "*"));
+  const [revealed, setRevealed] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    onScroll()
-    window.addEventListener("scroll", onScroll, { passive: true })
+    const FRAME_MS = 40;
+    const REVEAL_DELAY = 110;
+    const CYCLES_PER_SLOT = 5;
+    const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ*/#@!$%&+<>?";
+
+    let cancelled = false;
+    const slots = text.split("");
+    const locked = slots.map(() => false);
+    const current = slots.map(() => "*");
+    let tick = 0;
+    const timer = setInterval(() => {
+      if (cancelled) return;
+      tick++;
+      for (let i = 0; i < slots.length; i++) {
+        if (locked[i]) continue;
+        const startTick = Math.floor((i * REVEAL_DELAY) / FRAME_MS);
+        if (tick < startTick) continue;
+        const elapsed = tick - startTick;
+        if (elapsed >= CYCLES_PER_SLOT) {
+          current[i] = slots[i];
+          locked[i] = true;
+        } else {
+          current[i] = GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+        }
+      }
+      setDisplay([...current]);
+      if (locked.every(Boolean)) {
+        clearInterval(timer);
+        setRevealed(true);
+      }
+    }, FRAME_MS);
     return () => {
-      window.removeEventListener("scroll", onScroll)
-      if (timeout.current) clearTimeout(timeout.current)
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [text]);
+
+  const handleClick = () => {
+    if (typeof window === "undefined") return;
+    // Off the landing page, the logo should take users home. When
+    // already on the landing, scroll to the top and clear any
+    // anchor hash so a refresh doesn't jump back down.
+    if (pathname !== "/") {
+      router.push("/");
+      return;
     }
-  }, [onScroll])
+    if (window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch { window.scrollTo(0, 0); }
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  };
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 pointer-events-none">
-      <div className="flex justify-center pt-3 px-6">
-      <nav
-        style={{
-          maxWidth: scrolled ? "820px" : "1024px",
-          padding: scrolled ? "0 10px 0 20px" : "0 4px",
-          gap: scrolled ? "16px" : "0px",
-          borderColor: scrolled ? "rgba(255,255,255,0.08)" : "transparent",
-          backgroundColor: scrolled ? "rgba(255,255,255,0.04)" : "transparent",
-          boxShadow: scrolled ? "0 25px 50px -12px rgba(0,0,0,0.25)" : "none",
-          backdropFilter: scrolled ? "blur(64px)" : "none",
-          WebkitBackdropFilter: scrolled ? "blur(64px)" : "none",
-        }}
-        className="flex items-center h-14 w-full rounded-2xl border transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] pointer-events-auto"
-      >
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 shrink-0 no-underline">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent-green">
-            <HugeiconsIcon icon={Shield01Icon} size={14} color="white" />
-          </div>
-          <span className="text-lg font-semibold text-text-primary">SecureWarp</span>
-        </Link>
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={!revealed}
+      aria-label={
+        revealed
+          ? pathname === "/"
+            ? `${text}. Scroll to top`
+            : `${text}. Home`
+          : text
+      }
+      style={{
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        margin: 0,
+        color: "inherit",
+        font: "inherit",
+        cursor: revealed ? "pointer" : "default",
+        fontFamily: "var(--font-geist-mono), monospace",
+        fontVariantNumeric: "tabular-nums",
+        letterSpacing: 1,
+      }}
+    >
+      {display.join("")}
+    </button>
+  );
+}
 
-        {/* Links — centered */}
-        <div className="flex-1 flex items-center justify-center gap-0.5">
-          <Link href="#features" className="px-2.5 py-2 text-[13px] text-text-disabled hover:text-text-primary transition-colors rounded-lg hover:bg-cta-nav-hover no-underline">
-            Features
-          </Link>
-          <Link href="#pricing" className="px-2.5 py-2 text-[13px] text-text-disabled hover:text-text-primary transition-colors rounded-lg hover:bg-cta-nav-hover no-underline">
-            Pricing
-          </Link>
-          <Link href="#" className="px-2.5 py-2 text-[13px] text-text-disabled hover:text-text-primary transition-colors rounded-lg hover:bg-cta-nav-hover no-underline">
-            Security
-          </Link>
-          <Link href="#" className="px-2.5 py-2 text-[13px] text-text-disabled hover:text-text-primary transition-colors rounded-lg hover:bg-cta-nav-hover no-underline">
-            About
-          </Link>
-        </div>
+/**
+ * Floating nav pill used on every marketing page (landing, about).
+ * `current` highlights the matching link so users know where they
+ * are. Features/Support always anchor back to landing because those
+ * sections live on /.
+ */
+export function MarketingNav({ current }: { current?: "about" | "features" | "support" } = {}) {
+  const linkStyle = (active: boolean): React.CSSProperties => ({
+    padding: "8px 16px",
+    fontSize: 14,
+    color: active ? "white" : "rgba(255,255,255,0.7)",
+    textDecoration: "none",
+    fontWeight: active ? 500 : 400,
+  });
 
-        {/* Status badge */}
-        <div className="shrink-0">
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-accent-green/20 bg-accent-green/10 px-3 py-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent-green" />
-            <span className="text-[11px] font-medium text-accent-green">In Development</span>
-          </span>
-        </div>
-      </nav>
-      </div>
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: "50%",
+        top: 20,
+        transform: "translateX(-50%)",
+        display: "flex",
+        alignItems: "center",
+        gap: 0,
+        background: "rgba(30,30,30,0.95)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        borderRadius: 12,
+        padding: "6px 6px 6px 10px",
+        zIndex: 99999,
+      }}
+    >
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 16px 8px 6px", fontSize: 14, fontWeight: 600, color: "white", letterSpacing: 0.5 }}>
+        <LogoReveal text="SECUREWARP" />
+        <span
+          style={{
+            fontSize: 9,
+            fontFamily: "var(--font-geist-mono), monospace",
+            fontWeight: 600,
+            letterSpacing: 1.5,
+            color: "rgba(110,210,170,0.95)",
+            background: "rgba(110,210,170,0.12)",
+            border: "1px solid rgba(110,210,170,0.25)",
+            padding: "2px 6px",
+            borderRadius: 4,
+            lineHeight: 1,
+          }}
+          aria-label="Beta product"
+        >
+          BETA
+        </span>
+      </span>
+      <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.15)" }} />
+      <Link href="/about" style={linkStyle(current === "about")}>About</Link>
+      <Link href="/#features" style={linkStyle(current === "features")}>Features</Link>
+      <Link href="#" style={linkStyle(current === "support")}>Support</Link>
+      <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
+      <Link href="/login" style={{ padding: "8px 14px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Log in</Link>
+      <Link href="/signup" style={{ padding: "8px 14px", fontSize: 14, fontWeight: 500, color: "#111", background: "white", borderRadius: 8, textDecoration: "none" }}>Get Started</Link>
     </div>
-  )
+  );
 }

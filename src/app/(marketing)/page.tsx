@@ -3,6 +3,16 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { FloatingParticles } from "@/components/floating-particles";
+import { MarketingNav } from "@/components/marketing-nav";
+import { MarketingFooter } from "@/components/marketing-footer";
+import {
+  SECTION_MAX,
+  MOCKUP_MAX,
+  SECTION_PAD_Y,
+  GREEN,
+  EYEBROW_STYLE,
+  H2_STYLE,
+} from "@/lib/marketing-style";
 import { HugeiconsIcon } from "@hugeicons/react";
 import HardDriveIcon from "@hugeicons/core-free-icons/HardDriveIcon";
 import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
@@ -30,149 +40,9 @@ import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import Key01Icon from "@hugeicons/core-free-icons/Key01Icon";
 
-const GREEN = "#04a45c";
-
-// Unified layout constants. Every content section uses SECTION_MAX;
-// the dashboard mockup is the one intentional wider moment because
-// it's the visual focal point. SECTION_PAD_Y normalizes the vertical
-// rhythm so readers don't ping-pong between wide/narrow/tall/short.
-const SECTION_MAX = 1200;
-const MOCKUP_MAX = 1400;
-const SECTION_PAD_Y = 96;
-
-const EYEBROW_STYLE: React.CSSProperties = {
-  display: "inline-block",
-  fontSize: 11,
-  fontFamily: "var(--font-geist-mono), monospace",
-  textTransform: "uppercase",
-  letterSpacing: 2,
-  color: "rgba(255,255,255,0.4)",
-  marginBottom: 14,
-};
-
-const H2_STYLE: React.CSSProperties = {
-  fontSize: "clamp(28px, 3.5vw, 40px)",
-  fontWeight: 700,
-  color: "white",
-  letterSpacing: -1.2,
-  lineHeight: 1.12,
-  margin: 0,
-};
-
-/**
- * Logo reveal animation: each character starts as `*`, then cycles
- * through random glyphs for a brief moment before resolving to the
- * real letter. Lands left-to-right like a decryption sequence —
- * fits the zero-knowledge positioning.
- *
- * The string width stays fixed throughout the animation because
- * every in-between glyph is the same single-character monospace
- * width, so the nav pill doesn't reflow during the reveal.
- */
-function LogoReveal({ text }: { text: string }) {
-  // One cycle char per position. Starts with `*` for every slot, gets
-  // resolved to the real letter when that position's turn comes.
-  const [display, setDisplay] = useState<string[]>(() => text.split("").map(() => "*"));
-  const [revealed, setRevealed] = useState(false);
-
-  useEffect(() => {
-    const FRAME_MS = 40;          // glitch cycle speed per position
-    const REVEAL_DELAY = 110;     // delay between each position locking in
-    const CYCLES_PER_SLOT = 5;    // how many random chars flash before the real letter
-    const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ*/#@!$%&+<>?";
-
-    let cancelled = false;
-    const slots = text.split("");
-    const locked = slots.map(() => false);
-    const current = slots.map(() => "*");
-
-    // Drive the animation from a single interval so all still-cycling
-    // positions update in sync. Once a position is locked we stop
-    // scrambling it; when every position is locked we stop the loop.
-    let tick = 0;
-    const timer = setInterval(() => {
-      if (cancelled) return;
-      tick++;
-      for (let i = 0; i < slots.length; i++) {
-        if (locked[i]) continue;
-        // Only start cycling a position after its reveal delay has
-        // elapsed. Before that, leave it as `*`.
-        const startTick = Math.floor((i * REVEAL_DELAY) / FRAME_MS);
-        if (tick < startTick) continue;
-        const elapsed = tick - startTick;
-        if (elapsed >= CYCLES_PER_SLOT) {
-          current[i] = slots[i];
-          locked[i] = true;
-        } else {
-          current[i] = GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
-        }
-      }
-      setDisplay([...current]);
-      if (locked.every(Boolean)) {
-        clearInterval(timer);
-        setRevealed(true);
-      }
-    }, FRAME_MS);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [text]);
-
-  const handleClick = () => {
-    if (typeof window === "undefined") return;
-    // Clear any hash (e.g. #features) so refreshing the page doesn't
-    // restore the previous anchor and jump the viewport back down.
-    // Use replaceState instead of assigning location.hash to avoid
-    // pushing a history entry for the "go to top" action.
-    if (window.location.hash) {
-      window.history.replaceState(
-        null,
-        "",
-        window.location.pathname + window.location.search,
-      );
-    }
-    // Try the modern smooth API; fall back to direct scrollTop if
-    // a browser or user preference (prefers-reduced-motion) ignores
-    // it. Also try both documentElement and body for cross-browser
-    // coverage — Safari historically needed one or the other.
-    try {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch {
-      window.scrollTo(0, 0);
-    }
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={!revealed}
-      aria-label={revealed ? `${text} — scroll to top` : text}
-      style={{
-        background: "transparent",
-        border: "none",
-        padding: 0,
-        margin: 0,
-        color: "inherit",
-        font: "inherit",
-        // During the reveal the button is non-interactive so users
-        // can't trigger a scroll before the name finishes animating.
-        cursor: revealed ? "pointer" : "default",
-        fontFamily: "var(--font-geist-mono), monospace",
-        // Monospace + tabular-nums keeps every slot the same pixel
-        // width so the nav pill doesn't jitter as glyphs swap.
-        fontVariantNumeric: "tabular-nums",
-        letterSpacing: 1,
-      }}
-    >
-      {display.join("")}
-    </button>
-  );
-}
+// Shared layout tokens live in @/lib/marketing-style so the about
+// page and any future marketing surfaces stay in lockstep. The nav
+// + footer have moved to @/components/marketing-*.tsx.
 
 /**
  * Deterministic pseudo-ciphertext. Takes a seed string (the real
@@ -409,7 +279,7 @@ function PasswordKeyTile() {
         {pretty || <span style={{ color: "rgba(255,255,255,0.3)" }}>—</span>}
       </div>
       <p style={TILE_FOOTER_STYLE}>
-        Memory-hard hashing means even a leaked verifier is expensive to brute-force.
+        Memory hard hashing means even a leaked verifier is expensive to brute force.
       </p>
     </div>
   );
@@ -668,7 +538,7 @@ function TryItYourself() {
     <section style={{ padding: `${SECTION_PAD_Y}px 32px`, maxWidth: SECTION_MAX, margin: "0 auto" }}>
       <div style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 48px" }}>
         <span style={EYEBROW_STYLE}>Try it yourself</span>
-        <h2 style={H2_STYLE}>Four ways to feel zero-knowledge.</h2>
+        <h2 style={H2_STYLE}>Four ways to feel zero knowledge.</h2>
       </div>
       <div className="grid gap-5 grid-cols-1 md:grid-cols-2">
         <EncryptPlayground />
@@ -696,41 +566,12 @@ export default function Home() {
           motion without competing with the content. */}
       <FloatingParticles count={60} />
 
-      {/* Floating nav pill */}
-      <div style={{ position: "fixed", left: "50%", top: 20, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 0, background: "rgba(30,30,30,0.95)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderRadius: 12, padding: "6px 6px 6px 10px", zIndex: 99999 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 16px 8px 6px", fontSize: 14, fontWeight: 600, color: "white", letterSpacing: 0.5 }}>
-          <LogoReveal text="SECUREWARP" />
-          <span
-            style={{
-              fontSize: 9,
-              fontFamily: "var(--font-geist-mono), monospace",
-              fontWeight: 600,
-              letterSpacing: 1.5,
-              color: "rgba(110,210,170,0.95)",
-              background: "rgba(110,210,170,0.12)",
-              border: "1px solid rgba(110,210,170,0.25)",
-              padding: "2px 6px",
-              borderRadius: 4,
-              lineHeight: 1,
-            }}
-            aria-label="Beta product"
-          >
-            BETA
-          </span>
-        </span>
-        <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.15)" }} />
-        <Link href="#" style={{ padding: "8px 16px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>About</Link>
-        <Link href="#features" style={{ padding: "8px 16px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Features</Link>
-        <Link href="#" style={{ padding: "8px 16px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Support</Link>
-        <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
-        <Link href="/login" style={{ padding: "8px 14px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Log in</Link>
-        <Link href="/signup" style={{ padding: "8px 14px", fontSize: 14, fontWeight: 500, color: "#111", background: "white", borderRadius: 8, textDecoration: "none" }}>Get Started</Link>
-      </div>
+      <MarketingNav />
 
       {/* Hero copy */}
       <section style={{ padding: "140px 32px 0", maxWidth: SECTION_MAX, margin: "0 auto", textAlign: "center" }}>
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
-          <span style={EYEBROW_STYLE}>Zero-knowledge cloud drive</span>
+          <span style={EYEBROW_STYLE}>Zero knowledge cloud drive</span>
           <h1 style={{ ...H2_STYLE, fontSize: "clamp(32px, 4.2vw, 48px)", margin: "0 0 18px" }}>
             The cloud drive
             <br />
@@ -1121,7 +962,7 @@ export default function Home() {
             {
               icon: UserAdd01Icon,
               accent: "rgb(120,150,220)",
-              eyebrow: "Zero-knowledge sharing",
+              eyebrow: "Zero knowledge sharing",
               title: "Share without trusting the middleman",
               body:
                 "Grant access by wrapping file keys directly to a collaborator's public key, peer to peer. Revoke someone and we rotate the key forward so old devices can't read new content.",
@@ -1239,7 +1080,7 @@ export default function Home() {
                 { what: "File contents", why: "Every byte is encrypted in your browser before upload." },
                 { what: "Filenames and folder names", why: "Stored as ciphertext alongside the content." },
                 { what: "Your password", why: "SRP-6a means your password never leaves your device." },
-                { what: "Your recovery phrase", why: "Generated client-side, we only store a hash." },
+                { what: "Your recovery phrase", why: "Generated client side, we only store a hash." },
                 { what: "What's inside a shared link", why: "The link key lives in the URL fragment, which browsers never send to us." },
                 { what: "Who a collaborator shares with downstream", why: "Re-shares wrap keys directly between client devices." },
               ].map((item) => (
@@ -1303,144 +1144,7 @@ export default function Home() {
         </p>
       </section>
 
-      {/* Footer. Small, on-brand, no illustration; matches the rest
-          of the landing's rhythm with a SECTION_MAX container and
-          monospace eyebrows. Links are placeholders (#) for the
-          pages that don't exist yet. */}
-      <footer style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 48, padding: `48px 32px 32px` }}>
-        <div style={{ maxWidth: SECTION_MAX, margin: "0 auto" }}>
-          <div
-            style={{
-              display: "grid",
-              gap: 40,
-              gridTemplateColumns: "1.2fr 1fr 1fr 1fr",
-            }}
-            className="footer-grid"
-          >
-            {/* Brand block */}
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: "white", letterSpacing: 0.5, fontFamily: "var(--font-geist-mono), monospace" }}>
-                  SECUREWARP
-                </span>
-                <span
-                  style={{
-                    fontSize: 9,
-                    fontFamily: "var(--font-geist-mono), monospace",
-                    fontWeight: 600,
-                    letterSpacing: 1.5,
-                    color: "rgba(110,210,170,0.95)",
-                    background: "rgba(110,210,170,0.12)",
-                    border: "1px solid rgba(110,210,170,0.25)",
-                    padding: "2px 6px",
-                    borderRadius: 4,
-                    lineHeight: 1,
-                  }}
-                >
-                  BETA
-                </span>
-              </div>
-              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, margin: 0, maxWidth: 280 }}>
-                The cloud drive that can&apos;t read your files. End-to-end encrypted. Zero-knowledge by design.
-              </p>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 18 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(110,210,170,0.9)", boxShadow: "0 0 8px rgba(110,210,170,0.6)" }} />
-                <span style={{ fontSize: 11, fontFamily: "var(--font-geist-mono), monospace", color: "rgba(255,255,255,0.45)", letterSpacing: 0.5 }}>
-                  All systems operational
-                </span>
-              </div>
-            </div>
-
-            {/* Link columns */}
-            {[
-              {
-                heading: "Product",
-                links: [
-                  { label: "Features", href: "#features" },
-                  { label: "Pricing", href: "#" },
-                  { label: "Changelog", href: "#" },
-                  { label: "Roadmap", href: "#" },
-                ],
-              },
-              {
-                heading: "Company",
-                links: [
-                  { label: "About", href: "#" },
-                  { label: "Blog", href: "#" },
-                  { label: "Contact", href: "#" },
-                  { label: "Support", href: "#" },
-                ],
-              },
-              {
-                heading: "Legal",
-                links: [
-                  { label: "Privacy", href: "#" },
-                  { label: "Terms", href: "#" },
-                  { label: "Security", href: "#" },
-                  { label: "Threat model", href: "#" },
-                ],
-              },
-            ].map((col) => (
-              <div key={col.heading}>
-                <div style={EYEBROW_STYLE}>{col.heading}</div>
-                <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-                  {col.links.map((l) => (
-                    <li key={l.label}>
-                      <Link
-                        href={l.href}
-                        style={{
-                          fontSize: 13,
-                          color: "rgba(255,255,255,0.6)",
-                          textDecoration: "none",
-                          transition: "color 160ms ease",
-                        }}
-                      >
-                        {l.label}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-
-          <div
-            style={{
-              marginTop: 48,
-              paddingTop: 20,
-              borderTop: "1px solid rgba(255,255,255,0.06)",
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 16,
-              alignItems: "center",
-              justifyContent: "space-between",
-              fontSize: 12,
-              color: "rgba(255,255,255,0.35)",
-            }}
-          >
-            <span style={{ fontFamily: "var(--font-geist-mono), monospace" }}>
-              © {new Date().getFullYear()} SecureWarp. All rights reserved.
-            </span>
-            <span style={{ fontFamily: "var(--font-geist-mono), monospace", letterSpacing: 1 }}>
-              XSalsa20-Poly1305 · Argon2id · SRP-6a · BIP39
-            </span>
-          </div>
-        </div>
-
-        {/* Responsive: collapse the 4-column grid on small viewports. */}
-        <style>{`
-          @media (max-width: 768px) {
-            .footer-grid {
-              grid-template-columns: repeat(2, 1fr) !important;
-            }
-          }
-          @media (max-width: 480px) {
-            .footer-grid {
-              grid-template-columns: 1fr !important;
-            }
-          }
-        `}</style>
-      </footer>
+      <MarketingFooter />
     </div>
   );
 }
