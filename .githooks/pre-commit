@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+#
+# Pre-commit: fast security checks (~15s). Catches secrets, dependency
+# CVEs, static analysis errors, and type errors before they land in
+# git history. Blocks the commit if any check fails.
+#
+# To install: git config core.hooksPath .githooks
+
+set -euo pipefail
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+echo ""
+echo "🔒 Running pre-commit security scan..."
+echo ""
+
+FAILURES=0
+
+# 1. Secrets in staged files (fastest, most critical)
+if command -v gitleaks &>/dev/null; then
+  if ! gitleaks protect --staged --no-banner --exit-code 1 2>/dev/null; then
+    echo "❌ Gitleaks found secrets in staged files!"
+    ((FAILURES++))
+  else
+    echo "✓ No secrets in staged files"
+  fi
+fi
+
+# 2. npm audit (fast, cached)
+if ! npm audit --audit-level=high 2>/dev/null | grep -q "found 0"; then
+  echo "❌ npm audit found high/critical vulnerabilities"
+  ((FAILURES++))
+else
+  echo "✓ Dependencies clean"
+fi
+
+# 3. TypeScript type check
+if ! npx tsc --noEmit --pretty false 2>/dev/null; then
+  echo "❌ TypeScript type errors"
+  ((FAILURES++))
+else
+  echo "✓ TypeScript clean"
+fi
+
+# 4. Tests
+if ! npm test -- --run 2>/dev/null | tail -1 | grep -q "passed"; then
+  echo "❌ Tests failed"
+  ((FAILURES++))
+else
+  echo "✓ Tests pass"
+fi
+
+echo ""
+if [[ $FAILURES -gt 0 ]]; then
+  echo "🚫 Commit blocked: $FAILURES check(s) failed."
+  echo "   Fix the issues above, then try again."
+  exit 1
+fi
+
+echo "✅ All pre-commit checks passed."
+echo ""

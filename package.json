@@ -11,7 +11,10 @@
     "test:watch": "vitest",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "security": "bash scripts/security-scan.sh quick",
+    "security:full": "bash scripts/security-scan.sh full",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.1.1",

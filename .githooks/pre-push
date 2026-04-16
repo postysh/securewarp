@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#
+# Pre-push: full security scan before code reaches the remote.
+# Includes everything from pre-commit PLUS static analysis (Semgrep),
+# build verification, and a DAST scan against production.
+#
+# Takes ~2-3 minutes. Blocks the push if any check fails.
+#
+# To install: git config core.hooksPath .githooks
+# To skip once (emergency): git push --no-verify
+
+set -euo pipefail
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+echo ""
+echo "🔒 Running pre-push security scan (full)..."
+echo ""
+
+"$REPO_ROOT/scripts/security-scan.sh" full

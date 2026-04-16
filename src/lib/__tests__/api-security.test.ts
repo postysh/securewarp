@@ -41,7 +41,7 @@ const mockSupabaseChain = {
   lt: vi.fn().mockReturnThis(),
   order: vi.fn().mockReturnThis(),
   limit: vi.fn().mockReturnThis(),
-  single: vi.fn(() => Promise.resolve({ data: null, error: { code: "PGRST116" } })),
+  single: vi.fn((): Promise<{ data: unknown; error: unknown }> => Promise.resolve({ data: null, error: { code: "PGRST116" } })),
   then: vi.fn(),
 };
 

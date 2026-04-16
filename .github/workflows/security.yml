@@ -1,0 +1,50 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Weekly cron so new vulnerability patterns are caught even when
+  # no code has changed (njsscan updates its rule set independently).
+  schedule:
+    - cron: "0 9 * * 1" # Every Monday at 9 AM UTC
+
+jobs:
+  njsscan:
+    name: njsscan (Node.js security)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: njsscan
+        uses: ajinabraham/njsscan-action@v7
+        with:
+          args: "src/ --exit-warning"
+
+  secrets:
+    name: Gitleaks (secret scanning)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependencies:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=high
