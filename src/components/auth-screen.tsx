@@ -155,54 +155,67 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
       <div className="w-full max-w-[960px] min-h-0 max-h-[95vh] md:h-[600px] rounded-3xl border border-border-tertiary overflow-hidden flex bg-bg-main" style={{ boxShadow: "var(--shadow-l2)" }}>
         {/* Left branding panel */}
         <div className="hidden lg:flex lg:w-[45%] bg-cta-primary relative overflow-hidden flex-col p-12 rounded-l-2xl">
-          <div className="relative z-10 flex items-center gap-2.5 mb-auto">
-            <div className="w-8 h-8 rounded-lg bg-accent-green flex items-center justify-center">
-              <HugeiconsIcon icon={Shield01Icon} size={16} color="white" />
+          {/* Logo — matches the nav bar: monospace, uppercase, no icon */}
+          <Link href="/" className="relative z-10 mb-auto no-underline">
+            <span className="font-semibold text-[14px] text-text-inverse" style={{ fontFamily: "var(--font-geist-mono), monospace", letterSpacing: 1 }}>
+              SECUREWARP
+            </span>
+          </Link>
+
+          {/* Main messaging */}
+          <div className="relative z-10 my-auto space-y-6">
+            <h1 className="text-[32px] font-bold text-text-inverse leading-[1.2] tracking-[-0.02em]" style={{ textWrap: "balance" }}>
+              Encrypted before it leaves your device.
+            </h1>
+            <p className="text-text-inverse/55 text-[14px] max-w-[340px] leading-relaxed" style={{ textWrap: "pretty" }}>
+              When you create an account, we generate encryption keys in your
+              browser. Your password never crosses the wire. Files are
+              unreadable without keys only you hold.
+            </p>
+
+            {/* Benefit list */}
+            <div className="space-y-3 pt-2">
+              {[
+                { label: "Files encrypted before upload", desc: "Content and filenames are ciphertext." },
+                { label: "Password never transmitted", desc: "We verify you know it without seeing it." },
+                { label: "24 word recovery phrase", desc: "Your second path in. We never see it." },
+              ].map((item) => (
+                <div key={item.label} className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-md bg-accent-green/15 flex items-center justify-center mt-0.5 shrink-0">
+                    <div className="w-1.5 h-1.5 rounded-full bg-accent-green" />
+                  </div>
+                  <div>
+                    <div className="text-text-inverse/90 text-[13px] font-medium">{item.label}</div>
+                    <div className="text-text-inverse/40 text-[12px] leading-relaxed mt-0.5" style={{ textWrap: "pretty" }}>{item.desc}</div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <span className="font-semibold text-[15px] text-text-inverse tracking-[-0.01em]">
-              SecureWarp
+          </div>
+
+          {/* Bottom strip — aligned with the bullet list above via
+              the same gap-3 + w-5 icon column so the dot sits on
+              the same vertical axis as the green bullets. */}
+          <div className="relative z-10 mt-auto flex items-center gap-3">
+            <div className="w-5 flex items-center justify-center shrink-0">
+              <div className="w-1.5 h-1.5 rounded-full bg-accent-green" style={{ boxShadow: "0 0 6px rgba(72,191,145,0.5)" }} />
+            </div>
+            <span className="text-text-inverse/30 text-[11px] font-mono">
+              Zero knowledge architecture
             </span>
           </div>
-
-          <div className="relative z-10 my-auto space-y-8">
-            <h1 className="text-[36px] font-bold text-text-inverse leading-[1.15] tracking-[-0.02em]">
-              Your files.<br />Your keys.<br />Zero knowledge.
-            </h1>
-            <p className="text-text-inverse/60 text-[15px] max-w-[380px] leading-relaxed">
-              End-to-end encrypted cloud storage where only you hold the keys.
-            </p>
-            <div className="space-y-4 text-text-inverse/50 text-[13px]">
-              <div className="flex items-center gap-2">
-                <div className="w-1 h-1 rounded-full bg-accent-green shrink-0" />
-                Client-side encryption, keys never leave your browser
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-1 h-1 rounded-full bg-accent-green shrink-0" />
-                SRP authentication, password never sent to server
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-1 h-1 rounded-full bg-accent-green shrink-0" />
-                Curve25519, xsalsa20-poly1305, Argon2id
-              </div>
-            </div>
-          </div>
-
-          <p className="relative z-10 text-text-inverse/30 text-[11px] font-mono mt-auto">
-            Zero-knowledge architecture
-          </p>
         </div>
 
         {/* Right form panel */}
         <div className="flex-1 flex items-center justify-center p-12 overflow-y-auto">
           <FadeIn keyVal={lockCache ? "unlock" : mode}>
           <div className="w-full max-w-[340px]">
-            {/* Mobile logo */}
-            <div className="lg:hidden flex items-center gap-2 mb-8">
-              <div className="w-7 h-7 rounded-lg bg-accent-green flex items-center justify-center">
-                <HugeiconsIcon icon={Shield01Icon} size={16} color="white" />
-              </div>
-              <span className="font-semibold text-[14px] text-text-primary">SecureWarp</span>
-            </div>
+            {/* Mobile logo — matches nav bar style */}
+            <Link href="/" className="lg:hidden mb-8 no-underline inline-block">
+              <span className="font-semibold text-[14px] text-text-primary" style={{ fontFamily: "var(--font-geist-mono), monospace", letterSpacing: 1 }}>
+                SECUREWARP
+              </span>
+            </Link>
 
             {mode === "signup" && signupsEnabled === null ? (
               /* Config fetch in flight on signup mount. Render nothing
@@ -383,16 +396,6 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                   {password && confirmPassword && password !== confirmPassword && (
                     <p className="text-[11px] text-accent-red mt-1.5 px-1">Passwords don&apos;t match</p>
                   )}
-                </div>
-              )}
-
-              {!lockCache && mode === "signup" && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-accent-green-bg text-[12px] text-accent-green">
-                  <HugeiconsIcon icon={Shield01Icon} size={16} className="mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium">Zero-knowledge auth</p>
-                    <p className="opacity-70 mt-0.5">Your password derives encryption keys locally. It never reaches our servers.</p>
-                  </div>
                 </div>
               )}
 
