@@ -11,6 +11,7 @@ import { getUploadUrl } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
 import { assertWithinQuota } from "@/lib/db/quota";
 import { getBoolFlag } from "@/lib/flags";
+import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
 // Step 1: Initialize chunked upload — creates file record, returns presigned URLs for all chunks
@@ -244,6 +245,13 @@ export async function POST(request: Request) {
         const uploadUrl = await getUploadUrl(storageKey);
         chunkUrls.push({ sequence: i, storageKey, uploadUrl });
       }
+
+      auditEvent({
+        event: "files.version_create",
+        actorUserId: session.userId,
+        targetFileId: data.fileId,
+        detail: `v${nextVersionNumber}`,
+      });
 
       return NextResponse.json({
         fileId: data.fileId,

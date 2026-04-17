@@ -128,6 +128,122 @@ export async function getFileVersion(id: string): Promise<FileVersionRow | null>
   return (data as FileVersionRow | null) || null;
 }
 
+/**
+ * Restore a file to the content of an older version. Creates a NEW
+ * version row (next monotonic number) whose content matches `source`
+ * — metadata, size, chunk count all copied — and duplicates every
+ * file_chunks row under the new version_id. R2 blobs are SHARED
+ * between the source and new version (same storage_key); delete-
+ * version paths must ref-count before purging blobs.
+ *
+ * Returns the newly-created version row so the caller can bump
+ * files.current_version_number to it.
+ */
+export async function restoreFileVersion(params: {
+  fileId: string;
+  sourceVersionId: string;
+  actorUserId: string;
+}): Promise<FileVersionRow> {
+  // Load the source version + its chunks.
+  const { data: source, error: sourceErr } = await supabase
+    .from("file_versions")
+    .select("*")
+    .eq("id", params.sourceVersionId)
+    .eq("file_id", params.fileId)
+    .single();
+  if (sourceErr || !source) {
+    throw new Error("Source version not found");
+  }
+
+  const { data: sourceChunks, error: chunksErr } = await supabase
+    .from("file_chunks")
+    .select("sequence, is_final, size_bytes, storage_key, encryption_nonce")
+    .eq("version_id", params.sourceVersionId)
+    .order("sequence");
+  if (chunksErr) throw new Error(chunksErr.message);
+
+  // Find the highest existing version_number for this file so we can
+  // allocate the next one atomically-enough. There's a TOCTOU here —
+  // two concurrent restores could race to the same number and one
+  // would fail the UNIQUE constraint. That's acceptable: the client
+  // retries and the second call wins. Restore is a rare, user-
+  // initiated action; a hot spin-lock would be overkill.
+  const { data: maxRow } = await supabase
+    .from("file_versions")
+    .select("version_number")
+    .eq("file_id", params.fileId)
+    .order("version_number", { ascending: false })
+    .limit(1)
+    .single();
+  const nextNumber =
+    ((maxRow?.version_number as number | undefined) ?? 0) + 1;
+
+  const newVersion = await createFileVersion({
+    fileId: params.fileId,
+    versionNumber: nextNumber,
+    encryptedMetadata: source.encrypted_metadata as string,
+    sizeBytes: source.size_bytes as number,
+    chunkCount: source.chunk_count as number,
+    createdByUserId: params.actorUserId,
+  });
+
+  if (sourceChunks && sourceChunks.length > 0) {
+    const rows = sourceChunks.map((c) => ({
+      file_id: params.fileId,
+      version_id: newVersion.id,
+      sequence: c.sequence,
+      is_final: c.is_final,
+      size_bytes: c.size_bytes,
+      // Shared R2 blob — same storage_key. When deleting this
+      // version later, a reference count across file_chunks decides
+      // whether to also purge the blob.
+      storage_key: c.storage_key,
+      encryption_nonce: c.encryption_nonce,
+    }));
+    const { error: insertErr } = await supabase.from("file_chunks").insert(rows);
+    if (insertErr) throw new Error(insertErr.message);
+  }
+
+  return newVersion;
+}
+
+/**
+ * Delete a specific version. The caller must ensure it's NOT the
+ * current version (that's nonsensical — there'd be no "head" to show
+ * in lists). Returns the storage_keys that became orphaned by this
+ * delete so the caller can purge R2 blobs. Keys still referenced by
+ * another version are filtered out.
+ */
+export async function deleteFileVersion(versionId: string): Promise<string[]> {
+  // Pull the chunk rows for this version BEFORE deleting so we can
+  // reference-count their storage_keys across remaining versions.
+  const { data: chunks } = await supabase
+    .from("file_chunks")
+    .select("storage_key")
+    .eq("version_id", versionId);
+
+  const storageKeys = (chunks ?? [])
+    .map((c) => c.storage_key as string)
+    .filter(Boolean);
+
+  // Delete the version row — file_chunks rows cascade.
+  const { error } = await supabase.from("file_versions").delete().eq("id", versionId);
+  if (error) throw new Error(error.message);
+
+  if (storageKeys.length === 0) return [];
+
+  // Ref-count: any storage_key still referenced by a different
+  // version stays; the rest are orphaned and safe to purge from R2.
+  const { data: stillRefed } = await supabase
+    .from("file_chunks")
+    .select("storage_key")
+    .in("storage_key", storageKeys);
+  const refedSet = new Set(
+    (stillRefed ?? []).map((r) => r.storage_key as string),
+  );
+  return storageKeys.filter((k) => !refedSet.has(k));
+}
+
 export async function createFile(data: {
   ownerId: string;
   parentId: string | null;

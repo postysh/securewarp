@@ -20,6 +20,7 @@ import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
 import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
 import PinIcon from "@hugeicons/core-free-icons/PinIcon";
 import Move01Icon from "@hugeicons/core-free-icons/Move01Icon";
+import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
 import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
 import GridViewIcon from "@hugeicons/core-free-icons/GridViewIcon";
 import LeftToRightListBulletIcon from "@hugeicons/core-free-icons/LeftToRightListBulletIcon";
@@ -38,6 +39,7 @@ const RenameModal = dynamic(() => import("./rename-modal").then((m) => ({ defaul
 const MoveModal = dynamic(() => import("./move-modal").then((m) => ({ default: m.MoveModal })), { ssr: false });
 const FilePreview = dynamic(() => import("./file-preview").then((m) => ({ default: m.FilePreview })), { ssr: false });
 const StorageQuotaModal = dynamic(() => import("./storage-quota-modal").then((m) => ({ default: m.StorageQuotaModal })), { ssr: false });
+const VersionHistoryModal = dynamic(() => import("./version-history-modal").then((m) => ({ default: m.VersionHistoryModal })), { ssr: false });
 import { ConfirmDialog } from "./confirm-dialog";
 import { WorkspaceSettings } from "./workspace-settings";
 import { WorkspaceInviteModal } from "./workspace-invite-modal";
@@ -224,6 +226,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   });
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [shareTarget, setShareTarget] = useState<DecryptedFile | null>(null);
+  const [versionHistoryTarget, setVersionHistoryTarget] = useState<DecryptedFile | null>(null);
+  const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragFileId, setDragFileId] = useState<string | null>(null);
@@ -1745,6 +1750,44 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <HugeiconsIcon icon={Download04Icon} size={14} color="var(--icon-tertiary)" /> Download
             </button>
           )}
+          {/* Version history — non-folder files only. Available to anyone
+              with access; restore/delete gated to owner inside the modal. */}
+          {fileOps.viewMode !== "trash" && !contextMenu?.isFolder && (
+            <button
+              onClick={() => {
+                if (contextMenu) {
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
+                  if (full) setVersionHistoryTarget(full);
+                }
+                setContextMenu(null);
+              }}
+              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={Clock01Icon} size={14} color="var(--icon-tertiary)" /> Version history
+            </button>
+          )}
+          {/* Replace file — owner only. Picks a file, then runs the same
+              chunked upload flow as a new upload but tagged as a new
+              version on the existing row. */}
+          {fileOps.viewMode !== "trash"
+            && !contextMenu?.isFolder
+            && fileOps.viewMode === "own"
+            && !fileOps.activeWorkspace && (
+            <button
+              onClick={() => {
+                if (!contextMenu) return;
+                setReplaceTargetId(contextMenu.fileId!);
+                setContextMenu(null);
+                // Defer the click — React needs to render the input
+                // once replaceTargetId is set before the file picker
+                // can open with the right context.
+                setTimeout(() => replaceFileInputRef.current?.click(), 50);
+              }}
+              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={Upload04Icon} size={14} color="var(--icon-tertiary)" /> Replace file...
+            </button>
+          )}
           {fileOps.viewMode !== "trash" && (
             <>
               {fileOps.callerPermission !== "viewer" && (
@@ -1889,6 +1932,47 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       <StorageQuotaModal open={quotaModalOpen} onClose={() => setQuotaModalOpen(false)} />
       <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
+      <VersionHistoryModal
+        file={
+          versionHistoryTarget
+            ? {
+                id: versionHistoryTarget.id,
+                name: versionHistoryTarget.name,
+                isOwner:
+                  keys != null &&
+                  (versionHistoryTarget.ownerEmail === keys.email ||
+                    fileOps.viewMode === "own"),
+                encryptedPrivateHierarchicalKey: versionHistoryTarget.encryptedPrivateHierarchicalKey,
+                wrappedByPublicKey: versionHistoryTarget.wrappedByPublicKey,
+                ownerPublicKey: versionHistoryTarget.ownerPublicKey,
+                encryptedSessionKeyByFile: versionHistoryTarget.encryptedSessionKeyByFile,
+                sessionKeyNonce: versionHistoryTarget.sessionKeyNonce,
+              }
+            : null
+        }
+        onClose={() => setVersionHistoryTarget(null)}
+        listVersions={fileOps.listVersions}
+        restoreVersion={fileOps.restoreVersion}
+        deleteVersion={fileOps.deleteVersion}
+        onActionComplete={() => {
+          void fileOps.fetchFiles(fileOps.currentFolder);
+        }}
+      />
+      <input
+        ref={replaceFileInputRef}
+        type="file"
+        className="hidden"
+        onChange={async (e) => {
+          const picked = e.target.files?.[0];
+          if (!picked || !replaceTargetId) return;
+          try {
+            await fileOps.replaceFile(replaceTargetId, picked);
+          } finally {
+            e.target.value = "";
+            setReplaceTargetId(null);
+          }
+        }}
+      />
       <FileDetailsModal file={detailsTarget} onClose={() => setDetailsTarget(null)} />
       <MembersModal
         open={membersOpen}

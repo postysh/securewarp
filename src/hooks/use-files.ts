@@ -785,6 +785,193 @@ export function useFiles(keys: {
   }, [keys, fetchFiles]);
 
   /**
+   * Replace the content of an existing file with a new version. Reuses
+   * the file's existing session_key + hierarchical keypair — no new
+   * wraps hit the wire, so collaborators keep working and see the new
+   * content on next fetch.
+   *
+   * Client flow:
+   *   1. Fetch the file's crypto material (if not already cached) to
+   *      recover the shared session key.
+   *   2. Encrypt each chunk of the new file with that session key.
+   *   3. new-version-init — server allocates a version_number + signed
+   *      R2 URLs.
+   *   4. PUT each chunk to R2, register it, finalize the version.
+   */
+  const replaceFile = useCallback(
+    async (existingFileId: string, newFile: File) => {
+      if (!keys) return;
+      if (newFile.size > MAX_FILE_SIZE_FREE) {
+        setState((s) => ({
+          ...s,
+          error: `File too large. Maximum is ${MAX_FILE_SIZE_FREE / 1024 / 1024} MB on the free plan.`,
+        }));
+        return;
+      }
+
+      let sessionKey: Uint8Array | null = null;
+      const chunkCount = getChunkCount(newFile.size);
+
+      try {
+        // 1. Recover the session key from the server's view of the file.
+        //    chunk-download returns everything needed to reverse the
+        //    two-layer wrap: the caller's file_keys row + the owner's
+        //    public key.
+        const dlRes = await fetch(
+          `/api/files/chunk-download?fileId=${existingFileId}`,
+        );
+        if (!dlRes.ok) {
+          setState((s) => ({ ...s, error: "Cannot access file" }));
+          return;
+        }
+        const dlData = await dlRes.json();
+        sessionKey = unwrapSessionKeyFromDownload(dlData);
+
+        // 2. Encrypt the new metadata with the SAME session key.
+        //    Captures the new filename + size at this version so the
+        //    history can show when things changed.
+        const encryptedMetadata = encryptMetadata(
+          {
+            name: newFile.name,
+            type: newFile.type || "application/octet-stream",
+            size: newFile.size,
+          },
+          sessionKey,
+        );
+
+        // 3. Ask the server to create the next version row + signed URLs.
+        const initRes = await fetch("/api/files/chunk-upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "new-version-init",
+            fileId: existingFileId,
+            encryptedMetadata: JSON.stringify(encryptedMetadata),
+            totalSizeBytes: newFile.size,
+            chunkCount,
+          }),
+        });
+        const initData = await initRes.json();
+        if (!initRes.ok) {
+          setState((s) => ({ ...s, error: initData.error ?? "Replace failed" }));
+          return;
+        }
+        const { versionId, chunkUrls } = initData;
+
+        // 4. Upload chunks with the same concurrency shape as uploadFile.
+        const chunkQueue: Promise<void>[] = [];
+        for await (const {
+          data: chunkData,
+          index,
+          isFinal,
+        } of fileChunkGenerator(newFile)) {
+          const chunkUrl = chunkUrls[index];
+          const promise = (async () => {
+            const encrypted = encryptChunk(chunkData, index, isFinal, sessionKey!);
+            const r2Res = await fetch(chunkUrl.uploadUrl, {
+              method: "PUT",
+              body: encrypted.ciphertext as unknown as BodyInit,
+              headers: { "Content-Type": "application/octet-stream" },
+            });
+            if (!r2Res.ok) throw new Error(`Chunk ${index} upload failed`);
+            await fetch("/api/files/chunk-upload", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "chunk",
+                fileId: existingFileId,
+                versionId,
+                sequence: index,
+                isFinal,
+                sizeBytes: encrypted.sizeBytes,
+                storageKey: chunkUrl.storageKey,
+                encryptionNonce: encrypted.nonce,
+              }),
+            });
+          })();
+          chunkQueue.push(promise);
+          if (chunkQueue.length >= CONCURRENT_CHUNK_UPLOADS) {
+            await Promise.race(chunkQueue);
+            chunkQueue.splice(0, chunkQueue.length - CONCURRENT_CHUNK_UPLOADS + 1);
+          }
+        }
+        await Promise.all(chunkQueue);
+
+        // 5. Finalize — server flips files.current_version_number +
+        //    denormalized metadata to this version.
+        await fetch("/api/files/chunk-upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "finalize",
+            fileId: existingFileId,
+            versionId,
+          }),
+        });
+
+        await fetchFiles(state.currentFolder);
+      } catch (err) {
+        console.error("Replace error:", err);
+        setState((s) => ({ ...s, error: "Replace failed" }));
+      } finally {
+        if (sessionKey) sessionKey.fill(0);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [keys, fetchFiles, state.currentFolder],
+  );
+
+  /** Fetch every version of a file in newest-first order. */
+  const listVersions = useCallback(async (fileId: string) => {
+    const res = await fetch(`/api/files/${fileId}/versions`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.versions ?? []) as Array<{
+      id: string;
+      versionNumber: number;
+      encryptedMetadata: string;
+      sizeBytes: number;
+      chunkCount: number;
+      createdAt: string;
+    }>;
+  }, []);
+
+  /** Restore a previous version — creates a new version copying the
+   *  source's content. Returns the new version number. */
+  const restoreVersion = useCallback(
+    async (fileId: string, versionId: string) => {
+      const res = await fetch(
+        `/api/files/${fileId}/versions/${versionId}/restore`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Restore failed");
+      }
+      const data = await res.json();
+      await fetchFiles(state.currentFolder);
+      return data as { versionId: string; versionNumber: number };
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fetchFiles, state.currentFolder],
+  );
+
+  /** Delete a past version. Rejected by the server if it's current. */
+  const deleteVersion = useCallback(
+    async (fileId: string, versionId: string) => {
+      const res = await fetch(`/api/files/${fileId}/versions/${versionId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Delete failed");
+      }
+      return (await res.json()) as { ok: boolean; orphanedStorageKeys: number };
+    },
+    [],
+  );
+
+  /**
    * Unwrap the session key from a chunk-download response. Handles
    * both the direct path (user has a file_keys row on this file) and
    * the inherited path (user has a file_keys row on an ancestor
@@ -2799,6 +2986,10 @@ export function useFiles(keys: {
     initialized,
     fetchFiles,
     uploadFile,
+    replaceFile,
+    listVersions,
+    restoreVersion,
+    deleteVersion,
     downloadFile,
     previewFile,
     createFolder,
