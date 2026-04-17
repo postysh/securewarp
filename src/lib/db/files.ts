@@ -55,6 +55,79 @@ export interface FileKeyRow {
   wrapped_by_public_key: string;
 }
 
+export interface FileVersionRow {
+  id: string;
+  file_id: string;
+  version_number: number;
+  encrypted_metadata: string;
+  size_bytes: number;
+  chunk_count: number;
+  created_at: string;
+  created_by_user_id: string | null;
+}
+
+/**
+ * Create a new version row for a file. v1 is created automatically as
+ * part of the initial upload flow; v2+ are created when a user uploads
+ * a replacement of existing content.
+ *
+ * Shared session key model: every version reuses the file's existing
+ * session_key + public_hierarchical_key, so file_keys rows stay valid
+ * across all versions. Only the ciphertext chunks and the metadata
+ * snapshot differ from version to version.
+ */
+export async function createFileVersion(data: {
+  fileId: string;
+  versionNumber: number;
+  encryptedMetadata: string;
+  sizeBytes: number;
+  chunkCount: number;
+  createdByUserId: string;
+}): Promise<FileVersionRow> {
+  const { data: row, error } = await supabase
+    .from("file_versions")
+    .insert({
+      file_id: data.fileId,
+      version_number: data.versionNumber,
+      encrypted_metadata: data.encryptedMetadata,
+      size_bytes: data.sizeBytes,
+      chunk_count: data.chunkCount,
+      created_by_user_id: data.createdByUserId,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to create file version: ${error.message}`);
+  return row as FileVersionRow;
+}
+
+/**
+ * List every version of a file in newest-first order. Caller is
+ * responsible for verifying the user has access to the file — this
+ * helper returns all versions unconditionally so it can be reused by
+ * admin paths without a second access check.
+ */
+export async function listFileVersions(fileId: string): Promise<FileVersionRow[]> {
+  const { data, error } = await supabase
+    .from("file_versions")
+    .select("*")
+    .eq("file_id", fileId)
+    .order("version_number", { ascending: false });
+  if (error) throw new Error(`Failed to list versions: ${error.message}`);
+  return (data as FileVersionRow[]) ?? [];
+}
+
+export async function getFileVersion(id: string): Promise<FileVersionRow | null> {
+  const { data, error } = await supabase
+    .from("file_versions")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error && error.code !== "PGRST116") {
+    throw new Error(`Failed to fetch version: ${error.message}`);
+  }
+  return (data as FileVersionRow | null) || null;
+}
+
 export async function createFile(data: {
   ownerId: string;
   parentId: string | null;

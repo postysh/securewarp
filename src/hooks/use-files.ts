@@ -667,7 +667,7 @@ export function useFiles(keys: {
         return;
       }
 
-      const { fileId, chunkUrls } = initData;
+      const { fileId, versionId, chunkUrls } = initData;
 
       // 3. Encrypt and upload chunks with concurrency control
       const uploadProgressBase = 15;
@@ -700,6 +700,7 @@ export function useFiles(keys: {
             body: JSON.stringify({
               action: "chunk",
               fileId,
+              versionId,
               sequence: index,
               isFinal,
               sizeBytes: encrypted.sizeBytes,
