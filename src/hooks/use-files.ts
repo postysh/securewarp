@@ -105,12 +105,31 @@ export interface Collaborator {
   permissionLevel: PermissionLevel | "owner";
 }
 
+/**
+ * A single upload's position in the floating-panel queue. Lives in
+ * hook state so the panel survives folder navigation (the file row
+ * placeholder, on the other hand, is scoped to the current folder's
+ * list and disappears when you navigate away).
+ */
+export interface UploadRecord {
+  id: string; // uuid unique per upload
+  name: string; // plaintext filename, client-side only
+  size: number;
+  progress: number; // 0-100
+  status: "uploading" | "done" | "error";
+  kind: "new" | "version"; // new upload vs. new version of existing
+  error?: string;
+  startedAt: number;
+  fileId?: string; // set after init; lets user click to reveal
+}
+
 interface UseFilesState {
   files: DecryptedFile[];
   loading: boolean;
   uploading: boolean;
   uploadStep: string | null;
   uploadProgress: number;
+  uploadQueue: UploadRecord[];
   error: string | null;
   currentFolder: string | null;
   breadcrumb: { id: string | null; name: string }[];
@@ -137,6 +156,7 @@ export function useFiles(keys: {
     uploading: false,
     uploadStep: null,
     uploadProgress: 0,
+    uploadQueue: [],
     error: null,
     currentFolder: null,
     callerPermission: null,
@@ -560,7 +580,32 @@ export function useFiles(keys: {
       uploadProgress: 5,
     };
 
-    setState((s) => ({ ...s, uploading: true, uploadStep: "Preparing...", uploadProgress: 5, error: null, files: [...s.files, placeholderFile] }));
+    // Prepend instead of append — new files belong at the top of the
+    // list so the user sees their upload progress (and the finished
+    // file once it lands) without scrolling past 100 existing items.
+    // The server already returns files newest-first, so on the next
+    // refetch the real row takes over the same position.
+    const queueId = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `u-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const queueRecord: UploadRecord = {
+      id: queueId,
+      name: file.name,
+      size: file.size,
+      progress: 5,
+      status: "uploading",
+      kind: "new",
+      startedAt: Date.now(),
+    };
+    setState((s) => ({
+      ...s,
+      uploading: true,
+      uploadStep: "Preparing...",
+      uploadProgress: 5,
+      error: null,
+      files: [placeholderFile, ...s.files],
+      uploadQueue: [queueRecord, ...s.uploadQueue],
+    }));
 
     const updateProgress = (progress: number, step: string) => {
       setState((s) => ({
@@ -568,6 +613,11 @@ export function useFiles(keys: {
         uploadStep: step,
         uploadProgress: progress,
         files: s.files.map((f) => f.id === tempId ? { ...f, uploadProgress: progress } : f),
+        // Mirror into the floating panel record so both the file-row
+        // placeholder AND the persistent panel stay in sync.
+        uploadQueue: s.uploadQueue.map((r) =>
+          r.id === queueId ? { ...r, progress } : r,
+        ),
       }));
     };
 
@@ -771,11 +821,35 @@ export function useFiles(keys: {
         uploadStep: null,
         uploadProgress: 0,
         files: s.files.filter((f) => f.id !== tempId),
+        uploadQueue: s.uploadQueue.map((r) =>
+          r.id === queueId
+            ? { ...r, status: "done", progress: 100, fileId }
+            : r,
+        ),
       }));
+      // Auto-drop the done record from the panel after a beat so it
+      // doesn't linger indefinitely. 5s gives the user time to notice
+      // "upload finished" without becoming noisy on bulk uploads.
+      setTimeout(() => {
+        setState((s) => ({
+          ...s,
+          uploadQueue: s.uploadQueue.filter((r) => r.id !== queueId),
+        }));
+      }, 5_000);
       await fetchFiles(parentId);
     } catch (err) {
       console.error("Upload error:", err);
-      setState((s) => ({ ...s, uploading: false, error: "Upload failed", files: s.files.filter((f) => f.id !== tempId) }));
+      setState((s) => ({
+        ...s,
+        uploading: false,
+        error: "Upload failed",
+        files: s.files.filter((f) => f.id !== tempId),
+        uploadQueue: s.uploadQueue.map((r) =>
+          r.id === queueId
+            ? { ...r, status: "error", error: "Upload failed" }
+            : r,
+        ),
+      }));
     } finally {
       // Zero the session key on every exit path — success, error, or
       // early return. Strings (hier keys, wrappedBy) are GC'd by the
@@ -811,8 +885,36 @@ export function useFiles(keys: {
 
       let sessionKey: Uint8Array | null = null;
       const chunkCount = getChunkCount(newFile.size);
+      // Floating-panel record for this replacement. Tagged kind:
+      // "version" so the UI can render a small "new version" label.
+      const queueId = (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `u-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const queueRecord: UploadRecord = {
+        id: queueId,
+        name: newFile.name,
+        size: newFile.size,
+        progress: 5,
+        status: "uploading",
+        kind: "version",
+        startedAt: Date.now(),
+        fileId: existingFileId,
+      };
+      setState((s) => ({
+        ...s,
+        uploadQueue: [queueRecord, ...s.uploadQueue],
+      }));
+      const bumpQueue = (progress: number) => {
+        setState((s) => ({
+          ...s,
+          uploadQueue: s.uploadQueue.map((r) =>
+            r.id === queueId ? { ...r, progress } : r,
+          ),
+        }));
+      };
 
       try {
+        bumpQueue(10);
         // 1. Recover the session key from the server's view of the file.
         //    chunk-download returns everything needed to reverse the
         //    two-layer wrap: the caller's file_keys row + the owner's
@@ -896,6 +998,7 @@ export function useFiles(keys: {
           }
         }
         await Promise.all(chunkQueue);
+        bumpQueue(95);
 
         // 5. Finalize — server flips files.current_version_number +
         //    denormalized metadata to this version.
@@ -909,10 +1012,30 @@ export function useFiles(keys: {
           }),
         });
 
+        // Mark done in the panel; auto-drop after 5s.
+        setState((s) => ({
+          ...s,
+          uploadQueue: s.uploadQueue.map((r) =>
+            r.id === queueId ? { ...r, status: "done", progress: 100 } : r,
+          ),
+        }));
+        setTimeout(() => {
+          setState((s) => ({
+            ...s,
+            uploadQueue: s.uploadQueue.filter((r) => r.id !== queueId),
+          }));
+        }, 5_000);
+
         await fetchFiles(state.currentFolder);
       } catch (err) {
         console.error("Replace error:", err);
-        setState((s) => ({ ...s, error: "Replace failed" }));
+        setState((s) => ({
+          ...s,
+          error: "Replace failed",
+          uploadQueue: s.uploadQueue.map((r) =>
+            r.id === queueId ? { ...r, status: "error", error: "Replace failed" } : r,
+          ),
+        }));
       } finally {
         if (sessionKey) sessionKey.fill(0);
       }
@@ -920,6 +1043,14 @@ export function useFiles(keys: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [keys, fetchFiles, state.currentFolder],
   );
+
+  /** Remove a single upload from the floating panel (manual dismiss). */
+  const dismissUpload = useCallback((uploadId: string) => {
+    setState((s) => ({
+      ...s,
+      uploadQueue: s.uploadQueue.filter((r) => r.id !== uploadId),
+    }));
+  }, []);
 
   /** Fetch every version of a file in newest-first order. */
   const listVersions = useCallback(async (fileId: string) => {
@@ -2987,6 +3118,7 @@ export function useFiles(keys: {
     fetchFiles,
     uploadFile,
     replaceFile,
+    dismissUpload,
     listVersions,
     restoreVersion,
     deleteVersion,

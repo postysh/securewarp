@@ -40,6 +40,7 @@ const MoveModal = dynamic(() => import("./move-modal").then((m) => ({ default: m
 const FilePreview = dynamic(() => import("./file-preview").then((m) => ({ default: m.FilePreview })), { ssr: false });
 const StorageQuotaModal = dynamic(() => import("./storage-quota-modal").then((m) => ({ default: m.StorageQuotaModal })), { ssr: false });
 const VersionHistoryModal = dynamic(() => import("./version-history-modal").then((m) => ({ default: m.VersionHistoryModal })), { ssr: false });
+const UploadPanel = dynamic(() => import("./upload-panel").then((m) => ({ default: m.UploadPanel })), { ssr: false });
 import { ConfirmDialog } from "./confirm-dialog";
 import { WorkspaceSettings } from "./workspace-settings";
 import { WorkspaceInviteModal } from "./workspace-invite-modal";
@@ -50,6 +51,7 @@ import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } fro
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { userLabel, userInitials, userColor } from "@/lib/display";
 import { useUserKeys } from "@/hooks/use-user-keys";
+import { useNewFiles } from "@/hooks/use-new-files";
 import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import HardDriveIcon from "@hugeicons/core-free-icons/HardDriveIcon";
 
@@ -209,6 +211,7 @@ function CollaboratorStack({ collaborators }: { collaborators: FileCollaboratorP
 
 export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean; onToggleSidebar: () => void }) {
   const keys = useUserKeys();
+  const newFiles = useNewFiles();
   const fileOps = useFilesContext();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -362,7 +365,38 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     ? fileOps.files.filter((f) => f.fileLabels.some((l) => l.id === filterLabel.id))
     : fileOps.files;
 
-  const displayFiles = filteredFiles.map((f) => ({
+  // Apply the column-header sort that was silently not-being-applied
+  // before. Folders stay pinned above files regardless of sort — the
+  // standard drive UI convention everyone expects. In-progress
+  // uploading placeholders keep their top-of-list position too so
+  // users aren't startled by their upload "jumping" as progress
+  // updates would otherwise change sort ordering.
+  const sortedFiles = [...filteredFiles].sort((a, b) => {
+    if (a.uploading && !b.uploading) return -1;
+    if (!a.uploading && b.uploading) return 1;
+    if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+    let cmp = 0;
+    switch (sortField) {
+      case "name":
+        cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+        break;
+      case "type": {
+        const at = (a.isFolder ? "" : (a.name.split(".").pop() || "")).toLowerCase();
+        const bt = (b.isFolder ? "" : (b.name.split(".").pop() || "")).toLowerCase();
+        cmp = at.localeCompare(bt) || a.name.localeCompare(b.name);
+        break;
+      }
+      case "size":
+        cmp = (a.size || 0) - (b.size || 0);
+        break;
+      case "modified":
+        cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+        break;
+    }
+    return sortAsc ? cmp : -cmp;
+  });
+
+  const displayFiles = sortedFiles.map((f) => ({
     id: f.id,
     name: f.name,
     type: getFileKind(f.name, f.type),
@@ -379,6 +413,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     collaborators: f.collaborators,
     ownerEmail: f.ownerEmail,
     ownerDisplayName: f.ownerDisplayName ?? null,
+    // NEW badge flag — file was created in the last 24h and the
+    // user hasn't interacted with it yet. Uploading placeholders
+    // don't get a badge (they're obviously new already).
+    isNew: !f.uploading && newFiles.isNew(f.id, f.createdAt),
   }));
 
   const selectAll = () => setSelected(new Set(displayFiles.map((f) => f.id)));
@@ -1239,6 +1277,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 if (prefetchTimerRef.current) { clearTimeout(prefetchTimerRef.current); prefetchTimerRef.current = null; }
               }}
               onClick={() => {
+                // Any click on the row counts as "seen" — dismisses the
+                // NEW badge immediately.
+                newFiles.markSeen(file.id);
                 if (file.isFolder && fileOps.viewMode !== "trash") {
                   fileOps.navigateToFolder(file.id, file.name);
                 } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
@@ -1247,6 +1288,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
+                newFiles.markSeen(file.id);
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
               className={`group relative flex flex-col items-center justify-center rounded-xl border cursor-pointer transition-colors p-4 min-h-[130px] ${
@@ -1346,6 +1388,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 if (prefetchTimerRef.current) { clearTimeout(prefetchTimerRef.current); prefetchTimerRef.current = null; }
               }}
               onClick={() => {
+                // Any click on the row counts as "seen" — dismisses the
+                // NEW badge immediately.
+                newFiles.markSeen(file.id);
                 if (file.isFolder && fileOps.viewMode !== "trash") {
                   fileOps.navigateToFolder(file.id, file.name);
                 } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
@@ -1354,6 +1399,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
+                newFiles.markSeen(file.id);
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
               className={`group flex items-center min-h-[64px] md:min-h-[56px] h-[64px] md:h-[56px] px-4 rounded-xl border cursor-pointer transition-colors mb-1.5 shrink-0 ${
@@ -1400,6 +1446,19 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className={`text-[13px] truncate ${file.uploading ? "text-text-tertiary" : "text-text-primary"}`}>{file.name}</span>
+                    {file.isNew && (
+                      <span
+                        className="text-[9px] font-mono font-semibold tracking-wider px-1.5 py-0.5 rounded shrink-0"
+                        style={{
+                          background: "rgba(110,210,170,0.12)",
+                          color: "rgba(110,210,170,0.95)",
+                          border: "1px solid rgba(110,210,170,0.25)",
+                          lineHeight: 1,
+                        }}
+                      >
+                        NEW
+                      </span>
+                    )}
                     {!fileOps.activeWorkspace && fileOps.files.find((f) => f.id === file.id)?.isStarred && (
                       <HugeiconsIcon icon={StarIcon} size={12} color="var(--accent-yellow-primary)" className="shrink-0" />
                     )}
@@ -1495,6 +1554,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          newFiles.markSeen(file.id);
                           fileOps.downloadFile(file.id);
                         }}
                         className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer"
@@ -1899,6 +1959,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           await fileOps.emptyTrash();
           setEmptyTrashBusy(false);
           setEmptyTrashOpen(false);
+          // Clear the selection bar — the selected rows just got
+          // purged, so "N selected" pointing at ghost IDs is stale.
+          selectNone();
         }}
         onCancel={() => !emptyTrashBusy && setEmptyTrashOpen(false)}
       />
@@ -1917,9 +1980,18 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         onConfirm={async () => {
           if (!purgeTarget) return;
           setPurgeBusy(true);
-          await fileOps.purgeItem(purgeTarget.id);
+          const purgedId = purgeTarget.id;
+          await fileOps.purgeItem(purgedId);
           setPurgeBusy(false);
           setPurgeTarget(null);
+          // Drop just this id from the selection so the bar
+          // reflects reality without discarding other selections.
+          setSelected((prev) => {
+            if (!prev.has(purgedId)) return prev;
+            const next = new Set(prev);
+            next.delete(purgedId);
+            return next;
+          });
         }}
         onCancel={() => !purgeBusy && setPurgeTarget(null)}
       />
@@ -1932,6 +2004,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       <StorageQuotaModal open={quotaModalOpen} onClose={() => setQuotaModalOpen(false)} />
       <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
+      <UploadPanel queue={fileOps.uploadQueue} onDismiss={fileOps.dismissUpload} />
       <VersionHistoryModal
         file={
           versionHistoryTarget
