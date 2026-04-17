@@ -880,19 +880,20 @@ export async function getTrashedForUser(userId: string, workspaceId?: string | n
  * "last interacted with".
  */
 export async function getRecentForUser(userId: string): Promise<FileRowWithKey[]> {
-  const { data, error } = await supabase
-    .from("files")
-    .select(LIST_SELECT)
-    .eq("owner_id", userId)
-    .eq("file_keys.user_id", userId)
-    .eq("upload_complete", true)
-    .eq("is_workspace_root", false)
-    .is("deleted_at", null)
-    .is("workspace_id", null)
-    .order("updated_at", { ascending: false })
-    .limit(50);
-  if (error) throw new Error(`Failed to fetch recent: ${error.message}`);
-  return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
+  // Reuses getAllAccessibleFiles so inherited descendants (files a
+  // collaborator created inside a folder the user shared) show up
+  // too, not just files with a direct file_keys row for the caller.
+  // Sorted + sliced client-side; drive sizes we serve are small
+  // enough that the full fetch is cheap.
+  const all = await getAllAccessibleFiles(userId, { includeWorkspaces: false });
+  return all
+    .slice()
+    .sort((a, b) => {
+      const au = a.updated_at ?? "";
+      const bu = b.updated_at ?? "";
+      return bu.localeCompare(au);
+    })
+    .slice(0, 50);
 }
 
 /**
@@ -1042,28 +1043,24 @@ export async function toggleStar(fileId: string, userId: string, starred: boolea
  * starred set independent of the file owner.
  */
 export async function getStarredForUser(userId: string): Promise<FileRowWithKey[]> {
-  // Get the user's starred file IDs first
   const { data: stars, error: starErr } = await supabase
     .from("user_stars")
-    .select("file_id")
+    .select("file_id, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (starErr) throw new Error(`Failed to fetch stars: ${starErr.message}`);
   if (!stars || stars.length === 0) return [];
 
-  const fileIds = stars.map((s) => s.file_id as string);
-
-  const { data, error } = await supabase
-    .from("files")
-    .select(LIST_SELECT)
-    .in("id", fileIds)
-    .eq("file_keys.user_id", userId)
-    .eq("upload_complete", true)
-    .eq("is_workspace_root", false)
-    .is("deleted_at", null)
-    .is("workspace_id", null);
-  if (error) throw new Error(`Failed to fetch starred files: ${error.message}`);
-  return (data || []).map((row) => shapeRow(row as unknown as FileJoinRow));
+  // Intersect the star set with the full accessibility set so
+  // inherited files (ones the user starred but doesn't have a direct
+  // file_keys row on) still appear here, instead of silently
+  // dropping. Preserves the original star-time sort order.
+  const starOrder = new Map<string, number>();
+  stars.forEach((s, i) => starOrder.set(s.file_id as string, i));
+  const all = await getAllAccessibleFiles(userId, { includeWorkspaces: false });
+  return all
+    .filter((f) => starOrder.has(f.id))
+    .sort((a, b) => (starOrder.get(a.id)! - starOrder.get(b.id)!));
 }
 
 /**
