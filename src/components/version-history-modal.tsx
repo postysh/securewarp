@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import ReloadIcon from "@hugeicons/core-free-icons/ReloadIcon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
 import { decryptMetadata } from "@/lib/crypto/file-crypto";
 import { fromBase64 } from "@/lib/crypto/utils";
 import nacl from "tweetnacl";
@@ -67,6 +68,10 @@ interface VersionHistoryModalProps {
     fileId: string,
     versionId: string,
   ) => Promise<{ ok: boolean; orphanedStorageKeys: number }>;
+  // Upload a new version. Optional — when present the modal renders
+  // an "Upload new version" button in the header that opens a native
+  // file picker and pipes the result here.
+  replaceFile?: (fileId: string, file: File) => Promise<void>;
   onActionComplete?: () => void;
 }
 
@@ -100,14 +105,17 @@ export function VersionHistoryModal({
   listVersions,
   restoreVersion,
   deleteVersion,
+  replaceFile,
   onActionComplete,
 }: VersionHistoryModalProps) {
   const userKeys = useUserKeys();
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const newVersionInputRef = useRef<HTMLInputElement>(null);
 
   const fetchAndDecrypt = useCallback(async () => {
     if (!file || !userKeys) return;
@@ -183,6 +191,24 @@ export function VersionHistoryModal({
     [file, restoreVersion, fetchAndDecrypt, onActionComplete],
   );
 
+  const handleReplace = useCallback(
+    async (picked: File) => {
+      if (!file || !replaceFile) return;
+      setUploading(true);
+      setError(null);
+      try {
+        await replaceFile(file.id, picked);
+        onActionComplete?.();
+        await fetchAndDecrypt();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Upload failed");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [file, replaceFile, fetchAndDecrypt, onActionComplete],
+  );
+
   const handleDelete = useCallback(
     async (versionId: string) => {
       if (!file) return;
@@ -247,12 +273,37 @@ export function VersionHistoryModal({
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer shrink-0"
-          >
-            <HugeiconsIcon icon={Cancel01Icon} size={16} />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {file.isOwner && replaceFile && (
+              <button
+                onClick={() => newVersionInputRef.current?.click()}
+                disabled={uploading || busy !== null}
+                className="h-[30px] px-3 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <HugeiconsIcon icon={Upload04Icon} size={13} />
+                {uploading ? "Uploading…" : "Upload new version"}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={Cancel01Icon} size={16} />
+            </button>
+          </div>
+          {/* Hidden file input for the "Upload new version" action.
+              Lives here so a successful upload immediately refreshes
+              the modal's own version list. */}
+          <input
+            ref={newVersionInputRef}
+            type="file"
+            className="hidden"
+            onChange={(e) => {
+              const picked = e.target.files?.[0];
+              if (picked) handleReplace(picked);
+              e.target.value = "";
+            }}
+          />
         </div>
 
         {/* Body */}

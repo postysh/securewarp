@@ -227,8 +227,6 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [shareTarget, setShareTarget] = useState<DecryptedFile | null>(null);
   const [versionHistoryTarget, setVersionHistoryTarget] = useState<DecryptedFile | null>(null);
-  const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null);
-  const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragFileId, setDragFileId] = useState<string | null>(null);
@@ -1449,45 +1447,71 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <div className={`absolute right-0 flex items-center gap-0.5 transition-opacity ${
                   contextMenu?.fileId === file.id ? "opacity-100 pointer-events-auto" : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
                 }`}>
-                  {!fileOps.activeWorkspace && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const full = fileOps.files.find((f) => f.id === file.id);
-                        if (full) fileOps.toggleStar(full.id, !full.isStarred);
-                      }}
-                      className={`p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer ${
-                        fileOps.files.find((f) => f.id === file.id)?.isStarred
-                          ? "text-accent-yellow"
-                          : "text-icon-tertiary hover:text-accent-yellow"
-                      }`}
-                    >
-                      <HugeiconsIcon icon={StarIcon} size={15} />
-                    </button>
-                  )}
+                  {!fileOps.activeWorkspace && (() => {
+                    const starred = fileOps.files.find((f) => f.id === file.id)?.isStarred;
+                    return (
+                      <Tooltip label={starred ? "Unstar" : "Star"} side="bottom">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const full = fileOps.files.find((f) => f.id === file.id);
+                            if (full) fileOps.toggleStar(full.id, !full.isStarred);
+                          }}
+                          className={`p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer ${
+                            starred
+                              ? "text-accent-yellow"
+                              : "text-icon-tertiary hover:text-accent-yellow"
+                          }`}
+                        >
+                          <HugeiconsIcon icon={StarIcon} size={15} />
+                        </button>
+                      </Tooltip>
+                    );
+                  })()}
                   {fileOps.viewMode === "own" && !fileOps.activeWorkspace && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const full = fileOps.files.find((f) => f.id === file.id);
-                        if (full) setShareTarget(full);
-                      }}
-                      className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer"
-                    >
-                      <HugeiconsIcon icon={Share01Icon} size={15} />
-                    </button>
+                    <Tooltip label="Share" side="bottom">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const full = fileOps.files.find((f) => f.id === file.id);
+                          if (full) setShareTarget(full);
+                        }}
+                        className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+                      >
+                        <HugeiconsIcon icon={Share01Icon} size={15} />
+                      </button>
+                    </Tooltip>
                   )}
-                  <button onClick={(e) => {
-                    e.stopPropagation();
-                    if (contextMenu?.fileId === file.id) {
-                      setContextMenu(null);
-                    } else {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setContextMenu({ x: rect.right - 180, y: rect.bottom + 4, fileId: file.id, isFolder: !!file.isFolder });
-                    }
-                  }} className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer">
-                    <HugeiconsIcon icon={MoreHorizontalIcon} size={15} />
-                  </button>
+                  {/* Download — moved out of the context menu (which
+                      was overflowing). Single click on the hover strip
+                      triggers the same file-ops download path. Files
+                      only; folders don't download as a unit yet. */}
+                  {fileOps.viewMode !== "trash" && !file.isFolder && (
+                    <Tooltip label="Download" side="bottom">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fileOps.downloadFile(file.id);
+                        }}
+                        className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+                      >
+                        <HugeiconsIcon icon={Download04Icon} size={15} />
+                      </button>
+                    </Tooltip>
+                  )}
+                  <Tooltip label="More" side="bottom">
+                    <button onClick={(e) => {
+                      e.stopPropagation();
+                      if (contextMenu?.fileId === file.id) {
+                        setContextMenu(null);
+                      } else {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setContextMenu({ x: rect.right - 180, y: rect.bottom + 4, fileId: file.id, isFolder: !!file.isFolder });
+                      }
+                    }} className="p-1.5 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer">
+                      <HugeiconsIcon icon={MoreHorizontalIcon} size={15} />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
               {/* Mobile three-dot menu (touch devices have no hover) */}
@@ -1532,27 +1556,35 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               ...(typeof window !== "undefined" && window.innerWidth >= 768
                 ? (() => {
                     const left = Math.min(contextMenu.x, window.innerWidth - 200);
-                    // If click is in the bottom half of the screen, anchor menu above the click
-                    if (contextMenu.y > window.innerHeight / 2) {
-                      return {
-                        position: "fixed" as const,
-                        bottom: window.innerHeight - contextMenu.y,
-                        left,
-                        width: 180,
-                        borderRadius: 8,
-                        maxHeight: contextMenu.y - 8,
-                        overflowY: "auto" as const,
-                      };
-                    }
-                    return {
-                      position: "fixed" as const,
-                      top: contextMenu.y,
-                      left,
-                      width: 180,
-                      borderRadius: 8,
-                      maxHeight: window.innerHeight - contextMenu.y - 8,
-                      overflowY: "auto" as const,
-                    };
+                    const MARGIN = 8;
+                    // Anchor to whichever side has more room. The old
+                    // rule ("if clicked in bottom half, anchor bottom")
+                    // forced a scroll when the menu grew past that
+                    // side's height even if the other side had plenty
+                    // of space. Preferring the bigger side keeps the
+                    // menu one-piece in almost every realistic click.
+                    const spaceBelow = window.innerHeight - contextMenu.y - MARGIN;
+                    const spaceAbove = contextMenu.y - MARGIN;
+                    const anchorBelow = spaceBelow >= spaceAbove;
+                    return anchorBelow
+                      ? {
+                          position: "fixed" as const,
+                          top: contextMenu.y,
+                          left,
+                          width: 180,
+                          borderRadius: 8,
+                          maxHeight: spaceBelow,
+                          overflowY: "auto" as const,
+                        }
+                      : {
+                          position: "fixed" as const,
+                          bottom: window.innerHeight - contextMenu.y,
+                          left,
+                          width: 180,
+                          borderRadius: 8,
+                          maxHeight: spaceAbove,
+                          overflowY: "auto" as const,
+                        };
                   })()
                 : {}),
               boxShadow: "var(--shadow-l2)",
@@ -1745,13 +1777,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <HugeiconsIcon icon={Share01Icon} size={14} color="var(--icon-tertiary)" /> Share
             </button>
           )}
-          {fileOps.viewMode !== "trash" && !contextMenu?.isFolder && (
-            <button onClick={() => { if (contextMenu) { fileOps.downloadFile(contextMenu.fileId!); setContextMenu(null); } }} className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
-              <HugeiconsIcon icon={Download04Icon} size={14} color="var(--icon-tertiary)" /> Download
-            </button>
-          )}
           {/* Version history — non-folder files only. Available to anyone
-              with access; restore/delete gated to owner inside the modal. */}
+              with access; restore/delete/upload-new-version all gate
+              on ownership inside the modal. Replaces both the old
+              "Download" and "Replace file..." menu entries. */}
           {fileOps.viewMode !== "trash" && !contextMenu?.isFolder && (
             <button
               onClick={() => {
@@ -1764,28 +1793,6 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
             >
               <HugeiconsIcon icon={Clock01Icon} size={14} color="var(--icon-tertiary)" /> Version history
-            </button>
-          )}
-          {/* Replace file — owner only. Picks a file, then runs the same
-              chunked upload flow as a new upload but tagged as a new
-              version on the existing row. */}
-          {fileOps.viewMode !== "trash"
-            && !contextMenu?.isFolder
-            && fileOps.viewMode === "own"
-            && !fileOps.activeWorkspace && (
-            <button
-              onClick={() => {
-                if (!contextMenu) return;
-                setReplaceTargetId(contextMenu.fileId!);
-                setContextMenu(null);
-                // Defer the click — React needs to render the input
-                // once replaceTargetId is set before the file picker
-                // can open with the right context.
-                setTimeout(() => replaceFileInputRef.current?.click(), 50);
-              }}
-              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
-            >
-              <HugeiconsIcon icon={Upload04Icon} size={14} color="var(--icon-tertiary)" /> Replace file...
             </button>
           )}
           {fileOps.viewMode !== "trash" && (
@@ -1803,17 +1810,6 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   <HugeiconsIcon icon={Move01Icon} size={14} color="var(--icon-tertiary)" /> Move to
                 </button>
               )}
-              <button
-                onClick={() => {
-                  if (!contextMenu) return;
-                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
-                  if (full) setDetailsTarget(full);
-                  setContextMenu(null);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={InformationCircleIcon} size={14} color="var(--icon-tertiary)" /> Details
-              </button>
             </>
           )}
           <div className="h-px bg-border-tertiary my-1" />
@@ -1954,23 +1950,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         listVersions={fileOps.listVersions}
         restoreVersion={fileOps.restoreVersion}
         deleteVersion={fileOps.deleteVersion}
+        replaceFile={fileOps.replaceFile}
         onActionComplete={() => {
           void fileOps.fetchFiles(fileOps.currentFolder);
-        }}
-      />
-      <input
-        ref={replaceFileInputRef}
-        type="file"
-        className="hidden"
-        onChange={async (e) => {
-          const picked = e.target.files?.[0];
-          if (!picked || !replaceTargetId) return;
-          try {
-            await fileOps.replaceFile(replaceTargetId, picked);
-          } finally {
-            e.target.value = "";
-            setReplaceTargetId(null);
-          }
         }}
       />
       <FileDetailsModal file={detailsTarget} onClose={() => setDetailsTarget(null)} />
