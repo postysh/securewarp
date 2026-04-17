@@ -99,6 +99,22 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+/**
+ * Locale-formatted absolute timestamp. Shown alongside the relative
+ * time so users can see both "2h ago" and "Apr 17, 2026, 2:05 PM" at
+ * a glance — matches how Google Drive / OneDrive render version
+ * history entries.
+ */
+function formatAbsolute(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function VersionHistoryModal({
   file,
   onClose,
@@ -111,15 +127,21 @@ export function VersionHistoryModal({
   const userKeys = useUserKeys();
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
+  // Track which specific action is in-flight so the Restore button
+  // doesn't flip to "Restoring…" while a sibling Delete is running,
+  // and vice versa.
+  const [busy, setBusy] = useState<{ id: string; kind: "restore" | "delete" } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const newVersionInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchAndDecrypt = useCallback(async () => {
+  const fetchAndDecrypt = useCallback(async (opts?: { silent?: boolean }) => {
     if (!file || !userKeys) return;
-    setLoading(true);
+    // `silent` mode skips the Loading… placeholder so post-action
+    // refetches (after restore / delete / upload) don't flash the
+    // whole list. Initial open still uses the normal loading path.
+    if (!opts?.silent) setLoading(true);
     setError(null);
     let sessionKey: Uint8Array | null = null;
     try {
@@ -154,7 +176,7 @@ export function VersionHistoryModal({
       setError("Failed to load version history");
     } finally {
       if (sessionKey) sessionKey.fill(0);
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.id, userKeys, listVersions]);
@@ -176,12 +198,12 @@ export function VersionHistoryModal({
   const handleRestore = useCallback(
     async (versionId: string) => {
       if (!file) return;
-      setBusy(versionId);
+      setBusy({ id: versionId, kind: "restore" });
       setError(null);
       try {
         await restoreVersion(file.id, versionId);
         onActionComplete?.();
-        await fetchAndDecrypt();
+        await fetchAndDecrypt({ silent: true });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Restore failed");
       } finally {
@@ -199,7 +221,7 @@ export function VersionHistoryModal({
       try {
         await replaceFile(file.id, picked);
         onActionComplete?.();
-        await fetchAndDecrypt();
+        await fetchAndDecrypt({ silent: true });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Upload failed");
       } finally {
@@ -212,13 +234,13 @@ export function VersionHistoryModal({
   const handleDelete = useCallback(
     async (versionId: string) => {
       if (!file) return;
-      setBusy(versionId);
+      setBusy({ id: versionId, kind: "delete" });
       setError(null);
       try {
         await deleteVersion(file.id, versionId);
         setConfirmDelete(null);
         onActionComplete?.();
-        await fetchAndDecrypt();
+        await fetchAndDecrypt({ silent: true });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Delete failed");
       } finally {
@@ -273,27 +295,15 @@ export function VersionHistoryModal({
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {file.isOwner && replaceFile && (
-              <button
-                onClick={() => newVersionInputRef.current?.click()}
-                disabled={uploading || busy !== null}
-                className="h-[30px] px-3 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <HugeiconsIcon icon={Upload04Icon} size={13} />
-                {uploading ? "Uploading…" : "Upload new version"}
-              </button>
-            )}
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
-            >
-              <HugeiconsIcon icon={Cancel01Icon} size={16} />
-            </button>
-          </div>
-          {/* Hidden file input for the "Upload new version" action.
-              Lives here so a successful upload immediately refreshes
-              the modal's own version list. */}
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer shrink-0"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={16} />
+          </button>
+          {/* Hidden file input for the "Upload new version" button in
+              the footer below. Lives here so a successful upload
+              immediately refreshes the modal's own version list. */}
           <input
             ref={newVersionInputRef}
             type="file"
@@ -349,6 +359,9 @@ export function VersionHistoryModal({
                         <div className="text-[11px] text-text-tertiary mt-1 truncate">
                           {v.decryptedName} · {formatBytes(v.sizeBytes)}
                         </div>
+                        <div className="text-[10px] text-text-disabled font-mono mt-1">
+                          {formatAbsolute(v.createdAt)}
+                        </div>
                       </div>
                       {!isCurrent && file.isOwner && (
                         <div className="flex items-center gap-1.5 shrink-0">
@@ -358,7 +371,9 @@ export function VersionHistoryModal({
                             className="h-[28px] px-2.5 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <HugeiconsIcon icon={ReloadIcon} size={12} />
-                            {busy === v.id ? "Restoring…" : "Restore"}
+                            {busy?.id === v.id && busy.kind === "restore"
+                              ? "Restoring…"
+                              : "Restore"}
                           </button>
                           {confirmDelete === v.id ? (
                             <button
@@ -366,7 +381,9 @@ export function VersionHistoryModal({
                               disabled={busy !== null}
                               className="h-[28px] px-2.5 rounded-[6px] text-[11px] font-medium text-text-inverse bg-accent-red hover:opacity-90 transition-all cursor-pointer inline-flex items-center gap-1 disabled:opacity-50"
                             >
-                              Confirm
+                              {busy?.id === v.id && busy.kind === "delete"
+                                ? "Deleting…"
+                                : "Confirm"}
                             </button>
                           ) : (
                             <button
@@ -389,8 +406,20 @@ export function VersionHistoryModal({
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 px-5 py-3 border-t border-border-tertiary text-[11px] text-text-disabled">
-          Restore creates a new version; history is preserved.
+        <div className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-t border-border-tertiary">
+          <span className="text-[11px] text-text-disabled">
+            Restore creates a new version; history is preserved.
+          </span>
+          {file.isOwner && replaceFile && (
+            <button
+              onClick={() => newVersionInputRef.current?.click()}
+              disabled={uploading || busy !== null}
+              className="h-[30px] px-3 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              <HugeiconsIcon icon={Upload04Icon} size={13} />
+              {uploading ? "Uploading…" : "Upload new version"}
+            </button>
+          )}
         </div>
       </div>
     </div>,

@@ -368,7 +368,11 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     type: getFileKind(f.name, f.type),
     fileType: f.isFolder ? "FOLDER" : (f.name.split(".").pop()?.toUpperCase() || "FILE"),
     size: formatBytes(f.size),
-    modified: formatDate(f.createdAt),
+    // Use updated_at so the Modified column actually reflects edits.
+    // New-version uploads bump updated_at on files; creation time is
+    // stored separately on each row in file_versions if we ever need
+    // a dedicated "Created" column.
+    modified: formatDate(f.updatedAt),
     isFolder: f.isFolder,
     uploading: f.uploading,
     uploadProgress: f.uploadProgress,
