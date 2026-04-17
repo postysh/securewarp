@@ -41,8 +41,10 @@ else
   echo "✓ TypeScript clean"
 fi
 
-# 4. Tests
-if ! npm test -- --run 2>/dev/null | tail -1 | grep -q "passed"; then
+# 4. Tests — rely on vitest's exit code. Previous version grepped the
+# last line for "passed" but vitest's last line is a Duration summary,
+# so a green run still looked red. Exit-code-driven is bulletproof.
+if ! npm test -- --run >/dev/null 2>&1; then
   echo "❌ Tests failed"
   ((FAILURES++))
 else
