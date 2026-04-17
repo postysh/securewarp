@@ -103,8 +103,13 @@ if [[ "$MODE" == "full" ]]; then
 
   # Generate a CycloneDX SBOM for audit / release archival. The CI
   # workflow also produces one on every main push as an artifact.
+  # --ignore-npm-errors: cyclonedx runs `npm ls` internally and aborts
+  # on "extraneous"/"invalid" warnings that legitimately-installed
+  # optional deps (platform-specific binaries, etc.) trigger. Those
+  # deps still belong in the SBOM; we just don't want npm-ls pedantry
+  # to fail the whole generation.
   run_check "CycloneDX SBOM generation" \
-    bash -c "npx --yes @cyclonedx/cyclonedx-npm --output-format JSON --output-file '$REPO_ROOT/sbom.json' 2>&1"
+    bash -c "npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors --output-format JSON --output-file '$REPO_ROOT/sbom.json' 2>&1"
 
   header "DAST (live scan against production)"
 
