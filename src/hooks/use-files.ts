@@ -2896,7 +2896,37 @@ export function useFiles(keys: {
       email: keys.email,
       total: entries.length,
       workspaces: entries.filter((e) => e.workspaceId).length,
+      apiRows: rows.length,
+      decrypted: entries.length,
+      undecryptable: pending.length,
     });
+    if (pending.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[search.cache] some rows never decrypted — they won't appear in search",
+        pending.map((f) => ({
+          id: f.id,
+          parent_id: f.parent_id,
+          is_folder: f.is_folder,
+          hasDirectKey: !!f.encrypted_private_hierarchical_key,
+          hasParentClaim: !!f.parent_keys_claim,
+        })),
+      );
+    }
+    // Expose a browser-console inspector so we can diagnose missing
+    // results without adding server telemetry. Safe — the entries are
+    // already decrypted on this tab.
+    if (typeof window !== "undefined") {
+      (window as unknown as { __searchCache?: unknown }).__searchCache = {
+        entries,
+        lookup: (q: string) => {
+          const lo = q.toLowerCase();
+          return entries.filter(
+            (e) => e.name.toLowerCase().includes(lo) || e.breadcrumb.toLowerCase().includes(lo),
+          );
+        },
+      };
+    }
   }, [keys]);
 
   /**
