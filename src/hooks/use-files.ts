@@ -214,6 +214,10 @@ export function useFiles(keys: {
   // ref SYNCHRONOUSLY — no async IndexedDB read per keystroke, no
   // flicker between debounce firing and results resolving.
   const searchEntriesRef = useRef<SearchCacheEntry[] | null>(null);
+  // Tracks when the cache was last rebuilt. Used by
+  // refreshSearchCacheIfStale to decide whether to force a rebuild
+  // when Command Palette opens.
+  const lastBuildMsRef = useRef<number | null>(null);
   // Tiny helper so each mutation site is one line instead of four.
   const syncSearchMirror = (entry: SearchCacheEntry) => {
     const current = searchEntriesRef.current;
@@ -2840,6 +2844,7 @@ export function useFiles(keys: {
     await replaceSearchCache(keys.email, keys.encryptionPrivateKey, entries);
     await markSearchBuilt(keys.email);
     searchEntriesRef.current = entries;
+    lastBuildMsRef.current = Date.now();
     // eslint-disable-next-line no-console
     console.log("[search.cache] built", {
       email: keys.email,
@@ -2847,6 +2852,31 @@ export function useFiles(keys: {
       workspaces: entries.filter((e) => e.workspaceId).length,
     });
   }, [keys]);
+
+  /**
+   * Staleness check + rebuild. Per-item upserts from the client keep
+   * the cache fresh for operations this tab knows about, but anything
+   * that hits the DB from another device, another tab, a collaborator,
+   * or via a code path that forgot to call upsertSearchCache silently
+   * drifts. Calling this on Command Palette open forces a rebuild
+   * when the cache is older than STALE_MS — fast enough to feel
+   * instant (~1–2s for typical drives), bounded enough to catch any
+   * drift.
+   */
+  const STALE_MS = 2 * 60 * 1000; // 2 min
+  const refreshSearchCacheIfStale = useCallback(async () => {
+    if (!keys) return;
+    const last = lastBuildMsRef.current;
+    if (last && Date.now() - last < STALE_MS) return;
+    // De-dupe concurrent callers onto the same in-flight promise.
+    if (!searchBuildPromiseRef.current) {
+      searchBuildPromiseRef.current = (async () => {
+        try { await rebuildSearchCache(); }
+        finally { searchBuildPromiseRef.current = null; }
+      })();
+    }
+    await searchBuildPromiseRef.current;
+  }, [keys, rebuildSearchCache]);
 
   /**
    * Search the local cache. Filename substring match on decrypted
@@ -3151,6 +3181,7 @@ export function useFiles(keys: {
     invalidateCache,
     loadMore,
     searchFiles,
+    refreshSearchCacheIfStale,
     rebuildSearchCache,
     clearSearchIndex,
     exportAllAsZip,

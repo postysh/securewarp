@@ -61,8 +61,14 @@ export function CommandPalette({ open, onClose, onAction, onOpenFile }: CommandP
       setSearchResults([]);
       setSearching(false);
       setTimeout(() => inputRef.current?.focus(), 50);
+      // Rebuild the search cache on open if it's older than the
+      // hook's TTL (2 min). The cache's per-item upsert path keeps
+      // things fresh for local operations, but workspaces / other
+      // tabs / background changes drift it — rebuild on open catches
+      // that drift without users needing to know they should.
+      void fileOps.refreshSearchCacheIfStale?.();
     }
-  }, [open]);
+  }, [open, fileOps]);
 
   useEffect(() => {
     if (!open) return;
