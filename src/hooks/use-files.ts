@@ -391,9 +391,19 @@ export function useFiles(keys: {
     [keys]
   );
 
+  // Sequence counter for fetchFiles. Ensures that when a user clicks
+  // Recent → My Drive in quick succession, the slower Recent response
+  // can't arrive after the My Drive response and overwrite the view.
+  // Any setState that commits the *result* of a fetch is gated on
+  // `mySeq === fetchFilesSeqRef.current`; the optimistic pre-fetch
+  // setState still fires unconditionally so the sidebar flips
+  // immediately.
+  const fetchFilesSeqRef = useRef(0);
+
   const fetchFiles = useCallback(
     async (parentId: string | null = null, mode: ViewMode = "own", breadcrumbOverride?: { id: string | null; name: string }[], viewModeOverride?: ViewMode) => {
       if (!keys) return;
+      const mySeq = ++fetchFilesSeqRef.current;
       const cacheKey = `${mode}:${parentId ?? "root"}`;
       const cached = fileListCache.current.get(cacheKey);
 
@@ -428,6 +438,11 @@ export function useFiles(keys: {
                     : "/api/files/list";
         const res = await fetch(url);
         const data = await res.json();
+
+        // Drop stale responses — a newer fetchFiles call has already
+        // started, so its view is authoritative. Prevents the
+        // Recent→My-Drive quick-click flicker.
+        if (mySeq !== fetchFilesSeqRef.current) return;
 
         if (!res.ok) {
           setState((s) => ({ ...s, loading: false, error: data.error }));
@@ -624,6 +639,7 @@ export function useFiles(keys: {
           ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
         }));
       } catch (err) {
+        if (mySeq !== fetchFilesSeqRef.current) return;
         console.error("Fetch files error:", err);
         setState((s) => ({ ...s, loading: false, error: "Failed to load files" }));
       }
