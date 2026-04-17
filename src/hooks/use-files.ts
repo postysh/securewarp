@@ -158,20 +158,61 @@ export function useFiles(keys: {
   encryptionPrivateKey: string;
   email: string;
 } | null) {
-  const [state, setState] = useState<UseFilesState>({
-    files: [],
-    loading: false,
-    uploading: false,
-    uploadStep: null,
-    uploadProgress: 0,
-    uploadQueue: [],
-    error: null,
-    currentFolder: null,
-    callerPermission: null,
-    activeWorkspace: null,
-    nextCursor: null,
-    breadcrumb: [{ id: null, name: "My Drive" }],
-    viewMode: "own",
+  const [state, setState] = useState<UseFilesState>(() => {
+    // Seed from sessionStorage so the very first render matches the
+    // user's last view — avoids a flicker from "My Drive" → target
+    // on every page refresh. The file-browser mount effect still
+    // fires fetchFiles against the same coordinates to populate the
+    // file list; what we're avoiding here is the intermediate frame
+    // where the sidebar highlight + breadcrumb were briefly wrong.
+    const defaults: UseFilesState = {
+      files: [],
+      loading: false,
+      uploading: false,
+      uploadStep: null,
+      uploadProgress: 0,
+      uploadQueue: [],
+      error: null,
+      currentFolder: null,
+      callerPermission: null,
+      activeWorkspace: null,
+      nextCursor: null,
+      breadcrumb: [{ id: null, name: "My Drive" }],
+      viewMode: "own",
+    };
+    if (typeof window === "undefined") return defaults;
+    try {
+      const wsRaw = sessionStorage.getItem("securewarp_active_workspace");
+      const vRaw = sessionStorage.getItem("securewarp_view_state");
+      const savedWs = wsRaw ? JSON.parse(wsRaw) : null;
+      const savedView = vRaw ? JSON.parse(vRaw) : null;
+      if (savedWs) {
+        defaults.activeWorkspace = {
+          id: savedWs.id,
+          rootFolderId: savedWs.rootFolderId,
+          name: savedWs.name,
+          role: savedWs.role || "editor",
+        };
+        defaults.breadcrumb = [{ id: savedWs.rootFolderId, name: savedWs.name }];
+        defaults.currentFolder = savedWs.rootFolderId;
+        if (
+          savedView?.currentFolder &&
+          savedView.currentFolder !== savedWs.rootFolderId &&
+          Array.isArray(savedView.breadcrumb) &&
+          savedView.breadcrumb.length > 0
+        ) {
+          defaults.currentFolder = savedView.currentFolder;
+          defaults.breadcrumb = savedView.breadcrumb;
+        }
+      } else if (savedView?.viewMode) {
+        defaults.viewMode = savedView.viewMode;
+        defaults.currentFolder = savedView.currentFolder ?? null;
+        if (Array.isArray(savedView.breadcrumb) && savedView.breadcrumb.length > 0) {
+          defaults.breadcrumb = savedView.breadcrumb;
+        }
+      }
+    } catch { /* quota / private mode — fall back to defaults */ }
+    return defaults;
   });
   const [initialized, setInitialized] = useState(false);
 
@@ -356,22 +397,21 @@ export function useFiles(keys: {
       const cacheKey = `${mode}:${parentId ?? "root"}`;
       const cached = fileListCache.current.get(cacheKey);
 
-      // Show cached data immediately if available (stale-while-revalidate)
-      if (cached) {
-        setState((s) => ({
-          ...s,
-          files: cached,
-          loading: false,
-          error: null,
-          currentFolder: mode !== "own" ? null : parentId,
-          viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
-          ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
-        }));
-        setInitialized(true);
-      } else {
-        setState((s) => ({ ...s, loading: s.loading || !initialized || s.files.length === 0, error: null }));
-        setInitialized(true);
-      }
+      // Optimistically update the view coordinates (currentFolder,
+      // viewMode, breadcrumb) before the network round trip so the
+      // sidebar highlight and breadcrumb reflect the new view
+      // immediately. Without this, a cold fetch leaves the sidebar
+      // on the previous mode for the duration of the request — felt
+      // like a broken highlight on refresh.
+      setState((s) => ({
+        ...s,
+        ...(cached ? { files: cached, loading: false } : { loading: s.loading || !initialized || s.files.length === 0 }),
+        error: null,
+        currentFolder: mode !== "own" ? null : parentId,
+        viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
+        ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
+      }));
+      setInitialized(true);
 
       try {
         const url =

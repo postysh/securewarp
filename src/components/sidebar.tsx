@@ -264,7 +264,8 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
         ? "starred"
         : fileOps.viewMode === "recent"
           ? "recent"
-          : fileOps.breadcrumb[0]?.name === "Shared with me"
+          : fileOps.viewMode === "shared" ||
+              fileOps.breadcrumb[0]?.name === "Shared with me"
             ? "shared"
             : "drive";
   // Pins + labels — IDs fetched once on mount; names resolved reactively.
