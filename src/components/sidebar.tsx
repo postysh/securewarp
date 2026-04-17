@@ -21,11 +21,13 @@ import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import Logout01Icon from "@hugeicons/core-free-icons/Logout01Icon";
 import Key01Icon from "@hugeicons/core-free-icons/Key01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import MessageMultiple01Icon from "@hugeicons/core-free-icons/MessageMultiple01Icon";
 import { useTheme } from "./theme-provider";
 import { Tooltip } from "./tooltip";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 import { SettingsModal } from "./settings-modal";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { FeedbackModal } from "./feedback-modal";
+import { useState, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useUserKeys } from "@/hooks/use-user-keys";
 import { useFilesContext } from "@/hooks/use-files";
@@ -65,14 +67,19 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const [open, setOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
-  const updatePos = useCallback(() => {
+  // Calculate where the dropdown should anchor. Accepts an optional
+  // measured height so we can reposition after the menu actually
+  // renders and we know its real size — previous versions hard-coded
+  // MENU_H and got stale every time a new row was added.
+  const updatePos = useCallback((measuredH?: number) => {
     if (!btnRef.current) return;
     const rect = btnRef.current.getBoundingClientRect();
-    const MENU_H = 220;
+    const MENU_H = measuredH ?? 260;
     const MENU_W = 200;
     const MARGIN = 8;
     const vh = window.innerHeight;
@@ -90,6 +97,15 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
       setPos({ top, left: rect.left });
     }
   }, [collapsed]);
+
+  // Once the dropdown mounts, measure its real height and reposition.
+  // useLayoutEffect runs before the browser paints, so the user never
+  // sees the menu at the wrong position. This handles future rows
+  // being added to the menu without anyone remembering to bump MENU_H.
+  useLayoutEffect(() => {
+    if (!open || !menuRef.current) return;
+    updatePos(menuRef.current.offsetHeight);
+  }, [open, updatePos]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -156,6 +172,10 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
           <HugeiconsIcon icon={Key01Icon} size={15} />
           Recovery key info
         </button>
+        <button onClick={() => { setFeedbackOpen(true); setOpen(false); }} className="w-full flex items-center gap-2.5 px-3 h-[32px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer">
+          <HugeiconsIcon icon={MessageMultiple01Icon} size={15} />
+          Send feedback
+        </button>
       </div>
       <div className="py-1 border-t border-border-tertiary">
         <button onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; }} className="w-full flex items-center gap-2.5 px-3 h-[32px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer">
@@ -207,6 +227,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         document.body
       )}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </div>
   );
 }

@@ -36,7 +36,8 @@ export type AuditEventType =
   | "workspace.invite"
   | "workspace.remove"
   | "workspace.role_change"
-  | "workspace.leave";
+  | "workspace.leave"
+  | "feedback.submitted";
 
 export interface AuditInput {
   event: AuditEventType;

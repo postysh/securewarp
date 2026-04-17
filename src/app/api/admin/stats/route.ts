@@ -29,6 +29,7 @@ export async function GET() {
       activeSessionsQ,
       failedLogins7dQ,
       rateLimitHitsQ,
+      newFeedbackQ,
     ] = await Promise.all([
       supabase.from("users").select("id", { count: "exact", head: true }),
       supabase.from("users").select("id", { count: "exact", head: true }).gte("created_at", sevenDaysAgo),
@@ -42,6 +43,8 @@ export async function GET() {
       supabase.from("sessions").select("jti", { count: "exact", head: true }).gt("expires_at", new Date().toISOString()),
       supabase.from("security_audit").select("id", { count: "exact", head: true }).in("event", ["auth.login.fail", "auth.2fa.fail"]).gte("occurred_at", sevenDaysAgo),
       supabase.from("rate_limits").select("id", { count: "exact", head: true }).gte("reset_at", new Date().toISOString()),
+      // Pending feedback — shown as a dot on the sidebar nav.
+      supabase.from("feedback").select("id", { count: "exact", head: true }).eq("status", "new"),
     ]);
 
     // Client-side SUM — fine at small scale. If this ever exceeds a few
@@ -64,6 +67,7 @@ export async function GET() {
       activeSessions: activeSessionsQ.count ?? 0,
       failedLogins7d: failedLogins7dQ.count ?? 0,
       rateLimitHits: rateLimitHitsQ.count ?? 0,
+      newFeedback: newFeedbackQ.count ?? 0,
     });
   } catch (err) {
     logError("admin.stats", err);
