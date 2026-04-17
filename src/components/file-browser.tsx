@@ -275,19 +275,103 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
 
-  // Load files on mount and when keys become available.
+  // Track whether the initial mount restoration has completed so the
+  // view-state writer below doesn't overwrite saved state with the
+  // default "My Drive root" on first render.
+  const hasRestoredViewRef = useRef(false);
+
+  // Load files on mount and when keys become available. Restores the
+  // prior view (workspace / folder / special mode like starred) from
+  // sessionStorage so a refresh keeps the user where they were.
   useEffect(() => {
     if (!keys) return;
-    try {
-      const savedStr = sessionStorage.getItem("securewarp_active_workspace");
-      if (savedStr) {
-        const saved = JSON.parse(savedStr) as { id: string; rootFolderId: string; name: string; role?: string };
-        fileOps.navigateToWorkspace(saved.id, saved.rootFolderId, saved.name, saved.role);
-        return;
+    hasRestoredViewRef.current = false;
+    (async () => {
+      // Read both stored blobs up front. Active workspace is written
+      // by workspace-switcher; view state is written below by the
+      // writer effect whenever navigation changes.
+      let savedWorkspace:
+        | { id: string; rootFolderId: string; name: string; role?: string }
+        | null = null;
+      try {
+        const raw = sessionStorage.getItem("securewarp_active_workspace");
+        if (raw) savedWorkspace = JSON.parse(raw);
+      } catch { /* */ }
+
+      let savedView:
+        | { viewMode?: string; currentFolder?: string | null; breadcrumb?: { id: string | null; name: string }[] }
+        | null = null;
+      try {
+        const raw = sessionStorage.getItem("securewarp_view_state");
+        if (raw) savedView = JSON.parse(raw);
+      } catch { /* */ }
+
+      try {
+        if (savedWorkspace) {
+          // Workspace-scoped restore. Land at the workspace root
+          // first, then navigate deeper if the saved folder is below
+          // the root.
+          await fileOps.navigateToWorkspace(
+            savedWorkspace.id,
+            savedWorkspace.rootFolderId,
+            savedWorkspace.name,
+            savedWorkspace.role,
+          );
+          if (
+            savedView?.currentFolder &&
+            savedView.currentFolder !== savedWorkspace.rootFolderId &&
+            savedView.breadcrumb &&
+            savedView.breadcrumb.length > 0
+          ) {
+            await fileOps.fetchFiles(
+              savedView.currentFolder,
+              "own",
+              savedView.breadcrumb,
+            );
+          }
+        } else if (
+          savedView?.viewMode &&
+          savedView.viewMode !== "own"
+        ) {
+          // Special personal-drive view (starred / recent / trash / shared).
+          await fileOps.fetchFiles(
+            null,
+            savedView.viewMode as "starred" | "recent" | "trash" | "shared",
+            savedView.breadcrumb,
+          );
+        } else if (savedView?.currentFolder) {
+          // Inside a personal-drive subfolder.
+          await fileOps.fetchFiles(
+            savedView.currentFolder,
+            "own",
+            savedView.breadcrumb,
+          );
+        } else {
+          // Fresh session / no saved state — My Drive root.
+          await fileOps.fetchFiles(null);
+        }
+      } finally {
+        hasRestoredViewRef.current = true;
       }
-    } catch { /* */ }
-    fileOps.fetchFiles(fileOps.currentFolder);
+    })();
   }, [keys]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist the current view whenever it changes. Gated on
+  // hasRestoredViewRef so the initial pre-restore state (default
+  // "My Drive root") doesn't clobber a valid saved view.
+  useEffect(() => {
+    if (!keys || !hasRestoredViewRef.current) return;
+    try {
+      sessionStorage.setItem(
+        "securewarp_view_state",
+        JSON.stringify({
+          viewMode: fileOps.viewMode,
+          currentFolder: fileOps.currentFolder,
+          breadcrumb: fileOps.breadcrumb,
+        }),
+      );
+    } catch { /* quota / private mode — non-fatal */ }
+  }, [keys, fileOps.viewMode, fileOps.currentFolder, fileOps.breadcrumb]);
 
   // Fetch workspace members for the Facepile
   const fetchWorkspaceInfo = useCallback(() => {
