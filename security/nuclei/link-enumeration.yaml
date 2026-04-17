@@ -1,0 +1,31 @@
+id: securewarp-link-enumeration
+info:
+  name: Anonymous link enumeration — 404 collapse regression
+  author: securewarp
+  severity: high
+  description: |
+    The anonymous /api/files/link/{id} endpoint MUST return 404 for every
+    failure mode (nonexistent, revoked, expired, malformed UUID). A 200,
+    403, 401, or 500 leaks existence / handler state.
+
+    This template reports a FINDING when any of these probes gets a
+    non-404 response — i.e. a regression of the Phase 4 invariant.
+
+    Ref: src/app/api/files/link/[id]/route.ts
+  tags: securewarp,enumeration,anonymous
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/files/link/00000000-0000-4000-8000-000000000000"
+      - "{{BaseURL}}/api/files/link/11111111-1111-4111-8111-111111111111"
+      - "{{BaseURL}}/api/files/link/not-a-uuid"
+      - "{{BaseURL}}/api/files/link/%20"
+
+    stop-at-first-match: false
+    matchers:
+      - type: status
+        negative: true
+        status:
+          - 404
+          - 429 # rate limiting also acceptable — hides existence

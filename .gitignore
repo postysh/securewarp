@@ -12,6 +12,13 @@
 
 # testing
 /coverage
+# Playwright writes trace/video/screenshots here on failure
+/test-results
+/playwright-report
+
+# security artifacts (generated on demand)
+sbom.json
+migrations-dump.sql
 
 # next.js
 /.next/

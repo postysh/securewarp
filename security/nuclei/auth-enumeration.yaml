@@ -1,0 +1,45 @@
+id: securewarp-auth-enumeration
+info:
+  name: Auth endpoints leak email existence
+  author: securewarp
+  severity: high
+  description: |
+    /api/auth/login/init and /api/auth/recover must collapse "unknown
+    email" and "wrong password" into the same generic error. A FINDING
+    fires if the response body reveals non-existence.
+
+    Ref: normalizeEmail() + generic "Invalid email or password" branch
+    in src/app/api/auth/login/init/route.ts
+  tags: securewarp,enumeration,auth
+
+http:
+  - raw:
+      - |
+        POST /api/auth/login/init HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+        User-Agent: Nuclei-SecureWarp-Check
+
+        {"email":"nonexistent-probe-{{randstr}}@example.invalid","clientPublicEphemeral":"a"}
+
+      - |
+        POST /api/auth/recover HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"action":"verify","email":"nonexistent-probe-{{randstr}}@example.invalid","recoveryKeyHash":"deadbeef"}
+
+    stop-at-first-match: false
+    matchers-condition: or
+    matchers:
+      - type: word
+        part: body
+        case-insensitive: true
+        words:
+          - "not found"
+          - "does not exist"
+          - "unknown user"
+          - "unknown email"
+          - "no such user"
+          - "no account"
+          - "email not registered"

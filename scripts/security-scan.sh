@@ -60,6 +60,11 @@ header "DEPENDENCY VULNERABILITIES"
 run_check "npm audit" \
   npm audit --audit-level=high
 
+# Verifies every installed package has a valid npm-registry signature.
+# Catches tampered tarballs that slip past advisory-based npm audit.
+run_check "npm package signatures" \
+  npm audit signatures
+
 run_check "Trivy filesystem scan" \
   trivy fs --severity HIGH,CRITICAL --exit-code 1 --quiet .
 
@@ -94,6 +99,13 @@ run_check "Vitest" \
 
 if [[ "$MODE" == "full" ]]; then
 
+  header "SBOM"
+
+  # Generate a CycloneDX SBOM for audit / release archival. The CI
+  # workflow also produces one on every main push as an artifact.
+  run_check "CycloneDX SBOM generation" \
+    bash -c "npx --yes @cyclonedx/cyclonedx-npm --output-format JSON --output-file '$REPO_ROOT/sbom.json' 2>&1"
+
   header "DAST (live scan against production)"
 
   PROD_URL="${SCAN_URL:-https://securewarp.com}"
@@ -102,6 +114,15 @@ if [[ "$MODE" == "full" ]]; then
     nuclei -u "$PROD_URL" -as \
       -severity medium,high,critical \
       -silent -no-color
+
+  # SecureWarp-specific templates: route-level invariants that generic
+  # Nuclei rules can't know about (anonymous link 404-collapse, POST-only
+  # method restrictions, auth gates on state-change endpoints, etc.).
+  # Templates report FINDINGS — a clean run is silent, matches mean a
+  # regression was detected. Nuclei has no native fail-on-match flag,
+  # so we invert: any stdout output = match = fail.
+  run_check "Nuclei (SecureWarp custom templates)" \
+    bash -c "out=\$(nuclei -u '$PROD_URL' -t '$REPO_ROOT/security/nuclei/' -silent -no-color 2>&1); if [ -n \"\$out\" ]; then echo \"\$out\"; exit 1; fi"
 
   header "HTTP SECURITY HEADERS"
 

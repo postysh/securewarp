@@ -1,0 +1,57 @@
+id: securewarp-error-disclosure
+info:
+  name: 5xx / error response leaks framework internals
+  author: securewarp
+  severity: medium
+  description: |
+    Deliberately malformed requests should produce a structured error
+    JSON — never a stack trace, bundler path, or a Supabase error code.
+    This template reports a FINDING when any probed endpoint echoes a
+    disclosure marker back to the caller.
+
+    Ref: logError() in @/lib/log strips fields; routes catch and return
+    { error: "generic message" }.
+  tags: securewarp,disclosure,info-leak
+
+http:
+  - raw:
+      - |
+        POST /api/auth/register HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"email":"not-an-email","srpSalt":1,"srpVerifier":null}
+
+      - |
+        POST /api/files/share HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        []
+
+      - |
+        POST /api/auth/recover HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"action":"update","recoveryToken":"deliberately.malformed.jwt","newSrpSalt":"x","newSrpVerifier":"x","newArgon2Salt":"x","newEncryptedUserData":"x"}
+
+    stop-at-first-match: false
+    matchers:
+      # Fire when body contains any disclosure marker — stack traces,
+      # bundler paths, Supabase / Postgres error codes, internal hostnames.
+      - type: word
+        part: body
+        condition: or
+        words:
+          - "at async"
+          - "at Object."
+          - "node_modules"
+          - ".ts:"
+          - ".js:"
+          - "PGRST"
+          - "ECONNREFUSED"
+          - "supabase.co"
+          - "SUPABASE_"
+          - "stack trace"
+          - "Error: "

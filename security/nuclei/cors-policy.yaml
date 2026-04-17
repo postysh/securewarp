@@ -1,0 +1,60 @@
+id: securewarp-cors-policy
+info:
+  name: CORS — no credentialed cross-origin access
+  author: securewarp
+  severity: high
+  description: |
+    SecureWarp API is same-origin by design. A cross-origin preflight
+    from an arbitrary origin must NOT return:
+      - Access-Control-Allow-Origin: *
+      - Access-Control-Allow-Origin: <attacker-origin>
+      - Access-Control-Allow-Credentials: true
+    Any of those combos enables CSRF/session theft from a malicious site.
+  tags: securewarp,cors,csrf
+
+http:
+  - raw:
+      - |
+        OPTIONS /api/files/list HTTP/1.1
+        Host: {{Hostname}}
+        Origin: https://attacker.example
+        Access-Control-Request-Method: POST
+        Access-Control-Request-Headers: Content-Type
+
+      - |
+        OPTIONS /api/auth/session HTTP/1.1
+        Host: {{Hostname}}
+        Origin: https://attacker.example
+        Access-Control-Request-Method: GET
+
+      - |
+        OPTIONS /api/workspaces HTTP/1.1
+        Host: {{Hostname}}
+        Origin: null
+        Access-Control-Request-Method: POST
+
+    stop-at-first-match: false
+    matchers-condition: or
+    matchers:
+      # Flag wildcard ACAO.
+      - type: word
+        part: header
+        words:
+          - "Access-Control-Allow-Origin: *"
+          - "access-control-allow-origin: *"
+
+      # Flag the attacker echo.
+      - type: word
+        part: header
+        words:
+          - "Access-Control-Allow-Origin: https://attacker.example"
+          - "access-control-allow-origin: https://attacker.example"
+
+      # Flag ACAO: null. The 'null' origin is generally disallowed because
+      # sandboxed iframes and file:// pages report Origin: null, and any
+      # policy that trusts it is exploitable.
+      - type: word
+        part: header
+        words:
+          - "Access-Control-Allow-Origin: null"
+          - "access-control-allow-origin: null"

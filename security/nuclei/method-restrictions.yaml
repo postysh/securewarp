@@ -1,0 +1,43 @@
+id: securewarp-method-restrictions
+info:
+  name: POST-only endpoints accept GET — regression
+  author: securewarp
+  severity: medium
+  description: |
+    State-changing endpoints are POST-only. A GET to them must return
+    405 Method Not Allowed. Any 2xx / 500 means the handler either
+    accidentally exports GET or crashes unexpectedly on the wrong verb.
+
+    This template reports a FINDING when an endpoint responds to GET
+    with anything other than 405 (or an acceptable 401/403 auth gate).
+  tags: securewarp,method,regression
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/auth/register"
+      - "{{BaseURL}}/api/auth/login/verify"
+      - "{{BaseURL}}/api/auth/login/verify-2fa"
+      - "{{BaseURL}}/api/auth/change-password"
+      - "{{BaseURL}}/api/auth/2fa/setup"
+      - "{{BaseURL}}/api/auth/2fa/verify-setup"
+      - "{{BaseURL}}/api/auth/2fa/disable"
+      - "{{BaseURL}}/api/files/share"
+      - "{{BaseURL}}/api/files/unshare"
+      - "{{BaseURL}}/api/files/delete"
+      - "{{BaseURL}}/api/workspaces/delete"
+      - "{{BaseURL}}/api/workspaces/transfer"
+
+    stop-at-first-match: false
+    matchers:
+      - type: status
+        negative: true
+        # Acceptable: 405 (method not allowed), 401/403 (auth gate fires
+        # before method check), 404 (route doesn't register GET — also
+        # fine).
+        status:
+          - 405 # method not allowed (ideal)
+          - 401 # auth gate fires before method check
+          - 403 # auth forbidden
+          - 404 # route doesn't register GET
+          - 429 # Cloudflare rate-limit on unauth probes — still safe

@@ -1,0 +1,45 @@
+id: securewarp-api-security-headers
+info:
+  name: API response missing core security header
+  author: securewarp
+  severity: medium
+  description: |
+    The API must carry the same baseline security headers as the HTML
+    surface. This template reports a FINDING when a probed endpoint is
+    missing HSTS, nosniff, or referrer-policy — common regressions when
+    Next.js middleware is edited.
+
+    Cross-origin isolation headers (COOP / CORP) are intentionally NOT
+    asserted here because they apply only to HTML-rendering routes.
+  tags: securewarp,headers,hsts
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/auth/session"
+      - "{{BaseURL}}/api/files/list"
+      - "{{BaseURL}}/api/workspaces"
+
+    stop-at-first-match: false
+    matchers-condition: or
+    matchers:
+      - type: word
+        part: header
+        case-insensitive: true
+        negative: true
+        words:
+          - "strict-transport-security:"
+
+      - type: word
+        part: header
+        case-insensitive: true
+        negative: true
+        words:
+          - "x-content-type-options: nosniff"
+
+      - type: word
+        part: header
+        case-insensitive: true
+        negative: true
+        words:
+          - "referrer-policy:"

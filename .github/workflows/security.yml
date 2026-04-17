@@ -36,7 +36,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   dependencies:
-    name: npm audit
+    name: npm audit + signatures
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,5 +46,59 @@ jobs:
           node-version: 20
           cache: npm
 
+      # `npm ci` refuses to run if package-lock.json diverges from
+      # package.json, giving us lockfile-integrity for free. The
+      # `--ignore-scripts` flag blocks any install-time hooks from
+      # executing — cuts off an entire class of supply-chain attack.
+      - name: Install (reproducible, no postinstall scripts)
+        run: npm ci --ignore-scripts
+
+      - name: npm audit
+        run: npm audit --audit-level=high
+
+      # Verify every installed tarball's npm-registry signature. Catches
+      # tampered packages that would otherwise slip past npm audit.
+      # Available since npm 8.15.
+      - name: Verify package signatures
+        run: npm audit signatures
+
+  dependency-review:
+    name: Dependency review (PR only)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      # Blocks the PR if it introduces a dependency (or new version) with
+      # a known high/critical CVE or an incompatible license. Runs only
+      # on PRs because the diff-vs-base comparison is the point.
+      - name: Review PR dependency diff
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          # Deny license families that would conflict with a future
+          # paid plan or closed-source distribution.
+          deny-licenses: AGPL-3.0, GPL-3.0
+
+  sbom:
+    name: Generate SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
       - run: npm ci --ignore-scripts
-      - run: npm audit --audit-level=high
+
+      - name: Generate CycloneDX SBOM
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-format JSON --output-file sbom.json
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx-${{ github.sha }}
+          path: sbom.json
+          retention-days: 90

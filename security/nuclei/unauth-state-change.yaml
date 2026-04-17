@@ -1,0 +1,60 @@
+id: securewarp-unauth-state-change
+info:
+  name: Protected state-change endpoints accept unauthenticated POST — regression
+  author: securewarp
+  severity: critical
+  description: |
+    Every state-changing endpoint must reject unauthenticated POSTs with
+    401 before doing any work. This template reports a FINDING when any
+    endpoint responds with anything other than 401/403 — a genuine auth
+    bypass or a crash short of the gate.
+
+    Ref: api-security.test.ts covers this with mocks; this template
+    validates the live service.
+  tags: securewarp,auth,regression
+
+http:
+  - raw:
+      - |
+        POST /api/files/delete HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"fileId":"11111111-1111-4111-8111-111111111111"}
+
+      - |
+        POST /api/files/share HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"fileId":"11111111-1111-4111-8111-111111111111","recipientEmail":"x@y.com","encryptedPrivateHierarchicalKey":"x","wrappedByPublicKey":"x"}
+
+      - |
+        POST /api/workspaces/delete HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"workspaceId":"11111111-1111-4111-8111-111111111111"}
+
+      - |
+        POST /api/auth/change-password HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"oldSrpVerifier":"x","newSrpSalt":"x","newSrpVerifier":"x","newArgon2Salt":"x","newEncryptedUserData":"x"}
+
+      - |
+        POST /api/auth/2fa/disable HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"code":"000000"}
+
+    stop-at-first-match: false
+    matchers:
+      - type: status
+        negative: true
+        status:
+          - 401 # unauthenticated (ideal)
+          - 403 # turnstile / csrf reject
+          - 429 # rate-limited — no handler work done, still safe
