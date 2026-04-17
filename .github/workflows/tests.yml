@@ -37,6 +37,10 @@ jobs:
     # Cuts feedback time: a broken unit test shouldn't waste integration
     # minutes too.
     needs: unit
+    # Secrets for the dedicated test Supabase project live in the
+    # `SecureWarp-test` environment — opt into it so ${{ secrets.* }}
+    # resolves. Without this line, env-scoped secrets are invisible.
+    environment: SecureWarp-test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -63,6 +67,8 @@ jobs:
     # 6 tests with real Argon2 adds up. 15m is comfortable.
     timeout-minutes: 15
     needs: unit
+    # Same environment gate as integration — secrets live here.
+    environment: SecureWarp-test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
