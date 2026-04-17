@@ -39,6 +39,14 @@ import {
   clearFor as clearSearchCache,
   type SearchCacheEntry,
 } from "@/lib/search/local-cache";
+import {
+  create as createOrama,
+  insert as insertOrama,
+  insertMultiple as insertMultipleOrama,
+  remove as removeOrama,
+  search as searchOrama,
+  type AnyOrama,
+} from "@orama/orama";
 
 export interface FileCollaboratorPreview {
   userId: string;
@@ -218,19 +226,56 @@ export function useFiles(keys: {
   // refreshSearchCacheIfStale to decide whether to force a rebuild
   // when Command Palette opens.
   const lastBuildMsRef = useRef<number | null>(null);
+  // Orama full-text index — mirrors searchEntriesRef, gives us
+  // typo-tolerant BM25-ranked search instead of the old
+  // substring-scoring path. Built from the mirror on rebuild/hydrate
+  // and kept in sync on per-item mutations via the helpers below.
+  const oramaDbRef = useRef<AnyOrama | null>(null);
+  const buildOramaIndex = async (entries: SearchCacheEntry[]): Promise<AnyOrama> => {
+    const db = await createOrama({
+      schema: { name: "string", breadcrumb: "string" },
+    });
+    if (entries.length > 0) {
+      await insertMultipleOrama(
+        db,
+        entries.map((e) => ({ id: e.id, name: e.name, breadcrumb: e.breadcrumb })),
+      );
+    }
+    return db;
+  };
   // Tiny helper so each mutation site is one line instead of four.
   const syncSearchMirror = (entry: SearchCacheEntry) => {
     const current = searchEntriesRef.current;
-    if (!current) return;
-    const idx = current.findIndex((e) => e.id === entry.id);
-    if (idx >= 0) current[idx] = entry;
-    else current.push(entry);
+    if (current) {
+      const idx = current.findIndex((e) => e.id === entry.id);
+      if (idx >= 0) current[idx] = entry;
+      else current.push(entry);
+    }
+    const db = oramaDbRef.current;
+    if (db) {
+      // Fire-and-forget: Orama's in-memory ops resolve in a single
+      // microtask. A failure here just means the entry is absent from
+      // the index until the next cache rebuild — not catastrophic.
+      void (async () => {
+        try { await removeOrama(db, entry.id); } catch { /* not present yet */ }
+        try {
+          await insertOrama(db, { id: entry.id, name: entry.name, breadcrumb: entry.breadcrumb });
+        } catch { /* best-effort */ }
+      })();
+    }
   };
   const removeFromSearchMirror = (fileId: string) => {
     const current = searchEntriesRef.current;
-    if (!current) return;
-    const idx = current.findIndex((e) => e.id === fileId);
-    if (idx >= 0) current.splice(idx, 1);
+    if (current) {
+      const idx = current.findIndex((e) => e.id === fileId);
+      if (idx >= 0) current.splice(idx, 1);
+    }
+    const db = oramaDbRef.current;
+    if (db) {
+      void (async () => {
+        try { await removeOrama(db, fileId); } catch { /* */ }
+      })();
+    }
   };
 
   useEffect(() => {
@@ -2844,6 +2889,7 @@ export function useFiles(keys: {
     await replaceSearchCache(keys.email, keys.encryptionPrivateKey, entries);
     await markSearchBuilt(keys.email);
     searchEntriesRef.current = entries;
+    oramaDbRef.current = await buildOramaIndex(entries);
     lastBuildMsRef.current = Date.now();
     // eslint-disable-next-line no-console
     console.log("[search.cache] built", {
@@ -2910,10 +2956,13 @@ export function useFiles(keys: {
           const existing = await getSearchBuiltAt(keys.email);
           if (existing) {
             // IndexedDB has a prior build from another tab/session —
-            // hydrate the in-memory mirror from it.
+            // hydrate the in-memory mirror from it, then rebuild the
+            // Orama index so typo-tolerant search works without waiting
+            // for the next staleness-driven rebuild.
             searchBuildPromiseRef.current = (async () => {
               const loaded = await loadSearchCache(keys.email, keys.encryptionPrivateKey);
               searchEntriesRef.current = loaded;
+              oramaDbRef.current = await buildOramaIndex(loaded);
             })();
           } else {
             searchBuildPromiseRef.current = rebuildSearchCache();
@@ -2923,40 +2972,56 @@ export function useFiles(keys: {
       }
 
       const entries = searchEntriesRef.current ?? [];
-      const trimmed = query.trim().toLowerCase();
+      const trimmed = query.trim();
       if (!trimmed) return entries.slice(0, 20);
 
-      // Simple relevance ranking so the most obvious match appears
-      // first instead of being buried mid-list. Priority order:
-      //   1. Name starts with the query
-      //   2. Name contains the query (middle-match)
-      //   3. Breadcrumb contains the query (file lives in a matching folder)
-      // Ties broken by recency (updatedAt desc).
-      const scored = [] as { entry: SearchCacheEntry; score: number }[];
-      for (const e of entries) {
-        const lname = e.name.toLowerCase();
-        const lbread = e.breadcrumb.toLowerCase();
-        let score = 0;
-        if (lname.startsWith(trimmed)) score = 3;
-        else if (lname.includes(trimmed)) score = 2;
-        else if (lbread.includes(trimmed)) score = 1;
-        if (score > 0) scored.push({ entry: e, score });
+      // Orama path: BM25 ranking + typo tolerance (edit distance 1)
+      // over the decrypted name + breadcrumb fields. Name is boosted
+      // 3x so "budget" still ranks budget.pdf above anything that
+      // just happens to live in a folder called Budget.
+      const db = oramaDbRef.current;
+      if (!db) return [];
+      const byId = new Map(entries.map((e) => [e.id, e]));
+      try {
+        const res = await searchOrama(db, {
+          term: trimmed,
+          properties: ["name", "breadcrumb"],
+          tolerance: 1,
+          boost: { name: 3, breadcrumb: 1 },
+          limit: 50,
+        });
+        const out: SearchCacheEntry[] = [];
+        for (const hit of res.hits) {
+          const entry = byId.get(hit.id as string);
+          if (entry) out.push(entry);
+        }
+        return out;
+      } catch {
+        // Orama failure (corrupt index, unexpected tokenizer path)
+        // shouldn't take search down — fall back to a substring scan
+        // so the user still gets results while we rebuild on next open.
+        const lower = trimmed.toLowerCase();
+        return entries
+          .filter((e) =>
+            e.name.toLowerCase().includes(lower) ||
+            e.breadcrumb.toLowerCase().includes(lower),
+          )
+          .slice(0, 50);
       }
-      scored.sort((a, b) => {
-        if (a.score !== b.score) return b.score - a.score;
-        return b.entry.updatedAt.localeCompare(a.entry.updatedAt);
-      });
-      return scored.slice(0, 50).map((s) => s.entry);
     },
     [keys, rebuildSearchCache],
   );
 
   // Rebuild the cache when the signed-in user changes. Wipes any
-  // prior user's entries before triggering a fresh build so the
-  // palette never leaks names across accounts on a shared device.
+  // prior user's entries (including the in-memory Orama index)
+  // before triggering a fresh build so the palette never leaks names
+  // across accounts on a shared device.
   useEffect(() => {
     if (!keys) return;
     searchBuildPromiseRef.current = null;
+    searchEntriesRef.current = null;
+    oramaDbRef.current = null;
+    lastBuildMsRef.current = null;
     void (async () => {
       const builtAt = await getSearchBuiltAt(keys.email);
       if (!builtAt) {
