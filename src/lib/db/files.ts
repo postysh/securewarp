@@ -986,9 +986,17 @@ export async function getAllAccessibleFiles(
   // That child's `owner_id` is the collaborator, its file_keys row
   // is for the collaborator, and the caller's access is purely via
   // the `parent_keys_claim` chain. The owned/shared queries miss it
-  // because they require a direct file_keys row. We walk down the
-  // parent tree iteratively until no new rows appear; depth cap
-  // protects against loops (not reachable today but cheap insurance).
+  // because they require a direct file_keys row.
+  //
+  // Uses a left-join pattern (fetch files, then fetch *the caller's*
+  // file_keys rows separately and merge) so rows without a caller
+  // key return with empty key fields. The client then falls through
+  // to the parent_keys_claim branch instead of trying to unwrap a
+  // stranger's wrapped key and failing. Mirrors getInheritedChildren.
+  //
+  // We walk down the parent tree iteratively until no new rows
+  // appear; depth cap protects against loops (not reachable today
+  // but cheap insurance).
   const accessibleIds = new Set(combined.map((f) => f.id));
   let frontier = Array.from(accessibleIds);
   let depth = 0;
@@ -996,19 +1004,49 @@ export async function getAllAccessibleFiles(
     depth++;
     const { data: children, error: cErr } = await supabase
       .from("files")
-      .select(LIST_SELECT)
+      .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
       .in("parent_id", frontier)
       .eq("upload_complete", true)
       .is("deleted_at", null)
       .limit(1000);
     if (cErr) throw new Error(`Failed to fetch inherited children: ${cErr.message}`);
+    const rawRows = (children ?? []) as unknown as (FileRow & {
+      owner: { public_encryption_key: string } | null;
+    })[];
+    const newIds: string[] = [];
+    for (const raw of rawRows) {
+      if (!accessibleIds.has(raw.id)) newIds.push(raw.id);
+    }
+    if (newIds.length === 0) break;
+    const { data: keyRows } = await supabase
+      .from("file_keys")
+      .select("file_id, encrypted_private_hierarchical_key, wrapped_by_public_key")
+      .eq("user_id", userId)
+      .in("file_id", newIds);
+    const keyByFile = new Map(
+      (keyRows ?? []).map((k) => [
+        k.file_id as string,
+        {
+          encrypted_private_hierarchical_key: k.encrypted_private_hierarchical_key as string,
+          wrapped_by_public_key: k.wrapped_by_public_key as string,
+        },
+      ]),
+    );
     const nextFrontier: string[] = [];
-    for (const raw of (children ?? [])) {
-      const shaped = shapeRow(raw as unknown as FileJoinRow);
-      if (accessibleIds.has(shaped.id)) continue;
-      accessibleIds.add(shaped.id);
+    for (const raw of rawRows) {
+      if (accessibleIds.has(raw.id)) continue;
+      accessibleIds.add(raw.id);
+      const fk = keyByFile.get(raw.id);
+      const { owner, ...rest } = raw as unknown as Record<string, unknown> & {
+        owner: { public_encryption_key: string } | null;
+      };
+      const shaped: FileRowWithKey = {
+        ...(rest as unknown as FileRow),
+        encrypted_private_hierarchical_key: fk?.encrypted_private_hierarchical_key ?? "",
+        wrapped_by_public_key: fk?.wrapped_by_public_key ?? "",
+        owner_public_key: owner?.public_encryption_key ?? "",
+      };
       combined.push(shaped);
-      // Only folders can have descendants, so only descend through those.
       if (shaped.is_folder) nextFrontier.push(shaped.id);
     }
     frontier = nextFrontier;
