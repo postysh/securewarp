@@ -1,0 +1,120 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel duplicate runs on the same branch so pushing twice quickly
+# doesn't rack up minutes. Last commit wins.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit (Vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      # --ignore-scripts is safe here — unit tests don't touch native
+      # binaries; they just exercise pure JS crypto + mocked services.
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Run unit tests
+        run: npm test -- --run
+
+  integration:
+    name: Integration (real Supabase)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Cuts feedback time: a broken unit test shouldn't waste integration
+    # minutes too.
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Run integration tests
+        run: npm run test:integration
+        env:
+          # All of these point at the DEDICATED test Supabase project —
+          # not production. Real tests, isolated data.
+          SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY }}
+          # SESSION_SECRET is required by any route handler importing
+          # @/lib/auth/session; integration tests exercise those flows.
+          SESSION_SECRET: ${{ secrets.TEST_SESSION_SECRET }}
+
+  e2e:
+    name: E2E (Playwright, real Chromium)
+    runs-on: ubuntu-latest
+    # Longer timeout: Playwright browser install + dev server boot +
+    # 6 tests with real Argon2 adds up. 15m is comfortable.
+    timeout-minutes: 15
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # E2E needs install scripts (Next.js uses workerd / esbuild /
+      # fsevents postinstalls). If we skipped scripts here, the dev
+      # server wouldn't boot on Ubuntu.
+      - name: Install
+        run: npm ci
+
+      # Cache Playwright's browser downloads — saves ~60s per run.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install system deps only (cache hit case)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Run e2e tests
+        run: npm run test:e2e
+        env:
+          CI: "1"
+          SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
+          SESSION_SECRET: ${{ secrets.TEST_SESSION_SECRET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.TEST_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.TEST_R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.TEST_R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.TEST_R2_BUCKET }}
+
+      # On failure, upload Playwright's traces + screenshots + videos
+      # so we can debug without re-running locally. Retention is short
+      # to keep artifact storage in check.
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14

@@ -5,11 +5,14 @@ import { resolve } from "node:path";
 // Load .env.test so the Next.js dev server started below runs against
 // the isolated test Supabase project, never prod. `.env.test` is
 // gitignored; see the harness setup for the values it expects.
+//
+// On CI, `.env.test` doesn't exist — secrets are injected directly
+// into process.env by the workflow. Skip the file-load gracefully
+// when the file's missing but the required env is already set.
 const loaded = config({ path: resolve(__dirname, ".env.test"), quiet: true });
-if (loaded.error) {
+if (loaded.error && !process.env.SUPABASE_URL) {
   throw new Error(
-    `Playwright requires .env.test — ${loaded.error.message}. ` +
-      `See vitest.integration.config.ts for the setup.`,
+    `Playwright requires .env.test (or SUPABASE_URL in env) — ${loaded.error.message}.`,
   );
 }
 
