@@ -978,6 +978,41 @@ export async function getAllAccessibleFiles(
     }
   }
 
+  // Inherited personal-drive descendants: files whose parent is in
+  // the accessible set but the caller has no direct file_keys row on
+  // the child. Common case — a collaborator the caller shared a
+  // folder with creates a new subfolder or uploads a file inside it.
+  // That child's `owner_id` is the collaborator, its file_keys row
+  // is for the collaborator, and the caller's access is purely via
+  // the `parent_keys_claim` chain. The owned/shared queries miss it
+  // because they require a direct file_keys row. We walk down the
+  // parent tree iteratively until no new rows appear; depth cap
+  // protects against loops (not reachable today but cheap insurance).
+  const accessibleIds = new Set(combined.map((f) => f.id));
+  let frontier = Array.from(accessibleIds);
+  let depth = 0;
+  while (frontier.length > 0 && depth < 32) {
+    depth++;
+    const { data: children, error: cErr } = await supabase
+      .from("files")
+      .select(LIST_SELECT)
+      .in("parent_id", frontier)
+      .eq("upload_complete", true)
+      .is("deleted_at", null)
+      .limit(1000);
+    if (cErr) throw new Error(`Failed to fetch inherited children: ${cErr.message}`);
+    const nextFrontier: string[] = [];
+    for (const raw of (children ?? [])) {
+      const shaped = shapeRow(raw as unknown as FileJoinRow);
+      if (accessibleIds.has(shaped.id)) continue;
+      accessibleIds.add(shaped.id);
+      combined.push(shaped);
+      // Only folders can have descendants, so only descend through those.
+      if (shaped.is_folder) nextFrontier.push(shaped.id);
+    }
+    frontier = nextFrontier;
+  }
+
   return combined;
 }
 
