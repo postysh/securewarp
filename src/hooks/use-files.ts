@@ -2975,39 +2975,54 @@ export function useFiles(keys: {
       const trimmed = query.trim();
       if (!trimmed) return entries.slice(0, 20);
 
-      // Orama path: BM25 ranking + typo tolerance (edit distance 1)
-      // over the decrypted name + breadcrumb fields. Name is boosted
-      // 3x so "budget" still ranks budget.pdf above anything that
-      // just happens to live in a folder called Budget.
+      // Union of two matchers:
+      //
+      //   1. Orama (BM25 + edit-distance-1 typo tolerance) — handles
+      //      fuzzy queries like "buget" → "budget.pdf".
+      //   2. Literal substring scan — catches queries that Orama's
+      //      English tokenizer drops or over-stems (short tokens,
+      //      numeric tokens like "Test 2", dotted names like
+      //      "foo.pdf", accented characters).
+      //
+      // We union both so the user never misses something that exists
+      // in the cache. Orama hits come first (ranked), then any
+      // substring-only matches tack on at the end.
       const db = oramaDbRef.current;
-      if (!db) return [];
       const byId = new Map(entries.map((e) => [e.id, e]));
-      try {
-        const res = await searchOrama(db, {
-          term: trimmed,
-          properties: ["name", "breadcrumb"],
-          tolerance: 1,
-          boost: { name: 3, breadcrumb: 1 },
-          limit: 50,
-        });
-        const out: SearchCacheEntry[] = [];
-        for (const hit of res.hits) {
-          const entry = byId.get(hit.id as string);
-          if (entry) out.push(entry);
+      const ordered: SearchCacheEntry[] = [];
+      const seen = new Set<string>();
+      if (db) {
+        try {
+          const res = await searchOrama(db, {
+            term: trimmed,
+            properties: ["name", "breadcrumb"],
+            tolerance: 1,
+            boost: { name: 3, breadcrumb: 1 },
+            limit: 50,
+          });
+          for (const hit of res.hits) {
+            const entry = byId.get(hit.id as string);
+            if (entry && !seen.has(entry.id)) {
+              ordered.push(entry);
+              seen.add(entry.id);
+            }
+          }
+        } catch {
+          // Orama failure falls through to substring below.
         }
-        return out;
-      } catch {
-        // Orama failure (corrupt index, unexpected tokenizer path)
-        // shouldn't take search down — fall back to a substring scan
-        // so the user still gets results while we rebuild on next open.
-        const lower = trimmed.toLowerCase();
-        return entries
-          .filter((e) =>
-            e.name.toLowerCase().includes(lower) ||
-            e.breadcrumb.toLowerCase().includes(lower),
-          )
-          .slice(0, 50);
       }
+      const lower = trimmed.toLowerCase();
+      for (const e of entries) {
+        if (seen.has(e.id)) continue;
+        if (
+          e.name.toLowerCase().includes(lower) ||
+          e.breadcrumb.toLowerCase().includes(lower)
+        ) {
+          ordered.push(e);
+          seen.add(e.id);
+        }
+      }
+      return ordered.slice(0, 50);
     },
     [keys, rebuildSearchCache],
   );
