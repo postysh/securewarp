@@ -56,12 +56,14 @@ function saveSeen(seen: SeenMap) {
 }
 
 export function useNewFiles() {
-  const [seen, setSeen] = useState<SeenMap>({});
-  // Hydrate on mount only — SSR returns {} to avoid hydration
-  // mismatch on the server/client boundary.
-  useEffect(() => {
-    setSeen(loadSeen());
-  }, []);
+  // Lazy init from localStorage so the very first render already
+  // reflects previously-seen items. Using useEffect to hydrate was
+  // racy: first render showed the badge with an empty seen map, and
+  // if the user clicked before the effect fired, markSeen would write
+  // a seen map built from the empty state — stomping any other entries
+  // that hadn't loaded yet. Since the hook is only called inside
+  // `"use client"` trees, running this on first render is safe.
+  const [seen, setSeen] = useState<SeenMap>(() => loadSeen());
 
   const markSeen = useCallback((fileId: string) => {
     setSeen((prev) => {
@@ -88,6 +90,21 @@ export function useNewFiles() {
       return next;
     });
   }, []);
+
+  // Mark-seen on folder-open events dispatched from use-files.ts. Any
+  // code path that navigates into a folder (row click, keyboard Enter,
+  // context menu "Open", drag-hover, etc.) goes through
+  // `navigateToFolder`, which fires this event. Consolidates the
+  // dismiss logic so the badge dies on navigation regardless of which
+  // click handler started it.
+  useEffect(() => {
+    const onOpened = (e: Event) => {
+      const detail = (e as CustomEvent<{ fileId?: string }>).detail;
+      if (detail?.fileId) markSeen(detail.fileId);
+    };
+    window.addEventListener("securewarp-file-opened", onOpened);
+    return () => window.removeEventListener("securewarp-file-opened", onOpened);
+  }, [markSeen]);
 
   const isNew = useCallback(
     (fileId: string, createdAtIso: string | null | undefined): boolean => {

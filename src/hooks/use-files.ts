@@ -2604,6 +2604,14 @@ export function useFiles(keys: {
       await fetchFiles(null, "own", bc);
       return;
     } else {
+      // Broadcast the open so useNewFiles can dismiss the NEW badge
+      // regardless of which UI path (click, keyboard, context menu)
+      // triggered the navigation. The individual click handlers still
+      // call markSeen directly — this is belt-and-suspenders for the
+      // paths that forgot to.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("securewarp-file-opened", { detail: { fileId: folderId } }));
+      }
       // Compute the new breadcrumb from current state
       const lastCrumb = state.breadcrumb[state.breadcrumb.length - 1];
       if (lastCrumb?.id === folderId) {

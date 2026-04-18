@@ -606,10 +606,11 @@ export function useAuth() {
   }
 
   /**
-   * Fast tab-reopen path: re-derive the in-memory keys from the
-   * local lock cache using the password alone. Runs a local Argon2id
-   * + HKDF chain — never hits the server. Used by `auth-screen.tsx`
-   * when `readLockCacheMeta()` returns a cached user.
+   * Tab-reopen path: re-derive the in-memory keys from the local
+   * lock cache using the password alone, then run an SRP handshake
+   * against the server so the TOTP gate is honoured. Used by
+   * `auth-screen.tsx` when `readLockCacheMeta()` returns a cached
+   * user.
    */
   async function unlock(password: string) {
     const meta = readLockCacheMeta();
@@ -635,7 +636,7 @@ export function useAuth() {
       setStep("Deriving master key…");
       const argon2SaltBytes = fromBase64(meta.argon2Salt);
       const masterKey = await deriveMainKey(password, argon2SaltBytes);
-      const { unlockCacheKey } = splitMasterKey(masterKey);
+      const { srpKey, unlockCacheKey } = splitMasterKey(masterKey);
 
       setStep("Unsealing…");
       let payload;
@@ -649,82 +650,77 @@ export function useAuth() {
         ...payload,
         email: meta.email,
       };
-      // Don't write keys to sessionStorage yet. If the JWT is expired
-      // and 2FA is enabled, we need to wait for the TOTP code before
-      // committing keys. Writing early leaks decrypted private keys
-      // to sessionStorage while the 2FA prompt is still pending.
+      // Don't write keys to sessionStorage yet. If 2FA is enabled we
+      // need to wait for the TOTP code before committing. Writing early
+      // leaks decrypted private keys to sessionStorage while the 2FA
+      // prompt is still pending.
 
-      // Check if the server session is still valid. If the JWT
-      // expired, run a full SRP handshake (without Turnstile) to
-      // get a fresh JWT. The user already proved they know the
-      // password via Argon2 + lock cache unseal.
-      const sessionRes = await fetch("/api/auth/session");
-      if (!sessionRes.ok) {
-        setStep("Refreshing session...");
-        // Re-derive SRP key from the same master key chain
-        const masterKey2 = await deriveMainKey(password, fromBase64(meta.argon2Salt));
-        const { srpKey: srpKey2 } = splitMasterKey(masterKey2);
+      // Always run a full SRP re-auth on unlock — even if the JWT
+      // cookie is still valid. A valid JWT proves the server trusted
+      // *some* prior login, but for 2FA-enabled accounts we want the
+      // second factor re-challenged every time the user enters their
+      // password on this screen; otherwise a thief with the device
+      // password bypasses 2FA entirely as long as the 7-day cookie
+      // hasn't expired. The server's `requires2FA` branch on
+      // `/login/verify` is the canonical gate — always hit it.
+      setStep("Refreshing session...");
 
-        const { generateClientEphemeral, deriveClientSession, verifyServerProof } = await import("@/lib/srp/client");
-        const { clientSecretEphemeral, clientPublicEphemeral } = generateClientEphemeral();
+      const { generateClientEphemeral, deriveClientSession, verifyServerProof } = await import("@/lib/srp/client");
+      const { clientSecretEphemeral, clientPublicEphemeral } = generateClientEphemeral();
 
-        // Init (no Turnstile)
-        const initRes = await fetch("/api/auth/login/init-refresh", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: meta.email, clientPublicEphemeral }),
+      // Init (no Turnstile — we're not a fresh-device login)
+      const initRes = await fetch("/api/auth/login/init-refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: meta.email, clientPublicEphemeral }),
+      });
+      const initData = await initRes.json();
+      if (!initRes.ok) throw new Error(initData.error || "Session refresh failed");
+
+      // Derive + verify
+      const { clientSession, clientProof } = deriveClientSession(
+        clientSecretEphemeral,
+        clientPublicEphemeral,
+        initData.serverPublicEphemeral,
+        initData.srpSalt,
+        srpKey
+      );
+
+      const verifyRes = await fetch("/api/auth/login/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ srpSessionId: initData.srpSessionId, clientProof }),
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok) throw new Error(verifyData.error || "Session refresh failed");
+
+      verifyServerProof(clientPublicEphemeral, clientSession, verifyData.serverProof);
+
+      // If 2FA is enabled, the verify endpoint didn't create a
+      // session. Pause here and prompt for the TOTP code, same as
+      // the regular login flow. The keys are already unsealed from
+      // the lock cache; they'll be committed to sessionStorage
+      // after the code verifies.
+      if (verifyData.requires2FA) {
+        setState({
+          loading: false,
+          error: null,
+          step: null,
+          recoveryKey: null,
+          userKeys: null,
+          suspended: null,
+          pending2FA: {
+            srpSessionId: verifyData.srpSessionId ?? initData.srpSessionId,
+            keys,
+            email: meta.email,
+            argon2Salt: meta.argon2Salt,
+            unlockCacheKey: new Uint8Array(0),
+          },
         });
-        const initData = await initRes.json();
-        if (!initRes.ok) throw new Error(initData.error || "Session refresh failed");
-
-        // Derive + verify
-        const { clientSession, clientProof } = deriveClientSession(
-          clientSecretEphemeral,
-          clientPublicEphemeral,
-          initData.serverPublicEphemeral,
-          initData.srpSalt,
-          srpKey2
-        );
-
-        const verifyRes = await fetch("/api/auth/login/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ srpSessionId: initData.srpSessionId, clientProof }),
-        });
-        const verifyData = await verifyRes.json();
-        if (!verifyRes.ok) throw new Error(verifyData.error || "Session refresh failed");
-
-        verifyServerProof(clientPublicEphemeral, clientSession, verifyData.serverProof);
-
-        // If 2FA is enabled, the verify endpoint didn't create a
-        // session. Pause here and prompt for the TOTP code, same as
-        // the regular login flow. The keys are already unsealed from
-        // the lock cache; they'll be committed to sessionStorage
-        // after the code verifies.
-        if (verifyData.requires2FA) {
-          setState({
-            loading: false,
-            error: null,
-            step: null,
-            recoveryKey: null,
-            userKeys: null,
-            suspended: null,
-            pending2FA: {
-              srpSessionId: verifyData.srpSessionId ?? initData.srpSessionId,
-              keys,
-              email: meta.email,
-              argon2Salt: meta.argon2Salt,
-              unlockCacheKey: new Uint8Array(0),
-            },
-          });
-          return;
-        }
-        // No 2FA — JWT is now set via the verify endpoint's createSession call.
+        return;
       }
 
-      // Safe to commit keys now — either the JWT was still valid
-      // (no 2FA needed on tab reopen) or the SRP re-auth completed
-      // without requiring 2FA.
+      // No 2FA — JWT is now set via the verify endpoint's createSession call.
       sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
       window.dispatchEvent(new Event("securewarp-keys-updated"));
 
