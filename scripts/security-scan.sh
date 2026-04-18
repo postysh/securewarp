@@ -66,7 +66,7 @@ run_check "npm package signatures" \
   npm audit signatures
 
 run_check "Trivy filesystem scan" \
-  trivy fs --severity HIGH,CRITICAL --exit-code 1 --quiet .
+  trivy fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --quiet .
 
 header "SECRET SCANNING"
 
