@@ -27,6 +27,7 @@ export function StorageQuotaModal({ open, onClose }: Props) {
     trashBytes: number;
     trashCount: number;
   } | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -35,6 +36,20 @@ export function StorageQuotaModal({ open, onClose }: Props) {
       .then((d) => { if (d) setUsage(d); })
       .catch(() => {});
   }, [open]);
+
+  const handleUpgrade = async () => {
+    if (upgrading) return;
+    setUpgrading(true);
+    try {
+      const res = await fetch("/api/billing/checkout", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+    } catch { /* fall through */ }
+    setUpgrading(false);
+  };
 
   if (!open) return null;
 
@@ -105,10 +120,11 @@ export function StorageQuotaModal({ open, onClose }: Props) {
             Close
           </button>
           <button
-            onClick={onClose}
-            className="flex-1 h-[38px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer"
+            onClick={handleUpgrade}
+            disabled={upgrading}
+            className="flex-1 h-[38px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Upgrade plan
+            {upgrading ? "Opening checkout…" : "Upgrade plan"}
           </button>
         </div>
       </div>
