@@ -493,7 +493,11 @@ export function PlanBillingPanel() {
       {isPaid && invoices && invoices.length > 0 && (
         <div>
           <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-2">Invoices</p>
-          <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
+          {/* Cap the invoice list at 4 rows worth of height and
+              scroll within — keeps the plan card + subscription
+              management + cancel button visible while the user
+              browses their billing history. */}
+          <div className="rounded-[10px] border border-border-tertiary overflow-hidden max-h-[180px] overflow-y-auto">
             {invoices.slice(0, 10).map((inv) => (
               <div key={inv.id} className="flex items-center gap-3 px-3 py-2.5 border-b border-border-tertiary last:border-b-0">
                 <div className="flex-1 min-w-0">
