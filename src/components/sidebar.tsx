@@ -97,11 +97,10 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
     return () => window.removeEventListener("securewarp-open-settings", handler);
   }, []);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [planLabel, setPlanLabel] = useState<string>("Free plan");
-  // Refetch the plan label whenever the account dropdown opens (so
-  // the user sees the new tier immediately after subscribing) and
-  // whenever the app dispatches `securewarp-billing-refresh` from
-  // the plan panel after checkout success.
+  // Plan label for the dropdown header. Starts `null` so the row
+  // renders a skeleton instead of flashing "Free plan" briefly on
+  // the first dropdown open (which reads wrong for any paid user).
+  const [planLabel, setPlanLabel] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     const refresh = () => {
@@ -113,12 +112,25 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         })
         .catch(() => {});
     };
-    if (open) refresh();
+    // Prefetch on mount so the label is ready BEFORE the user
+    // clicks the dropdown for the first time. Also refresh on the
+    // billing-refresh event so a checkout flips the label across
+    // every open instance of the sidebar without a page reload.
+    refresh();
     window.addEventListener("securewarp-billing-refresh", refresh);
     return () => {
       cancelled = true;
       window.removeEventListener("securewarp-billing-refresh", refresh);
     };
+  }, []);
+  // Optional refresh when the dropdown opens — covers the case where
+  // another tab mutated the subscription and we want the latest.
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/billing/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.limits?.label) setPlanLabel(`${d.limits.label} plan`); })
+      .catch(() => {});
   }, [open]);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -206,7 +218,11 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             {userEmail}
           </div>
         </Tooltip>
-        <div className="text-[11px] text-text-disabled mt-0.5">{planLabel}</div>
+        {planLabel !== null ? (
+          <div className="text-[11px] text-text-disabled mt-0.5">{planLabel}</div>
+        ) : (
+          <div className="h-[14px] w-[60px] rounded bg-bg-field mt-0.5 animate-pulse" />
+        )}
       </div>
       <div className="py-1">
         <button
