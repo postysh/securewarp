@@ -668,6 +668,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         return (
           <div>
             <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
+              <p className="text-[14px] text-text-primary font-semibold mb-3">Storage usage</p>
               <div className="h-[8px] bg-bg-field rounded-full overflow-hidden flex">
                 {categories.filter((c) => c.percent > 0).map((cat) => (
                   <div
