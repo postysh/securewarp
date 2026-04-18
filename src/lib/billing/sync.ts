@@ -54,12 +54,16 @@ export async function syncLatestSubscriptionFor(userId: string): Promise<void> {
     .maybeSingle();
   if (!row?.polar_customer_id) return;
 
+  // Pull the last several subscriptions — not just the most recent
+  // created one. A user with an active plan who starts a new
+  // checkout has at least two subscriptions in Stripe; we need both
+  // rows in our DB so getLatestSubscription can pick the paid one.
   const list = await stripe().subscriptions.list({
     customer: row.polar_customer_id as string,
-    limit: 1,
+    limit: 10,
     status: "all",
   });
-  const latest = list.data[0];
-  if (!latest) return;
-  await upsertSubscriptionRow(latest);
+  for (const sub of list.data) {
+    await upsertSubscriptionRow(sub);
+  }
 }

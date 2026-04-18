@@ -78,19 +78,33 @@ export interface SubscriptionSummary {
 export async function getLatestSubscription(
   userId: string,
 ): Promise<SubscriptionSummary | null> {
+  // A user can legitimately have multiple subscription rows: an
+  // active paying one and an incomplete/canceled attempt from a
+  // later aborted checkout. We want the one the user is actually
+  // being charged for, so prefer active/trialing over everything
+  // else. Within the same status class, newer wins.
   const { data } = await supabase
     .from("billing_subscriptions")
     .select("polar_subscription_id, status, product_id, current_period_end")
     .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!data) return null;
+    .order("created_at", { ascending: false });
+  if (!data || data.length === 0) return null;
+
+  const rank = (status: string): number => {
+    if (status === "active") return 0;
+    if (status === "trialing") return 1;
+    if (status === "past_due") return 2;
+    if (status === "paused") return 3;
+    if (status === "incomplete" || status === "incomplete_expired") return 4;
+    if (status === "canceled" || status === "unpaid") return 5;
+    return 6;
+  };
+  const best = data.slice().sort((a, b) => rank(a.status as string) - rank(b.status as string))[0];
   return {
-    externalSubscriptionId: data.polar_subscription_id as string,
-    status: data.status as string,
-    priceId: data.product_id as string,
-    currentPeriodEnd: (data.current_period_end as string | null) ?? null,
+    externalSubscriptionId: best.polar_subscription_id as string,
+    status: best.status as string,
+    priceId: best.product_id as string,
+    currentPeriodEnd: (best.current_period_end as string | null) ?? null,
   };
 }
 
