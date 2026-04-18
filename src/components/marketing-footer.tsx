@@ -88,7 +88,7 @@ export function MarketingFooter() {
               heading: "Product",
               links: [
                 { label: "Features", href: "/#features" },
-                { label: "Pricing", href: "#" },
+                { label: "Pricing", href: "/pricing" },
                 { label: "Changelog", href: "#" },
                 { label: "Roadmap", href: "#" },
               ],
@@ -105,6 +105,7 @@ export function MarketingFooter() {
               links: [
                 { label: "Privacy", href: "/privacy" },
                 { label: "Terms", href: "/terms" },
+                { label: "Refunds", href: "/refund" },
               ],
             },
           ].map((col) => (

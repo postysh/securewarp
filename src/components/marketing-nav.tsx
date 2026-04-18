@@ -111,7 +111,7 @@ function LogoReveal({ text }: { text: string }) {
  * are. Features/Support always anchor back to landing because those
  * sections live on /.
  */
-export function MarketingNav({ current }: { current?: "about" | "features" | "support" } = {}) {
+export function MarketingNav({ current }: { current?: "about" | "features" | "pricing" | "support" } = {}) {
   const linkStyle = (active: boolean): React.CSSProperties => ({
     padding: "8px 16px",
     fontSize: 14,
@@ -161,6 +161,7 @@ export function MarketingNav({ current }: { current?: "about" | "features" | "su
       <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.15)" }} />
       <Link href="/about" style={linkStyle(current === "about")}>About</Link>
       <Link href="/#features" style={linkStyle(current === "features")}>Features</Link>
+      <Link href="/pricing" style={linkStyle(current === "pricing")}>Pricing</Link>
       <Link href="/support" style={linkStyle(current === "support")}>Support</Link>
       <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
       <Link href="/login" style={{ padding: "8px 14px", fontSize: 14, color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>Log in</Link>
