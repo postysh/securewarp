@@ -186,8 +186,36 @@ export function PlanBillingPanel() {
 
   const startCheckout = async (tier: "plus" | "pro") => {
     setError(null);
-    setPendingTier(tier);
     setPickerOpen(false);
+
+    // Already on a paid plan? Switch it via /change-plan — Stripe
+    // prorates using the existing payment method, no Payment
+    // Element needed. Falls through to the new-subscription flow
+    // if the server rejects the change (e.g. sub no longer active).
+    if (status?.tier && status.tier !== "free") {
+      try {
+        const res = await fetch("/api/billing/change-plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tier }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setStatus(null);
+          window.dispatchEvent(new Event("securewarp-billing-refresh"));
+          return;
+        }
+        if (data?.code !== "no_active_sub") {
+          setError(data?.error ?? "Failed to change plan");
+          return;
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to change plan");
+        return;
+      }
+    }
+
+    setPendingTier(tier);
     setClientSecret(null);
     try {
       const res = await fetch("/api/billing/checkout", {
