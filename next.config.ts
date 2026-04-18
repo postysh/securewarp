@@ -50,6 +50,9 @@ const connectSources = [
   "https://cloudflareinsights.com",
   // Sentry error reporting.
   "https://*.ingest.us.sentry.io",
+  // Stripe API + merchant UI endpoints used by the Payment Element.
+  "https://api.stripe.com",
+  "https://merchant-ui-api.stripe.com",
 ];
 
 const scriptSources = [
@@ -58,6 +61,8 @@ const scriptSources = [
   "https://challenges.cloudflare.com",
   // Cloudflare Web Analytics beacon, auto-injected by the proxy.
   "https://static.cloudflareinsights.com",
+  // Stripe.js + Payment Element bootstrap script.
+  "https://js.stripe.com",
   // Required for Next.js hydration inline bootstrap. Moving to a
   // nonce-based scheme is tracked as a separate hardening task —
   // see SECURITY.md "What's coming".
@@ -81,6 +86,9 @@ const frameSources = [
   // and DNS is pointed at this Worker; before that, PDF preview
   // uses the inline blob-iframe path and this entry is harmless.
   "https://pdf.securewarp.com",
+  // Stripe's Payment Element and 3DS challenge iframes.
+  "https://js.stripe.com",
+  "https://hooks.stripe.com",
 ];
 
 const csp = [
