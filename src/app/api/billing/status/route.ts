@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { getLatestSubscription, getTier } from "@/lib/billing/customers";
+import { syncLatestSubscriptionFor } from "@/lib/billing/sync";
 import { supabase } from "@/lib/db/supabase";
 import { TIER_LIMITS, limitsForTier, type Tier } from "@/lib/billing/config";
 import { logError } from "@/lib/log";
@@ -16,6 +17,13 @@ export async function GET() {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    // Pull latest state from Stripe before reading local rows.
+    // Makes the panel converge to the correct tier within one poll
+    // iteration even when webhook delivery is unavailable (dev) or
+    // delayed (production reconciliation).
+    try { await syncLatestSubscriptionFor(session.userId); }
+    catch (e) { logError("billing.status.sync", e); }
 
     const [tier, subscription, storageBytes, seats, workspaces] = await Promise.all([
       getTier(session.userId),

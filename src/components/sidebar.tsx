@@ -75,6 +75,29 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
     return () => window.removeEventListener("securewarp-open-settings", handler);
   }, []);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [planLabel, setPlanLabel] = useState<string>("Free plan");
+  // Refetch the plan label whenever the account dropdown opens (so
+  // the user sees the new tier immediately after subscribing) and
+  // whenever the app dispatches `securewarp-billing-refresh` from
+  // the plan panel after checkout success.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      fetch("/api/billing/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (cancelled) return;
+          if (d?.limits?.label) setPlanLabel(`${d.limits.label} plan`);
+        })
+        .catch(() => {});
+    };
+    if (open) refresh();
+    window.addEventListener("securewarp-billing-refresh", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("securewarp-billing-refresh", refresh);
+    };
+  }, [open]);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -161,7 +184,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             {userEmail}
           </div>
         </Tooltip>
-        <div className="text-[11px] text-text-disabled mt-0.5">Free plan</div>
+        <div className="text-[11px] text-text-disabled mt-0.5">{planLabel}</div>
       </div>
       <div className="py-1">
         <button

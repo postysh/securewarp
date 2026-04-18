@@ -8,6 +8,7 @@ import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import SecurityLockIcon from "@hugeicons/core-free-icons/SecurityLockIcon";
 import PaintBrush01Icon from "@hugeicons/core-free-icons/PaintBrush01Icon";
 import CloudServerIcon from "@hugeicons/core-free-icons/CloudServerIcon";
+import HardDriveIcon from "@hugeicons/core-free-icons/HardDriveIcon";
 import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
 import Sun01Icon from "@hugeicons/core-free-icons/Sun01Icon";
 import Moon02Icon from "@hugeicons/core-free-icons/Moon02Icon";
@@ -30,14 +31,15 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-type TabId = "account" | "security" | "appearance" | "notifications" | "storage";
+type TabId = "account" | "security" | "appearance" | "notifications" | "plan" | "storage";
 
 const tabs: { id: TabId; label: string; icon: unknown; section?: string }[] = [
   { id: "account", label: "Account", icon: UserCircleIcon, section: "General" },
   { id: "security", label: "Security", icon: SecurityLockIcon, section: "General" },
   { id: "appearance", label: "Appearance", icon: PaintBrush01Icon, section: "General" },
   { id: "notifications", label: "Notifications", icon: Notification01Icon, section: "General" },
-  { id: "storage", label: "Plan & billing", icon: CloudServerIcon, section: "Plan" },
+  { id: "plan", label: "Plan & billing", icon: CloudServerIcon, section: "Plan" },
+  { id: "storage", label: "Storage", icon: HardDriveIcon, section: "Plan" },
 ];
 
 function SettingRow({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
@@ -631,10 +633,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           </div>
         );
       }
+      case "plan": {
+        return <PlanBillingPanel />;
+      }
       case "storage": {
+        const used = storageUsage?.usedBytes ?? 0;
+        const max = storageUsage?.maxBytes ?? 20 * 1024 * 1024 * 1024;
         const filesBytes = storageUsage?.filesBytes ?? 0;
         const trashBytes = storageUsage?.trashBytes ?? 0;
-        const max = storageUsage?.maxBytes ?? 20 * 1024 * 1024 * 1024;
         const filesPct = max > 0 ? (filesBytes / max) * 100 : 0;
         const trashPct = max > 0 ? (trashBytes / max) * 100 : 0;
         const categories = [
@@ -645,8 +651,23 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         return (
           <div>
-            <PlanBillingPanel />
-
+            <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[14px] text-text-primary font-semibold">Storage usage</p>
+                <span className="text-[11px] text-text-disabled font-mono">
+                  {formatBytes(used)} / {formatBytes(max)}
+                </span>
+              </div>
+              <div className="h-[8px] bg-bg-field rounded-full overflow-hidden flex">
+                {categories.filter((c) => c.percent > 0).map((cat) => (
+                  <div
+                    key={cat.label}
+                    className="h-full first:rounded-l-full last:rounded-r-full"
+                    style={{ width: `${cat.percent}%`, backgroundColor: cat.color }}
+                  />
+                ))}
+              </div>
+            </div>
 
             <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-2">Breakdown</p>
             <div className="rounded-[10px] border border-border-tertiary overflow-hidden">

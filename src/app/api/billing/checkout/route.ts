@@ -5,6 +5,7 @@ import { supabase } from "@/lib/db/supabase";
 import { stripe } from "@/lib/billing/stripe";
 import { stripeConfig } from "@/lib/billing/config";
 import { getOrCreateStripeCustomer } from "@/lib/billing/customers";
+import { upsertSubscriptionRow } from "@/lib/billing/sync";
 import { logError } from "@/lib/log";
 
 const CheckoutSchema = z.object({ tier: z.enum(["plus", "pro"]).default("plus") });
@@ -77,6 +78,12 @@ export async function POST(request: Request) {
         { status: 500 },
       );
     }
+
+    // Record the (incomplete) subscription right away so we have a
+    // row to flip to active when the webhook lands. In dev without
+    // webhook forwarding this also seeds the row so the status GET
+    // can upsert its way to active after confirmPayment succeeds.
+    await upsertSubscriptionRow(subscription);
 
     return NextResponse.json({
       subscriptionId: subscription.id,

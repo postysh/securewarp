@@ -134,6 +134,10 @@ export function PlanBillingPanel() {
         setStatus(data);
         setPendingTier(null);
         setClientSecret(null);
+        // Let the sidebar (and anything else listening) re-read their
+        // plan label from /api/billing/status. Dispatched once per
+        // successful convergence, so no polling traffic leaks out.
+        window.dispatchEvent(new Event("securewarp-billing-refresh"));
         if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
       }
     }, 2000);
