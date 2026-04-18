@@ -29,6 +29,8 @@ import { clearLockCache } from "@/lib/auth/lock-cache";
 interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
+  /** Tab to land on when the modal opens. Defaults to "account". */
+  initialTab?: TabId;
 }
 
 type TabId = "account" | "security" | "appearance" | "notifications" | "plan" | "storage";
@@ -72,7 +74,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-export function SettingsModal({ open, onClose }: SettingsModalProps) {
+export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>("account");
   const { theme, toggle: toggleTheme } = useTheme();
   const [changingPassword, setChangingPassword] = useState(false);
@@ -127,7 +129,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   useEffect(() => {
     if (open) {
-      setActiveTab("account");
+      setActiveTab(initialTab ?? "account");
       setChangingPassword(false);
       setNewPw("");
       setConfirmPw("");
@@ -145,7 +147,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           .catch(() => {});
       }
     }
-  }, [open, profileLoaded]);
+  }, [open, profileLoaded, initialTab]);
 
   // Fetch 2FA status when security tab opens.
   useEffect(() => {

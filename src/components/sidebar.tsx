@@ -43,11 +43,26 @@ function formatStorageBytes(bytes: number): string {
 }
 
 function useStorageUsage() {
-  const [usage, setUsage] = useState({ usedBytes: 0, maxBytes: 20 * 1024 * 1024 * 1024, fileCount: 0 });
+  // `null` = not yet loaded. The widget should render nothing (or a
+  // skeleton) in that state rather than flashing "0 B of 20 GB"
+  // which looks like a real value for Free-tier users who just
+  // upgraded.
+  const [usage, setUsage] = useState<{
+    usedBytes: number;
+    maxBytes: number;
+    fileCount: number;
+  } | null>(null);
   useEffect(() => {
-    fetch("/api/files/usage").then(r => r.json()).then(data => {
-      if (data.usedBytes !== undefined) setUsage(data);
-    }).catch(() => {});
+    const load = () => {
+      fetch("/api/files/usage").then(r => r.json()).then(data => {
+        if (data.usedBytes !== undefined) setUsage(data);
+      }).catch(() => {});
+    };
+    load();
+    // Refetch on billing changes so the sidebar widget picks up the
+    // new tier's maxBytes without a page reload.
+    window.addEventListener("securewarp-billing-refresh", load);
+    return () => window.removeEventListener("securewarp-billing-refresh", load);
   }, []);
   return usage;
 }
@@ -67,10 +82,17 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const [open, setOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Which tab the Settings modal should land on the next time it
+  // opens. Null means "whatever the modal's default is".
+  const [settingsInitialTab, setSettingsInitialTab] = useState<string | null>(null);
 
   // External callers (quota modal, etc.) open settings via an event.
   useEffect(() => {
-    const handler = () => setSettingsOpen(true);
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ tab?: string }>).detail;
+      if (detail?.tab) setSettingsInitialTab(detail.tab);
+      setSettingsOpen(true);
+    };
     window.addEventListener("securewarp-open-settings", handler);
     return () => window.removeEventListener("securewarp-open-settings", handler);
   }, []);
@@ -256,7 +278,11 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         </div>,
         document.body
       )}
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        initialTab={settingsInitialTab as never}
+        onClose={() => { setSettingsOpen(false); setSettingsInitialTab(null); }}
+      />
       <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </div>
   );
@@ -348,9 +374,21 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   }, [rawPins, fileOps.files]);
 
   const storage = useStorageUsage();
-  const usedPct = storage.maxBytes > 0 ? Math.min((storage.usedBytes / storage.maxBytes) * 100, 100) : 0;
-  const usedLabel = formatStorageBytes(storage.usedBytes);
-  const maxLabel = formatStorageBytes(storage.maxBytes);
+  const storageLoaded = storage !== null;
+  const usedPct = storageLoaded && storage.maxBytes > 0
+    ? Math.min((storage.usedBytes / storage.maxBytes) * 100, 100)
+    : 0;
+  const usedLabel = storageLoaded ? formatStorageBytes(storage.usedBytes) : "";
+  const maxLabel = storageLoaded ? formatStorageBytes(storage.maxBytes) : "";
+
+  const openPlanSettings = () => {
+    // UserMenu owns the Settings modal and listens for this event
+    // with an optional `tab` detail, so we dispatch instead of
+    // trying to reach into its state from here.
+    window.dispatchEvent(
+      new CustomEvent("securewarp-open-settings", { detail: { tab: "plan" } }),
+    );
+  };
 
   const storageTooltipContent = (
     <div>
@@ -362,8 +400,15 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
         <div className="h-full bg-accent-green rounded-full transition-all" style={{ width: `${usedPct}%` }} />
       </div>
       <div className="flex items-center justify-between">
-        <span className="text-[11px] text-text-tertiary">{usedLabel} of {maxLabel}</span>
-        <span className="text-[10px] text-accent-green font-medium">Upgrade</span>
+        <span className="text-[11px] text-text-tertiary">
+          {storageLoaded ? `${usedLabel} of ${maxLabel}` : "Loading…"}
+        </span>
+        <button
+          onClick={openPlanSettings}
+          className="text-[10px] text-accent-green font-medium cursor-pointer hover:underline"
+        >
+          Upgrade
+        </button>
       </div>
     </div>
   );
@@ -605,11 +650,20 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
             <span className="text-[12px] text-text-primary font-medium whitespace-nowrap">Storage</span>
           </div>
           <div className="h-[4px] bg-bg-field rounded-full overflow-hidden mb-2">
-            <div className="h-full bg-accent-green rounded-full transition-all" style={{ width: `${usedPct}%` }} />
+            {storageLoaded && (
+              <div className="h-full bg-accent-green rounded-full transition-all" style={{ width: `${usedPct}%` }} />
+            )}
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-text-tertiary whitespace-nowrap">{usedLabel} of {maxLabel}</span>
-            <span className="text-[10px] text-accent-green font-medium cursor-pointer hover:underline whitespace-nowrap">Upgrade</span>
+            <span className="text-[11px] text-text-tertiary whitespace-nowrap">
+              {storageLoaded ? `${usedLabel} of ${maxLabel}` : "Loading…"}
+            </span>
+            <button
+              onClick={openPlanSettings}
+              className="text-[10px] text-accent-green font-medium cursor-pointer hover:underline whitespace-nowrap"
+            >
+              Upgrade
+            </button>
           </div>
         </div>
       )}
