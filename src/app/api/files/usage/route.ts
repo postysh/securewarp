@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
 import { getTier } from "@/lib/billing/customers";
 import { limitsForTier } from "@/lib/billing/config";
+import { syncLatestSubscriptionFor } from "@/lib/billing/sync";
 import { logError } from "@/lib/log";
 
 export async function GET() {
@@ -55,6 +56,12 @@ export async function GET() {
     }
 
     const usedBytes = filesBytes + trashBytes;
+    // Pull latest state from Stripe before reading tier so the max
+    // shown here matches the Plan & billing panel even when webhook
+    // delivery is unavailable (dev) or delayed. Same pattern as
+    // /api/billing/status.
+    try { await syncLatestSubscriptionFor(session.userId); }
+    catch (e) { logError("files.usage.sync", e); }
     const tier = await getTier(session.userId);
     const maxBytes = limitsForTier(tier).storageGB * 1024 * 1024 * 1024;
 

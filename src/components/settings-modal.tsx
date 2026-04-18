@@ -170,6 +170,22 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   }, [open, activeTab, storageUsage]);
 
+  // Re-fetch storage usage whenever the billing state changes, so
+  // maxBytes picks up a tier upgrade/downgrade without reopening
+  // the modal. Panel dispatches this after checkout success +
+  // on cancel/resume.
+  useEffect(() => {
+    const refresh = () => {
+      if (!open) return;
+      fetch("/api/files/usage")
+        .then((r) => r.json())
+        .then((d) => { if (d.usedBytes !== undefined) setStorageUsage(d); })
+        .catch(() => {});
+    };
+    window.addEventListener("securewarp-billing-refresh", refresh);
+    return () => window.removeEventListener("securewarp-billing-refresh", refresh);
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -649,14 +665,27 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           { label: "Trash", size: formatBytes(trashBytes), count: storageUsage?.trashCount ?? 0, percent: trashPct, color: "var(--accent-red-primary)" },
         ];
 
-        const usedPct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
+        const usedPctExact = max > 0 ? (used / max) * 100 : 0;
+        const usedPct = Math.min(usedPctExact, 100);
+        // Bar fill never goes below 2px equivalent when there's any
+        // usage — a 40 MB file on a 500 GB plan is ~0.008%, which
+        // renders as a zero-pixel sliver. Guarantee a visible mark.
+        const displayWidth = used > 0 && usedPct < 0.5 ? "2px" : `${usedPct}%`;
+        const pctLabel =
+          used === 0
+            ? "0%"
+            : usedPct >= 1
+              ? `${usedPct.toFixed(usedPct < 10 ? 1 : 0)}%`
+              : usedPct >= 0.1
+                ? `${usedPct.toFixed(1)}%`
+                : "<0.1%";
         return (
           <div>
             <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[14px] text-text-primary font-semibold">Storage usage</p>
                 <span className="text-[11px] text-text-disabled font-mono">
-                  {formatBytes(used)} / {formatBytes(max)}
+                  {formatBytes(used)} of {formatBytes(max)}
                 </span>
               </div>
               <div
@@ -669,7 +698,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{
-                    width: `${usedPct}%`,
+                    width: displayWidth,
+                    minWidth: used > 0 ? "6px" : undefined,
                     background:
                       usedPct >= 95
                         ? "var(--accent-red-primary)"
@@ -680,11 +710,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 />
               </div>
               <div className="flex items-center justify-between mt-2">
+                <span className="text-[11px] text-text-disabled">{pctLabel} used</span>
                 <span className="text-[11px] text-text-disabled">
-                  {usedPct < 1 && used > 0 ? "<1%" : `${Math.round(usedPct)}%`} used
-                </span>
-                <span className="text-[11px] text-text-disabled">
-                  {formatBytes(Math.max(0, max - used))} remaining
+                  {formatBytes(Math.max(0, max - used))} free
                 </span>
               </div>
             </div>
