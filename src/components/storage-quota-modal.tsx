@@ -13,8 +13,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-const MAX_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB
-
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -23,6 +21,7 @@ interface Props {
 export function StorageQuotaModal({ open, onClose }: Props) {
   const [usage, setUsage] = useState<{
     usedBytes: number;
+    maxBytes: number;
     filesCount: number;
     trashBytes: number;
     trashCount: number;
@@ -53,7 +52,8 @@ export function StorageQuotaModal({ open, onClose }: Props) {
   if (!open) return null;
 
   const used = usage?.usedBytes ?? 0;
-  const pct = Math.min((used / MAX_BYTES) * 100, 100);
+  const max = usage?.maxBytes ?? 20 * 1024 * 1024 * 1024;
+  const pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
   const trashBytes = usage?.trashBytes ?? 0;
   const trashCount = usage?.trashCount ?? 0;
 
@@ -84,7 +84,7 @@ export function StorageQuotaModal({ open, onClose }: Props) {
         <div className="px-6 pb-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[12px] text-text-secondary">
-              {formatBytes(used)} of {formatBytes(MAX_BYTES)} used
+              {formatBytes(used)} of {formatBytes(max)} used
             </span>
             <span className="text-[12px] font-mono text-text-disabled">
               {pct.toFixed(0)}%

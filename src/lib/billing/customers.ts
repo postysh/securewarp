@@ -1,6 +1,7 @@
 import "server-only";
 import { supabase } from "@/lib/db/supabase";
 import { polar } from "./polar";
+import { tierFromProductId, type Tier } from "./config";
 
 /**
  * Billing-customer bridge. Maps a SecureWarp user to a Polar customer
@@ -81,4 +82,19 @@ export async function hasActiveSubscription(userId: string): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+/**
+ * Resolve the caller's current tier. "free" when no active
+ * subscription OR when the subscription's product id doesn't match
+ * any known paid tier (covers archived legacy products gracefully).
+ */
+export async function getTier(userId: string): Promise<Tier> {
+  const sub = await getLatestSubscription(userId);
+  if (!sub) return "free";
+  if (sub.status !== "active" && sub.status !== "trialing") return "free";
+  if (sub.currentPeriodEnd && new Date(sub.currentPeriodEnd).getTime() < Date.now()) {
+    return "free";
+  }
+  return tierFromProductId(sub.productId) ?? "free";
 }

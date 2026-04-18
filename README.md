@@ -527,7 +527,7 @@ ALTER TABLE file_search_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ADD COLUMN totp_secret text;
 ```
 
-#### Polar.sh billing (usage-based)
+#### Polar.sh billing (tier-based)
 
 ```sql
 -- One row per SecureWarp user that has ever interacted with billing

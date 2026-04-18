@@ -1,80 +1,64 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { getLatestSubscription } from "@/lib/billing/customers";
-import {
-  computeUsageForSubscribedUsers,
-  toBillable,
-} from "@/lib/billing/usage";
+import { getLatestSubscription, getTier } from "@/lib/billing/customers";
 import { supabase } from "@/lib/db/supabase";
-import { FREE_TIER, POLAR_UNIT_CENTS } from "@/lib/billing/config";
+import { TIER_LIMITS, limitsForTier, type Tier } from "@/lib/billing/config";
 import { logError } from "@/lib/log";
 
 const BYTES_PER_GB = 1024 * 1024 * 1024;
 
 /**
- * Plan + usage summary for the caller. Drives the settings Plan tab.
- * Returns the same usage totals we'd bill for if the user is on Pro,
- * so users can preview the cost before upgrading.
+ * Plan + usage summary for the caller. Drives the Settings
+ * Plan & billing tab and the quota modal's progress bars.
  *
- * Free-tier users see their current consumption plus the allowance
- * ratio (e.g. "3.2 / 20 GB"). Pro users see total consumption +
- * estimated monthly bill in cents.
+ * Tier-based model: every caller belongs to exactly one tier
+ * (free / plus / pro). Usage is displayed against that tier's
+ * hard limits; no metering, no estimated bill computation.
  */
 export async function GET() {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const subscription = await getLatestSubscription(session.userId);
-    const isPaid =
-      !!subscription &&
-      (subscription.status === "active" || subscription.status === "trialing") &&
-      (!subscription.currentPeriodEnd ||
-        new Date(subscription.currentPeriodEnd).getTime() > Date.now());
-
-    // Usage — we intentionally recompute for THIS user only rather
-    // than calling computeUsageForSubscribedUsers (which is the cron
-    // aggregator over all paying users). Inline versions here mirror
-    // that helper's queries; if they drift, fix both.
-    const [storageBytes, seats, workspaces] = await Promise.all([
+    const [tier, subscription, storageBytes, seats, workspaces] = await Promise.all([
+      getTier(session.userId),
+      getLatestSubscription(session.userId),
       getStorageBytes(session.userId),
       getSeatCount(session.userId),
       getWorkspaceCount(session.userId),
     ]);
-    const storageGB = storageBytes / BYTES_PER_GB;
 
-    const usage = { storageGB, seats, workspaces };
-    const billable = toBillable({
-      userId: session.userId,
-      polarCustomerId: "",
-      ...usage,
-    });
-    const estimatedMonthlyCents =
-      billable.storageGB * POLAR_UNIT_CENTS.STORAGE_PER_GB_MONTH +
-      billable.seats * POLAR_UNIT_CENTS.SEAT_PER_MONTH +
-      billable.workspaces * POLAR_UNIT_CENTS.WORKSPACE_PER_MONTH;
+    const limits = limitsForTier(tier);
 
     return NextResponse.json({
-      plan: isPaid ? "pro" : "free",
+      tier,
       subscription: subscription
         ? {
             status: subscription.status,
             currentPeriodEnd: subscription.currentPeriodEnd,
           }
         : null,
-      usage,
-      allowance: {
-        storageGB: FREE_TIER.storageGB,
-        seats: FREE_TIER.seats,
-        workspaces: FREE_TIER.workspaces,
+      usage: {
+        storageGB: storageBytes / BYTES_PER_GB,
+        storageBytes,
+        seats,
+        workspaces,
       },
-      billable,
-      estimatedMonthlyCents,
-      unitCents: {
-        storagePerGB: POLAR_UNIT_CENTS.STORAGE_PER_GB_MONTH,
-        seat: POLAR_UNIT_CENTS.SEAT_PER_MONTH,
-        workspace: POLAR_UNIT_CENTS.WORKSPACE_PER_MONTH,
+      limits: {
+        storageGB: limits.storageGB,
+        seats: limits.seats === Infinity ? null : limits.seats,
+        workspaces: limits.workspaces === Infinity ? null : limits.workspaces,
+        priceCents: limits.priceCents,
+        label: limits.label,
       },
+      tiers: Object.entries(TIER_LIMITS).map(([id, l]) => ({
+        id: id as Tier,
+        label: l.label,
+        priceCents: l.priceCents,
+        storageGB: l.storageGB,
+        seats: l.seats === Infinity ? null : l.seats,
+        workspaces: l.workspaces === Infinity ? null : l.workspaces,
+      })),
     });
   } catch (err) {
     logError("billing.status", err);
@@ -127,8 +111,3 @@ async function getWorkspaceCount(userId: string): Promise<number> {
     .eq("owner_id", userId);
   return count ?? 0;
 }
-
-// We re-export this symbol only to keep the import side-effect-free in
-// case other modules later need the same helper. Silences an unused-
-// import TS warning without actually exposing internals.
-void computeUsageForSubscribedUsers;

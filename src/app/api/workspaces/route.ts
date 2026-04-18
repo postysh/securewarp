@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
-import { hasActiveSubscription } from "@/lib/billing/customers";
-import { FREE_TIER } from "@/lib/billing/config";
+import { getTier } from "@/lib/billing/customers";
+import { limitsForTier } from "@/lib/billing/config";
 import { logError } from "@/lib/log";
 
 const CreateSchema = z.object({
@@ -58,21 +58,27 @@ export async function POST(request: Request) {
     const parsed = CreateSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: "Invalid data" }, { status: 400 });
 
-    // Free tier allows FREE_TIER.workspaces total. Past that the
-    // caller must have an active subscription (pay-as-you-go covers
-    // extra workspaces). Counted server-side against owner_id.
-    const { count: existingCount } = await supabase
-      .from("workspaces")
-      .select("id", { count: "exact", head: true })
-      .eq("owner_id", session.userId);
-    if ((existingCount ?? 0) >= FREE_TIER.workspaces) {
-      const paid = await hasActiveSubscription(session.userId);
-      if (!paid) {
-        return NextResponse.json(
-          { error: "Free tier allows one workspace. Upgrade to add more.", code: "workspace_limit" },
-          { status: 402 },
-        );
-      }
+    // Enforce the caller's tier cap on workspace count. Free allows
+    // 1, Plus/Pro are unlimited (TIER_LIMITS uses Infinity).
+    const [{ count: existingCount }, tier] = await Promise.all([
+      supabase
+        .from("workspaces")
+        .select("id", { count: "exact", head: true })
+        .eq("owner_id", session.userId),
+      getTier(session.userId),
+    ]);
+    const cap = limitsForTier(tier).workspaces;
+    if ((existingCount ?? 0) >= cap) {
+      return NextResponse.json(
+        {
+          error:
+            tier === "free"
+              ? "Free tier allows one workspace. Upgrade to Plus or Pro for unlimited."
+              : "Workspace limit reached for your plan.",
+          code: "workspace_limit",
+        },
+        { status: 402 },
+      );
     }
 
     // Verify the root folder exists and is owned by this user

@@ -93,14 +93,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     sharedCount: number;
   } | null>(null);
   const [billingStatus, setBillingStatus] = useState<{
-    plan: "free" | "pro";
+    tier: "free" | "plus" | "pro";
     subscription: { status: string; currentPeriodEnd: string | null } | null;
-    usage: { storageGB: number; seats: number; workspaces: number };
-    allowance: { storageGB: number; seats: number; workspaces: number };
-    billable: { storageGB: number; seats: number; workspaces: number };
-    estimatedMonthlyCents: number;
-    unitCents: { storagePerGB: number; seat: number; workspace: number };
+    usage: { storageGB: number; storageBytes: number; seats: number; workspaces: number };
+    limits: { storageGB: number; seats: number | null; workspaces: number | null; priceCents: number; label: string };
+    tiers: { id: "free" | "plus" | "pro"; label: string; priceCents: number; storageGB: number; seats: number | null; workspaces: number | null }[];
   } | null>(null);
+  const [tierPickerOpen, setTierPickerOpen] = useState(false);
   const [openingPortal, setOpeningPortal] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
   const [subscriptionDetail, setSubscriptionDetail] = useState<{
@@ -193,7 +192,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     if (open && activeTab === "storage" && !billingStatus) {
       fetch("/api/billing/status")
         .then((r) => (r.ok ? r.json() : null))
-        .then((d) => { if (d && d.plan) setBillingStatus(d); })
+        .then((d) => { if (d && d.tier) setBillingStatus(d); })
         .catch(() => {});
     }
   }, [open, activeTab, storageUsage, billingStatus]);
@@ -203,7 +202,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // lookups for Free users (they have no subscription row to query).
   useEffect(() => {
     if (!open || activeTab !== "storage") return;
-    if (billingStatus?.plan !== "pro") return;
+    if (billingStatus?.tier === "free") return;
     if (!subscriptionDetail) {
       fetch("/api/billing/subscription")
         .then((r) => (r.ok ? r.json() : null))
@@ -694,24 +693,24 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           { label: "Trash", size: formatBytes(trashBytes), count: storageUsage?.trashCount ?? 0, percent: trashPct, color: "var(--accent-red-primary)" },
         ];
 
-        const isPro = billingStatus?.plan === "pro";
-        const cents = billingStatus?.estimatedMonthlyCents ?? 0;
-        const dollars = (cents / 100).toFixed(2);
-        const u = billingStatus?.usage ?? { storageGB: 0, seats: 0, workspaces: 0 };
-        const a = billingStatus?.allowance ?? { storageGB: 20, seats: 1, workspaces: 1 };
+        const tier = billingStatus?.tier ?? "free";
+        const isPaid = tier !== "free";
+        const u = billingStatus?.usage ?? { storageGB: 0, storageBytes: 0, seats: 1, workspaces: 0 };
+        const l = billingStatus?.limits ?? { storageGB: 20, seats: 1 as number | null, workspaces: 1 as number | null, priceCents: 0, label: "Free" };
 
-        const handleUpgrade = async () => {
+        const formatLimit = (n: number | null) => (n === null ? "unlimited" : `${n}`);
+        const pct = (cur: number, cap: number | null) =>
+          cap === null || cap === 0 ? 0 : Math.min((cur / cap) * 100, 100);
+
+        const startCheckout = async (pickTier: "plus" | "pro") => {
           if (upgrading) return;
           setUpgrading(true);
+          setTierPickerOpen(false);
           const { openEmbeddedCheckout } = await import("@/lib/billing/embed-checkout");
-          await openEmbeddedCheckout(() => {
-            // Force a billing refetch so the Pro status + live bill
-            // show up without a full page reload after the webhook
-            // lands the subscription row.
-            setBillingStatus(null);
-          });
+          await openEmbeddedCheckout(() => setBillingStatus(null), pickTier);
           setUpgrading(false);
         };
+        const handleUpgrade = () => setTierPickerOpen(true);
         const handleManage = async () => {
           if (openingPortal) return;
           setOpeningPortal(true);
@@ -729,44 +728,68 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-[14px] text-text-primary font-semibold">
-                    {isPro ? "SecureWarp Pro" : "Free plan"}
+                    SecureWarp {l.label}
                   </p>
                   <p className="text-[11px] text-text-disabled mt-0.5">
-                    {isPro
-                      ? `Pay-as-you-go. Next bill ≈ $${dollars}/mo at current usage.`
-                      : cents > 0
-                        ? `Your current usage would be $${dollars}/mo on Pro.`
-                        : `${formatBytes(max)} storage, 1 workspace, 1 user included.`}
+                    {isPaid
+                      ? `$${(l.priceCents / 100).toFixed(2)}/mo. ${l.storageGB} GB storage, ${formatLimit(l.seats)} seats, ${formatLimit(l.workspaces)} workspaces.`
+                      : `${l.storageGB} GB storage, ${formatLimit(l.seats)} user, ${formatLimit(l.workspaces)} workspace.`}
                   </p>
                 </div>
-                {!isPro && (
-                  <button
-                    onClick={handleUpgrade}
-                    disabled={upgrading}
-                    className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-                  >
-                    {upgrading ? "Opening…" : "Upgrade"}
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {isPaid && tier !== "pro" && (
+                    <button
+                      onClick={handleUpgrade}
+                      disabled={upgrading}
+                      className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Change plan
+                    </button>
+                  )}
+                  {!isPaid && (
+                    <button
+                      onClick={handleUpgrade}
+                      disabled={upgrading}
+                      className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                    >
+                      {upgrading ? "Opening…" : "Upgrade"}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {billingStatus && (
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   {[
-                    { label: "Storage", value: `${u.storageGB.toFixed(2)} GB`, limit: `of ${a.storageGB} GB free` },
-                    { label: "Team seats", value: `${u.seats}`, limit: `${a.seats} free` },
-                    { label: "Workspaces", value: `${u.workspaces}`, limit: `${a.workspaces} free` },
-                  ].map((m) => (
-                    <div key={m.label} className="p-2.5 rounded-[8px] bg-bg-l2 border border-border-tertiary">
-                      <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider">{m.label}</p>
-                      <p className="text-[13px] text-text-primary font-medium mt-0.5">{m.value}</p>
-                      <p className="text-[10px] text-text-disabled mt-0.5">{m.limit}</p>
-                    </div>
-                  ))}
+                    { label: "Storage", value: `${u.storageGB.toFixed(2)} GB`, cap: l.storageGB as number | null, capDisplay: `${l.storageGB} GB` },
+                    { label: "Team seats", value: `${u.seats}`, cap: l.seats, capDisplay: formatLimit(l.seats) },
+                    { label: "Workspaces", value: `${u.workspaces}`, cap: l.workspaces, capDisplay: formatLimit(l.workspaces) },
+                  ].map((m) => {
+                    const curNum = parseFloat(m.value);
+                    const usedPct = pct(curNum, m.cap);
+                    return (
+                      <div key={m.label} className="p-2.5 rounded-[8px] bg-bg-l2 border border-border-tertiary">
+                        <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider">{m.label}</p>
+                        <p className="text-[13px] text-text-primary font-medium mt-0.5">{m.value}</p>
+                        <p className="text-[10px] text-text-disabled mt-0.5">of {m.capDisplay}</p>
+                        {m.cap !== null && (
+                          <div className="mt-1.5 h-[3px] rounded-full bg-bg-field overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${usedPct}%`,
+                                background: usedPct > 90 ? "var(--accent-red-primary)" : "var(--accent-green-primary)",
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
-              {isPro && subscriptionDetail && (
+              {isPaid && subscriptionDetail && (
                 <div className="p-3 rounded-[8px] bg-bg-l2 border border-border-tertiary mb-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -863,7 +886,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               Storage usage is calculated from encrypted file sizes
             </div>
 
-            {isPro && invoices && invoices.length > 0 && (
+            {isPaid && invoices && invoices.length > 0 && (
               <div className="mt-6 pt-4 border-t border-border-tertiary">
                 <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-2">Invoices</p>
                 <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
@@ -1006,9 +1029,22 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       {auth.recoveryKey && (
         <RecoveryKeyModal open={true} onClose={auth.dismissRecoveryKey} recoveryKey={auth.recoveryKey} />
       )}
+      <TierPickerDialog
+        open={tierPickerOpen}
+        currentTier={billingStatus?.tier ?? "free"}
+        tiers={billingStatus?.tiers ?? []}
+        onPick={async (picked) => {
+          setTierPickerOpen(false);
+          setUpgrading(true);
+          const { openEmbeddedCheckout } = await import("@/lib/billing/embed-checkout");
+          await openEmbeddedCheckout(() => setBillingStatus(null), picked);
+          setUpgrading(false);
+        }}
+        onClose={() => setTierPickerOpen(false)}
+      />
       <ConfirmDialog
         open={cancelConfirmOpen}
-        title="Cancel SecureWarp Pro?"
+        title="Cancel your subscription?"
         description={
           subscriptionDetail?.currentPeriodEnd
             ? `Your subscription will stay active until ${new Date(subscriptionDetail.currentPeriodEnd).toLocaleDateString()}. You can resume any time before then.`
@@ -1064,5 +1100,89 @@ function QrImage({ data }: { data: string }) {
       height={180}
       className="rounded-lg"
     />
+  );
+}
+
+interface TierPickerDialogProps {
+  open: boolean;
+  currentTier: "free" | "plus" | "pro";
+  tiers: {
+    id: "free" | "plus" | "pro";
+    label: string;
+    priceCents: number;
+    storageGB: number;
+    seats: number | null;
+    workspaces: number | null;
+  }[];
+  onPick: (tier: "plus" | "pro") => void;
+  onClose: () => void;
+}
+
+function TierPickerDialog({ open, currentTier, tiers, onPick, onClose }: TierPickerDialogProps) {
+  if (!open) return null;
+  const paid = tiers.filter((t) => t.id !== "free");
+  const fmtCap = (n: number | null) => (n === null ? "Unlimited" : n);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+      <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" onClick={onClose} />
+      <div
+        className="relative w-full max-w-[520px] mx-4 rounded-2xl bg-bg-l2 border border-border-primary overflow-hidden animate-fade-in"
+        style={{ boxShadow: "var(--shadow-l2)" }}
+      >
+        <div className="px-5 pt-5 pb-3 border-b border-border-tertiary">
+          <p className="text-[15px] text-text-primary font-semibold">Choose a plan</p>
+          <p className="text-[12px] text-text-disabled mt-0.5">
+            Upgrade any time. Cancel from this page when you're done.
+          </p>
+        </div>
+        <div className="p-4 flex flex-col gap-3">
+          {paid.map((t) => {
+            const isCurrent = t.id === currentTier;
+            return (
+              <button
+                key={t.id}
+                onClick={() => !isCurrent && onPick(t.id as "plus" | "pro")}
+                disabled={isCurrent}
+                className={`group relative w-full text-left rounded-[10px] border p-4 transition-colors cursor-pointer disabled:cursor-default ${
+                  isCurrent
+                    ? "border-border-secondary bg-bg-overlay-tertiary"
+                    : "border-border-tertiary hover:border-accent-green-primary hover:bg-bg-cell-hover"
+                }`}
+              >
+                <div className="flex items-baseline justify-between mb-1.5">
+                  <span className="text-[14px] font-semibold text-text-primary">
+                    SecureWarp {t.label}
+                  </span>
+                  <span className="text-[14px] text-text-primary font-mono">
+                    ${(t.priceCents / 100).toFixed(2)}
+                    <span className="text-[11px] text-text-disabled">/mo</span>
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-secondary">
+                  <span>{t.storageGB >= 1024 ? `${(t.storageGB / 1024).toFixed(0)} TB` : `${t.storageGB} GB`} storage</span>
+                  <span>{fmtCap(t.seats)} team seats</span>
+                  <span>{fmtCap(t.workspaces)} workspaces</span>
+                </div>
+                {isCurrent && (
+                  <span className="absolute top-3 right-3 text-[10px] font-mono uppercase tracking-wider text-text-disabled">
+                    Current
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <div className="px-5 py-3 border-t border-border-tertiary flex justify-end">
+          <button
+            onClick={onClose}
+            className="h-[30px] px-3 rounded-[6px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

@@ -16,9 +16,14 @@ export type EmbedCheckoutResult =
 
 export async function openEmbeddedCheckout(
   onSuccess?: () => void,
+  tier: "plus" | "pro" = "plus",
 ): Promise<EmbedCheckoutResult> {
   try {
-    const res = await fetch("/api/billing/checkout", { method: "POST" });
+    const res = await fetch("/api/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tier }),
+    });
     const data = (await res.json()) as { url?: string; error?: string };
     if (!res.ok || !data.url) {
       return { ok: false, error: data.error ?? "Failed to start checkout" };

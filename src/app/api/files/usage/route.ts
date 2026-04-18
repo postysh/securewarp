@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
-import { MAX_STORAGE_BYTES } from "@/lib/db/quota";
+import { getTier } from "@/lib/billing/customers";
+import { limitsForTier } from "@/lib/billing/config";
 import { logError } from "@/lib/log";
 
 export async function GET() {
@@ -54,10 +55,12 @@ export async function GET() {
     }
 
     const usedBytes = filesBytes + trashBytes;
+    const tier = await getTier(session.userId);
+    const maxBytes = limitsForTier(tier).storageGB * 1024 * 1024 * 1024;
 
     return NextResponse.json({
       usedBytes,
-      maxBytes: MAX_STORAGE_BYTES,
+      maxBytes,
       filesBytes,
       filesCount,
       trashBytes,
