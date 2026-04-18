@@ -36,7 +36,20 @@ export async function getOrCreateStripeCustomer(
   // we overwrite the legacy value rather than error on insert.
   const stored = existing?.polar_customer_id as string | undefined;
   if (stored && stored.startsWith("cus_")) {
-    return stored;
+    // Also guard against customers that were deleted out-of-band
+    // (e.g. via the Stripe dashboard). A deleted customer returns
+    // `{ deleted: true }` on retrieve but still 404s on any write
+    // path. Recreate so we never hand a zombie id to subscriptions.
+    try {
+      const c = await stripe().customers.retrieve(stored);
+      if (!("deleted" in c) || c.deleted !== true) {
+        return stored;
+      }
+    } catch {
+      // If retrieve fails (auth issue, transient), fall through to
+      // create a fresh one — better to have a throwaway new customer
+      // than to block checkout.
+    }
   }
 
   const customer = await stripe().customers.create({

@@ -58,15 +58,18 @@ export async function POST(request: Request) {
       payment_settings: {
         save_default_payment_method: "on_subscription",
       },
-      expand: ["latest_invoice.payment_intent"],
+      // In current Stripe API versions the subscription's first
+      // invoice exposes the client secret via `confirmation_secret`,
+      // not `payment_intent.client_secret` (which returns empty on
+      // the invoice object post-2024). Expand for direct access.
+      expand: ["latest_invoice.confirmation_secret"],
       metadata: { userId: session.userId, tier },
     });
 
     const latestInvoice = subscription.latest_invoice;
     let clientSecret: string | null = null;
     if (latestInvoice && typeof latestInvoice !== "string") {
-      const pi = (latestInvoice as { payment_intent?: { client_secret?: string } }).payment_intent;
-      clientSecret = pi?.client_secret ?? null;
+      clientSecret = latestInvoice.confirmation_secret?.client_secret ?? null;
     }
     if (!clientSecret) {
       return NextResponse.json(
