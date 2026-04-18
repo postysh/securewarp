@@ -649,6 +649,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           { label: "Trash", size: formatBytes(trashBytes), count: storageUsage?.trashCount ?? 0, percent: trashPct, color: "var(--accent-red-primary)" },
         ];
 
+        const usedPct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
         return (
           <div>
             <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
@@ -658,14 +659,33 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   {formatBytes(used)} / {formatBytes(max)}
                 </span>
               </div>
-              <div className="h-[8px] bg-bg-field rounded-full overflow-hidden flex">
-                {categories.filter((c) => c.percent > 0).map((cat) => (
-                  <div
-                    key={cat.label}
-                    className="h-full first:rounded-l-full last:rounded-r-full"
-                    style={{ width: `${cat.percent}%`, backgroundColor: cat.color }}
-                  />
-                ))}
+              <div
+                className="h-[8px] bg-bg-field rounded-full overflow-hidden"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(usedPct)}
+              >
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${usedPct}%`,
+                    background:
+                      usedPct >= 95
+                        ? "var(--accent-red-primary)"
+                        : usedPct >= 80
+                          ? "var(--accent-yellow-primary)"
+                          : "var(--accent-green-primary)",
+                  }}
+                />
+              </div>
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-[11px] text-text-disabled">
+                  {usedPct < 1 && used > 0 ? "<1%" : `${Math.round(usedPct)}%`} used
+                </span>
+                <span className="text-[11px] text-text-disabled">
+                  {formatBytes(Math.max(0, max - used))} remaining
+                </span>
               </div>
             </div>
 
@@ -774,14 +794,16 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-6 py-4 border-b border-border-tertiary shrink-0">
-            <h3 className="text-[16px] font-semibold text-text-primary capitalize">{activeTab}</h3>
+            <h3 className="text-[16px] font-semibold text-text-primary">
+              {tabs.find((t) => t.id === activeTab)?.label ?? activeTab}
+            </h3>
             <button onClick={onClose} className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer">
               <HugeiconsIcon icon={Cancel01Icon} size={16} />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto px-6 py-2">
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-2">
             {renderContent()}
           </div>
         </div>

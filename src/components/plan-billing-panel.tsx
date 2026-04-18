@@ -170,19 +170,42 @@ export function PlanBillingPanel() {
     }
   };
 
-  const tier = status?.tier ?? "free";
-  const isPaid = tier !== "free";
-  const usage = status?.usage ?? { storageGB: 0, storageBytes: 0, seats: 1, workspaces: 0 };
-  const limits = status?.limits ?? { storageGB: 20, seats: 1, workspaces: 1, priceCents: 0, label: "Free" };
-  const tiersList = status?.tiers ?? [];
-  const fmtLimit = (n: number | null) => (n === null ? "unlimited" : `${n}`);
-  const pct = (cur: number, cap: number | null) =>
-    cap === null || cap === 0 ? 0 : Math.min((cur / cap) * 100, 100);
-
   const options = useMemo(
     () => (clientSecret ? { clientSecret, appearance: { theme: "night" as const } } : undefined),
     [clientSecret],
   );
+
+  // Don't render a placeholder Free card before /status responds —
+  // showing "SecureWarp Free" and then flipping to "Plus" a beat
+  // later reads like the upgrade got reverted. Skeleton instead.
+  if (!status) {
+    return (
+      <div>
+        <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5 animate-pulse">
+          <div className="h-[18px] w-[140px] rounded bg-bg-field mb-2" />
+          <div className="h-[12px] w-[220px] rounded bg-bg-field mb-4" />
+          <div className="grid grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="p-2.5 rounded-[8px] bg-bg-l2 border border-border-tertiary">
+                <div className="h-[8px] w-[60px] rounded bg-bg-field mb-2" />
+                <div className="h-[14px] w-[40px] rounded bg-bg-field mb-1" />
+                <div className="h-[8px] w-[50px] rounded bg-bg-field" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const tier = status.tier;
+  const isPaid = tier !== "free";
+  const usage = status.usage;
+  const limits = status.limits;
+  const tiersList = status.tiers;
+  const fmtLimit = (n: number | null) => (n === null ? "unlimited" : `${n}`);
+  const pct = (cur: number, cap: number | null) =>
+    cap === null || cap === 0 ? 0 : Math.min((cur / cap) * 100, 100);
 
   return (
     <div>
