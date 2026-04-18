@@ -29,8 +29,14 @@ export async function getOrCreateStripeCustomer(
     .select("polar_customer_id")
     .eq("user_id", userId)
     .maybeSingle();
-  if (existing?.polar_customer_id) {
-    return existing.polar_customer_id as string;
+
+  // Stripe customer ids always start with `cus_`. Anything else is
+  // a stale row from the Polar era (which used raw UUIDs). Don't
+  // reuse it — create a fresh Stripe customer and upsert the row so
+  // we overwrite the legacy value rather than error on insert.
+  const stored = existing?.polar_customer_id as string | undefined;
+  if (stored && stored.startsWith("cus_")) {
+    return stored;
   }
 
   const customer = await stripe().customers.create({
@@ -41,7 +47,10 @@ export async function getOrCreateStripeCustomer(
 
   await supabase
     .from("billing_customers")
-    .insert({ user_id: userId, polar_customer_id: customer.id });
+    .upsert(
+      { user_id: userId, polar_customer_id: customer.id },
+      { onConflict: "user_id" },
+    );
 
   return customer.id;
 }
