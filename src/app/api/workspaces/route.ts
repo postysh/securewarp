@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
+import { hasActiveSubscription } from "@/lib/billing/customers";
+import { FREE_TIER } from "@/lib/billing/config";
 import { logError } from "@/lib/log";
 
 const CreateSchema = z.object({
@@ -55,6 +57,23 @@ export async function POST(request: Request) {
     const body = await request.json();
     const parsed = CreateSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: "Invalid data" }, { status: 400 });
+
+    // Free tier allows FREE_TIER.workspaces total. Past that the
+    // caller must have an active subscription (pay-as-you-go covers
+    // extra workspaces). Counted server-side against owner_id.
+    const { count: existingCount } = await supabase
+      .from("workspaces")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_id", session.userId);
+    if ((existingCount ?? 0) >= FREE_TIER.workspaces) {
+      const paid = await hasActiveSubscription(session.userId);
+      if (!paid) {
+        return NextResponse.json(
+          { error: "Free tier allows one workspace. Upgrade to add more.", code: "workspace_limit" },
+          { status: 402 },
+        );
+      }
+    }
 
     // Verify the root folder exists and is owned by this user
     const { data: folder } = await supabase

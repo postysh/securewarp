@@ -6,6 +6,7 @@ import { getUserByEmail } from "@/lib/db/users";
 import { grantFileAccess } from "@/lib/db/files";
 import { normalizeEmail } from "@/lib/auth/email";
 import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
+import { hasActiveSubscription } from "@/lib/billing/customers";
 import { auditEvent } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
@@ -45,13 +46,42 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Only admins can invite members" }, { status: 403 });
     }
 
-    // Get workspace root folder
+    // Get workspace root folder + owner (owner bears the seat cost)
     const { data: ws } = await supabase
       .from("workspaces")
-      .select("root_folder_id, name")
+      .select("root_folder_id, name, owner_id")
       .eq("id", workspaceId)
       .single();
     if (!ws) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+
+    // Free tier: owner_id is seat #1 (free). Any additional seat
+    // across any of their workspaces requires an active subscription.
+    // Pro subscribers pay per extra seat via the metering cron —
+    // no hard cap here.
+    const ownerId = ws.owner_id as string;
+    const paid = await hasActiveSubscription(ownerId);
+    if (!paid) {
+      const { data: ownerWs } = await supabase
+        .from("workspaces")
+        .select("id")
+        .eq("owner_id", ownerId);
+      const wsIds = (ownerWs ?? []).map((w) => w.id as string);
+      const { data: currentMembers } = wsIds.length > 0
+        ? await supabase
+            .from("workspace_members")
+            .select("user_id")
+            .in("workspace_id", wsIds)
+        : { data: [] as { user_id: string }[] };
+      const distinct = new Set((currentMembers ?? []).map((m) => m.user_id as string));
+      distinct.add(ownerId);
+      if (distinct.size >= 1) {
+        // 1 = owner only. Adding another member means seat #2.
+        return NextResponse.json(
+          { error: "Free tier is one user. The workspace owner must upgrade to invite members.", code: "seat_limit" },
+          { status: 402 },
+        );
+      }
+    }
 
     // Find recipient
     const recipient = await getUserByEmail(email);
