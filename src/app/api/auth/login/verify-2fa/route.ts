@@ -78,7 +78,13 @@ export async function POST(request: Request) {
       secret: OTPAuth.Secret.fromBase32(user.totp_secret),
     });
 
-    const delta = totp.validate({ token: code, window: 1 });
+    // window: 2 gives ±60 seconds of clock-drift tolerance — one
+    // period before and one after the current 30s bucket. ±30s
+    // (window: 1) was biting users whose desktop clocks drifted
+    // more than half a minute. window: 2 is the de facto industry
+    // norm; Google Authenticator + Authy both validate within the
+    // same range server-side.
+    const delta = totp.validate({ token: code, window: 2 });
     if (delta === null) {
       auditEvent({
         event: "auth.2fa.fail",
@@ -88,19 +94,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid code." }, { status: 403 });
     }
 
-    // Atomic replay protection via Postgres CAS. A plain read-then-
-    // write has a TOCTOU race where two concurrent requests can both
-    // read the old timestamp, both pass the < 30 check, and both
-    // succeed. Instead, do a conditional UPDATE that only sets the new
-    // stamp if the old one is far enough in the past. If the UPDATE
-    // touches 0 rows, another request already consumed this window.
+    // Replay protection — atomic CAS via Postgres UPDATE. We store
+    // the *timestep start time* (unix seconds aligned to 30s) of
+    // the code that was just accepted. A fresh code in a later
+    // timestep has a strictly greater start time and passes; the
+    // exact same code re-submitted has the same start time and
+    // fails (replay). Two concurrent requests hit the UPDATE's WHERE
+    // clause and only one row matches, so concurrency is safe.
+    //
+    // Previously this used wall-clock "last 30 seconds" logic,
+    // which wrongly rejected *different* codes submitted within
+    // 30s of a previous success.
     const nowSec = Math.floor(Date.now() / 1000);
+    const periodStart = (Math.floor(nowSec / 30) + delta) * 30;
     const { supabase: sb } = await import("@/lib/db/supabase");
     const { data: updated, error: casErr } = await sb
       .from("users")
-      .update({ totp_last_used_at: nowSec })
+      .update({ totp_last_used_at: periodStart })
       .eq("id", user.id)
-      .or(`totp_last_used_at.is.null,totp_last_used_at.lt.${nowSec - 30}`)
+      .or(`totp_last_used_at.is.null,totp_last_used_at.lt.${periodStart}`)
       .select("id");
     if (casErr) {
       logError("2fa.replay-check", casErr);
