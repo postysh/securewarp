@@ -79,6 +79,13 @@
     "EMAIL_REPLY_TO": "hello@securewarp.com",
     "SUPPORT_INBOX": "hello@securewarp.com",
     "NEXT_PUBLIC_PDF_VIEWER_ORIGIN": "https://pdf.securewarp.com",
+    // Stripe publishable key. Public by design — the live key is
+    // included in every page load (the client bundle) and is meant
+    // to be visible. The matching secret key lives as a Worker
+    // secret via `wrangler secret put STRIPE_SECRET_KEY`.
+    // Baked into the client bundle at build time via NEXT_PUBLIC_*,
+    // so a redeploy is required after rotating the publishable key.
+    "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_live_51TNQK7EHBP1AWE2M4ESihYysqqTHyYgAlLryMiafbi342uO1widHEUlywPxIq9MAhS3HOKLhsrzIHsE1MXIefBx400I7yA3maJ",
   },
 
   // NOTE on scheduled cleanup: Cloudflare Cron Triggers invoke a Worker's
