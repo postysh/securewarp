@@ -64,17 +64,26 @@ export function stripeConfig() {
 
 export function requireStripeConfig() {
   const cfg = stripeConfig();
-  for (const [name, value] of Object.entries(cfg)) {
-    if (!value) {
-      const envName = name === "publishableKey"
-        ? "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY"
-        : `STRIPE_${name.replace(/([A-Z])/g, "_$1").toUpperCase()}`;
+  // `publishableKey` is a NEXT_PUBLIC_* value baked into the
+  // client bundle at build time. The server never needs it, and
+  // requiring it here breaks any route that imports the config on
+  // a Worker that doesn't also expose the var at runtime. Check
+  // only the server-side secrets.
+  const required: (keyof typeof cfg)[] = [
+    "secretKey",
+    "webhookSecret",
+    "priceIdPlus",
+    "priceIdPro",
+  ];
+  for (const name of required) {
+    if (!cfg[name]) {
+      const envName = `STRIPE_${String(name).replace(/([A-Z])/g, "_$1").toUpperCase()}`;
       throw new Error(
         `Stripe not configured: missing ${envName}. See README.md → Stripe billing.`,
       );
     }
   }
-  return cfg as Required<ReturnType<typeof stripeConfig>>;
+  return cfg;
 }
 
 /** Map a Stripe price id back to a tier. */
