@@ -23,8 +23,17 @@ export async function GET() {
       .maybeSingle();
     if (!row?.polar_customer_id) return NextResponse.json({ invoices: [] });
 
+    // Only return invoices we'd want a customer to see — a paid
+    // charge or line item that was actually billed. Filtering out:
+    //   - `draft` (never sent)
+    //   - `open` (finalized but unpaid; usually orphans from
+    //     abandoned checkouts — our abandon endpoint voids these,
+    //     but filter anyway as a backstop)
+    //   - `void` (explicitly voided, includes abandoned checkouts)
+    //   - `uncollectible` (rare, internal state)
     const list = await stripe().invoices.list({
       customer: row.polar_customer_id as string,
+      status: "paid",
       limit: 50,
     });
 
