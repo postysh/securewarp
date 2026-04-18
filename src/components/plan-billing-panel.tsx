@@ -76,6 +76,13 @@ export function PlanBillingPanel() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pendingTier, setPendingTier] = useState<"plus" | "pro" | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  // When a paid subscriber picks a different tier we need to show
+  // a confirm dialog BEFORE calling change-plan — Stripe charges
+  // the existing payment method immediately, so the user has to
+  // opt in explicitly. `changeConfirmTier` != null opens the
+  // dialog; null means idle.
+  const [changeConfirmTier, setChangeConfirmTier] = useState<"plus" | "pro" | null>(null);
+  const [changingBusy, setChangingBusy] = useState(false);
   // Track the Stripe subscription id the checkout creates so we can
   // void it if the user bails before confirming payment — otherwise
   // the dashboard fills up with "incomplete" subscriptions + open
@@ -108,6 +115,33 @@ export function PlanBillingPanel() {
       }
     } catch { /* */ }
   }, []);
+
+  const confirmChangePlan = useCallback(async () => {
+    if (!changeConfirmTier || changingBusy) return;
+    setChangingBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/billing/change-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: changeConfirmTier }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.error ?? "Failed to change plan");
+        return;
+      }
+      setChangeConfirmTier(null);
+      // Refetch instead of nulling status — nulling forces the
+      // skeleton and the panel gets stuck there until remount.
+      await fetchStatus();
+      window.dispatchEvent(new Event("securewarp-billing-refresh"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to change plan");
+    } finally {
+      setChangingBusy(false);
+    }
+  }, [changeConfirmTier, changingBusy, fetchStatus]);
 
   const fetchDetail = useCallback(async () => {
     try {
@@ -188,31 +222,13 @@ export function PlanBillingPanel() {
     setError(null);
     setPickerOpen(false);
 
-    // Already on a paid plan? Switch it via /change-plan — Stripe
-    // prorates using the existing payment method, no Payment
-    // Element needed. Falls through to the new-subscription flow
-    // if the server rejects the change (e.g. sub no longer active).
+    // Already on a paid plan? Ask the user to confirm before
+    // touching their payment method. /change-plan would otherwise
+    // charge the prorated difference instantly with no warning —
+    // correct mechanically, terrible UX.
     if (status?.tier && status.tier !== "free") {
-      try {
-        const res = await fetch("/api/billing/change-plan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tier }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-          setStatus(null);
-          window.dispatchEvent(new Event("securewarp-billing-refresh"));
-          return;
-        }
-        if (data?.code !== "no_active_sub") {
-          setError(data?.error ?? "Failed to change plan");
-          return;
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to change plan");
-        return;
-      }
+      setChangeConfirmTier(tier);
+      return;
     }
 
     setPendingTier(tier);
@@ -505,6 +521,48 @@ export function PlanBillingPanel() {
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Change-plan confirm (paid → paid) */}
+      {changeConfirmTier && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center"
+          onClick={() => !changingBusy && setChangeConfirmTier(null)}
+        >
+          <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" />
+          <div
+            className="relative w-full max-w-[420px] mx-4 rounded-2xl bg-bg-l2 border border-border-primary overflow-hidden animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+            style={{ boxShadow: "var(--shadow-l2)" }}
+          >
+            <div className="p-6">
+              <p className="text-[15px] text-text-primary font-semibold mb-1">
+                {changeConfirmTier === "pro" ? "Upgrade to Pro?" : "Switch to Plus?"}
+              </p>
+              <p className="text-[13px] text-text-secondary leading-relaxed">
+                {changeConfirmTier === "pro"
+                  ? "Takes effect immediately. Your card on file is charged for the prorated difference between your current plan and Pro."
+                  : "Takes effect immediately. You'll receive a prorated credit for the unused portion of your current plan, applied to your next invoice."}
+              </p>
+            </div>
+            <div className="px-6 pb-6 flex gap-3 justify-end">
+              <button
+                onClick={() => setChangeConfirmTier(null)}
+                disabled={changingBusy}
+                className="h-[36px] px-4 rounded-[8px] text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Keep current plan
+              </button>
+              <button
+                onClick={confirmChangePlan}
+                disabled={changingBusy}
+                className="h-[36px] px-4 rounded-[8px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+              >
+                {changingBusy ? "Switching…" : changeConfirmTier === "pro" ? "Upgrade to Pro" : "Switch to Plus"}
+              </button>
+            </div>
           </div>
         </div>
       )}
