@@ -27,18 +27,34 @@ export async function openEmbeddedCheckout(
     // Dynamic import keeps the Polar embed bundle out of the main
     // JS chunk — only loaded when a user actually clicks Upgrade.
     const { PolarEmbedCheckout } = await import("@polar-sh/checkout/embed");
+
+    // Polar's embed adds body.polar-no-scroll but the app's scroll
+    // container is <html> (body has overflow-x only), so its class
+    // has no effect and the page keeps scrolling behind the modal.
+    // Pin html overflow ourselves and restore on close.
+    const htmlEl = document.documentElement;
+    const prevOverflow = htmlEl.style.overflow;
+    htmlEl.style.overflow = "hidden";
+
     const instance = await PolarEmbedCheckout.create(data.url, { theme: "dark" });
 
     return new Promise((resolve) => {
+      let done = false;
+      const finish = (status: "success" | "closed") => {
+        if (done) return;
+        done = true;
+        htmlEl.style.overflow = prevOverflow;
+        resolve({ ok: true, status });
+      };
       instance.addEventListener("success", () => {
         onSuccess?.();
-        resolve({ ok: true, status: "success" });
+        finish("success");
       });
-      instance.addEventListener("close", () => {
-        resolve({ ok: true, status: "closed" });
-      });
+      instance.addEventListener("close", () => finish("closed"));
     });
   } catch (err) {
+    // Restore scroll if we added the lock but the embed failed to open.
+    try { document.documentElement.style.overflow = ""; } catch { /* */ }
     return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
 }
