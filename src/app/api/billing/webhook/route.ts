@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { stripe } from "@/lib/billing/stripe";
+import { stripe, stripeCryptoProvider } from "@/lib/billing/stripe";
 import { stripeConfig } from "@/lib/billing/config";
 import { upsertSubscriptionRow } from "@/lib/billing/sync";
 import { logError } from "@/lib/log";
@@ -27,7 +27,16 @@ export async function POST(request: Request) {
 
   let event: Stripe.Event;
   try {
-    event = await stripe().webhooks.constructEventAsync(body, signature, cfg.webhookSecret);
+    // SubtleCrypto provider required on Workers — the default
+    // provider uses Node's crypto.timingSafeEqual which isn't
+    // available there.
+    event = await stripe().webhooks.constructEventAsync(
+      body,
+      signature,
+      cfg.webhookSecret,
+      undefined,
+      stripeCryptoProvider(),
+    );
   } catch (err) {
     logError("billing.webhook.verify", err);
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
