@@ -117,10 +117,10 @@ export default function Refund() {
 
         <Block title="4. How refunds are processed">
           <p>
-            Payments are processed by Paddle as our merchant of record. Refunds
-            are issued back to the original payment method. Depending on your
-            bank or card issuer, it can take 5–10 business days for the refund
-            to show up on your statement.
+            Payments are processed securely by Stripe. Refunds are issued back
+            to the original payment method. Depending on your bank or card
+            issuer, it can take 5–10 business days for the refund to show up
+            on your statement.
           </p>
           <p>
             Refunds of gift or promotional credits aren&apos;t available in cash
@@ -149,8 +149,8 @@ export default function Refund() {
           <p>
             For anything about refunds or billing, write to{" "}
             <A href="mailto:hello@securewarp.com">hello@securewarp.com</A>.
-            Include your account email and, if you have it, the Paddle
-            invoice number from your receipt.
+            Include your account email and, if you have it, the Stripe
+            receipt ID or charge ID from your email receipt.
           </p>
         </Block>
       </section>

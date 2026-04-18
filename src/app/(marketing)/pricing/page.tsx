@@ -107,7 +107,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "How is billing handled?",
-    a: "Payments are processed by Paddle as merchant of record. Paddle handles global tax, invoicing, and compliance. Your card never touches SecureWarp's servers.",
+    a: "Payments are processed securely by Stripe. Your card details go straight to Stripe — they never touch SecureWarp's servers. Stripe also handles tax calculation for most jurisdictions automatically.",
   },
   {
     q: "What about larger teams or more storage?",

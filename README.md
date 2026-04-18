@@ -527,7 +527,7 @@ ALTER TABLE file_search_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ADD COLUMN totp_secret text;
 ```
 
-#### Paddle billing (tier-based)
+#### Stripe billing (tier-based)
 
 ```sql
 -- One row per SecureWarp user that has ever interacted with billing

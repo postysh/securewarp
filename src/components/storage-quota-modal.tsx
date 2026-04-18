@@ -36,9 +36,9 @@ export function StorageQuotaModal({ open, onClose }: Props) {
   }, [open]);
 
   const handleUpgrade = async () => {
-    // Billing is mid-migration to Paddle. Route the user to the
-    // Settings → Plan & billing tab where the Paddle Inline
-    // Checkout lives once wired.
+    // Billing is mid-integration (Stripe). Route the user to
+    // Settings → Plan & billing where the checkout UI will live
+    // once wired.
     window.dispatchEvent(new CustomEvent("securewarp-open-settings", { detail: { tab: "storage" } }));
     onClose();
   };

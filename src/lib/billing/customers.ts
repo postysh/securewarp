@@ -3,17 +3,18 @@ import { supabase } from "@/lib/db/supabase";
 import { tierFromPriceId, type Tier } from "./config";
 
 /**
- * Vendor-neutral subscription lookups. Today these read
- * `billing_subscriptions` rows that will be written by the Paddle
- * webhook handler. The column names (`polar_subscription_id` etc.)
- * are legacy — they hold Paddle IDs post-migration. A later
- * migration renames them to `external_*`.
+ * Vendor-neutral subscription lookups. Reads `billing_subscriptions`
+ * rows written by the Stripe webhook handler. The column names
+ * (`polar_subscription_id`, `product_id`) are historical from the
+ * first billing attempt — they now hold Stripe subscription ids and
+ * Stripe price ids respectively. A later migration renames them to
+ * `external_subscription_id` / `stripe_price_id` for clarity.
  */
 
 export interface SubscriptionSummary {
   externalSubscriptionId: string;
   status: string;
-  priceId: string; // product_id column repurposed for Paddle price id
+  priceId: string; // product_id column repurposed for Stripe price id
   currentPeriodEnd: string | null;
 }
 

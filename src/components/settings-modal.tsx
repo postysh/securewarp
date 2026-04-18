@@ -92,9 +92,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     trashBytes: number; trashCount: number;
     sharedCount: number;
   } | null>(null);
-  // Billing UI is paused during the migration to Paddle. The Plan
-  // section will return here wired to @paddle/paddle-js Inline
-  // Checkout. Storage breakdown + export below still work.
+  // Billing UI is paused during the Stripe integration build-out.
+  // The Plan section will return here wired to Stripe Elements.
+  // Storage breakdown + export below still work.
   const [displayName, setDisplayName] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
