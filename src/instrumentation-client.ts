@@ -26,6 +26,18 @@ if (!isViewerOrigin) {
       maskAllText: true,
       maskAllInputs: true,
       blockAllMedia: true,
+      // Block cross-origin iframes from the recording. Replay tries
+      // to serialize their DOM, which throws "Blocked a frame"
+      // errors on every checkout / PDF preview because browsers
+      // enforce the same-origin policy on iframe DOM access. Listing
+      // the selectors here skips them entirely — no noisy errors
+      // and no sensitive payment-method data leaves the iframe.
+      block: [
+        "iframe[src*='js.stripe.com']",
+        "iframe[src*='hooks.stripe.com']",
+        "iframe[src*='newassets.hcaptcha.com']",
+        "iframe[src*='pdf.securewarp.com']",
+      ],
     }),
   ],
 
