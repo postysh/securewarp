@@ -67,6 +67,13 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const [open, setOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // External callers (quota modal, etc.) open settings via an event.
+  useEffect(() => {
+    const handler = () => setSettingsOpen(true);
+    window.addEventListener("securewarp-open-settings", handler);
+    return () => window.removeEventListener("securewarp-open-settings", handler);
+  }, []);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);

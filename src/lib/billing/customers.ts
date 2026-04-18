@@ -1,5 +1,6 @@
 import "server-only";
 import { supabase } from "@/lib/db/supabase";
+import { stripe } from "./stripe";
 import { tierFromPriceId, type Tier } from "./config";
 
 /**
@@ -10,6 +11,40 @@ import { tierFromPriceId, type Tier } from "./config";
  * Stripe price ids respectively. A later migration renames them to
  * `external_subscription_id` / `stripe_price_id` for clarity.
  */
+
+/**
+ * Get or create the Stripe customer mapped to this SecureWarp user.
+ * First call creates the customer via Stripe's API and inserts a
+ * billing_customers row; subsequent calls return the cached id.
+ * `metadata.userId` on Stripe lets us find our user back from a
+ * stray Stripe object (useful for webhook dedup).
+ */
+export async function getOrCreateStripeCustomer(
+  userId: string,
+  email: string,
+  displayName: string | null,
+): Promise<string> {
+  const { data: existing } = await supabase
+    .from("billing_customers")
+    .select("polar_customer_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (existing?.polar_customer_id) {
+    return existing.polar_customer_id as string;
+  }
+
+  const customer = await stripe().customers.create({
+    email,
+    name: displayName ?? undefined,
+    metadata: { userId },
+  });
+
+  await supabase
+    .from("billing_customers")
+    .insert({ user_id: userId, polar_customer_id: customer.id });
+
+  return customer.id;
+}
 
 export interface SubscriptionSummary {
   externalSubscriptionId: string;

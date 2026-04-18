@@ -22,6 +22,7 @@ import { useFilesContext } from "@/hooks/use-files";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { RecoveryKeyModal } from "./recovery-key-modal";
 import { ConfirmDialog } from "./confirm-dialog";
+import { PlanBillingPanel } from "./plan-billing-panel";
 import { clearLockCache } from "@/lib/auth/lock-cache";
 
 interface SettingsModalProps {
@@ -631,10 +632,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         );
       }
       case "storage": {
-        const used = storageUsage?.usedBytes ?? 0;
-        const max = storageUsage?.maxBytes ?? 20 * 1024 * 1024 * 1024;
         const filesBytes = storageUsage?.filesBytes ?? 0;
         const trashBytes = storageUsage?.trashBytes ?? 0;
+        const max = storageUsage?.maxBytes ?? 20 * 1024 * 1024 * 1024;
         const filesPct = max > 0 ? (filesBytes / max) * 100 : 0;
         const trashPct = max > 0 ? (trashBytes / max) * 100 : 0;
         const categories = [
@@ -645,27 +645,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         return (
           <div>
-            <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-[14px] text-text-primary font-semibold">Storage</p>
-                <span className="text-[10px] font-mono uppercase text-text-disabled tracking-wider">
-                  Plan & billing coming back soon
-                </span>
-              </div>
-              <div className="h-[8px] bg-bg-field rounded-full overflow-hidden flex">
-                {categories.filter((c) => c.percent > 0).map((cat) => (
-                  <div
-                    key={cat.label}
-                    className="h-full first:rounded-l-full last:rounded-r-full"
-                    style={{ width: `${cat.percent}%`, backgroundColor: cat.color }}
-                  />
-                ))}
-              </div>
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-[12px] text-text-primary font-medium">{formatBytes(used)} used</span>
-                <span className="text-[11px] text-text-disabled">of {formatBytes(max)}</span>
-              </div>
-            </div>
+            <PlanBillingPanel />
+
 
             <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-2">Breakdown</p>
             <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
