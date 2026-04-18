@@ -26,7 +26,6 @@ export function StorageQuotaModal({ open, onClose }: Props) {
     trashBytes: number;
     trashCount: number;
   } | null>(null);
-  const [upgrading, setUpgrading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -37,16 +36,11 @@ export function StorageQuotaModal({ open, onClose }: Props) {
   }, [open]);
 
   const handleUpgrade = async () => {
-    if (upgrading) return;
-    setUpgrading(true);
-    const { openEmbeddedCheckout } = await import("@/lib/billing/embed-checkout");
-    await openEmbeddedCheckout(() => {
-      // Success — close the quota modal so the user lands back on
-      // the app. Subscription state flips via webhook; the next
-      // settings-panel open will show Pro.
-      onClose();
-    });
-    setUpgrading(false);
+    // Billing is mid-migration to Paddle. Route the user to the
+    // Settings → Plan & billing tab where the Paddle Inline
+    // Checkout lives once wired.
+    window.dispatchEvent(new CustomEvent("securewarp-open-settings", { detail: { tab: "storage" } }));
+    onClose();
   };
 
   if (!open) return null;
@@ -120,10 +114,9 @@ export function StorageQuotaModal({ open, onClose }: Props) {
           </button>
           <button
             onClick={handleUpgrade}
-            disabled={upgrading}
-            className="flex-1 h-[38px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 h-[38px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer"
           >
-            {upgrading ? "Opening checkout…" : "Upgrade plan"}
+            Upgrade plan
           </button>
         </div>
       </div>

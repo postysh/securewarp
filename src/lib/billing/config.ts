@@ -1,38 +1,21 @@
 import "server-only";
 
 /**
- * Polar.sh billing configuration. Tier-based pricing: Free, Plus,
- * Pro. Each paid tier is a fixed-price monthly subscription with
- * well-defined limits enforced in-app. No usage metering — we moved
- * away from that because consumers overwhelmingly expect tiers
- * (Proton, Filen, Dropbox, iCloud, Google One all do this).
- *
- * Changing a tier's limits affects every subscriber on that tier
- * immediately. Coordinate with landing-page copy when adjusting.
+ * Tier definitions. Vendor-neutral — these limits drive in-app
+ * enforcement (upload quota, workspace count, seat cap) and also
+ * the UI's tier-picker. Paddle product/price IDs are looked up via
+ * paddleConfig() separately; this file doesn't depend on Paddle.
  */
-
-function required(name: string, value: string | undefined): string {
-  if (!value || value.length === 0) {
-    throw new Error(
-      `Missing required billing env var: ${name}. ` +
-        "See README.md → Polar.sh billing section.",
-    );
-  }
-  return value;
-}
 
 export type Tier = "free" | "plus" | "pro";
 
 export interface TierLimits {
-  /** Human-readable label used in UI copy. */
   label: string;
-  /** Monthly price in USD cents, 0 for free. */
   priceCents: number;
-  /** Hard storage cap in GB. */
   storageGB: number;
-  /** Total user count including the owner. `Infinity` for unlimited. */
+  /** Total users (owner + teammates). Infinity for unlimited. */
   seats: number;
-  /** Total workspaces owned. `Infinity` for unlimited. */
+  /** Owned workspaces. Infinity for unlimited. */
   workspaces: number;
 }
 
@@ -54,33 +37,49 @@ export const TIER_LIMITS: Record<Tier, TierLimits> = {
   pro: {
     label: "Pro",
     priceCents: 999,
-    storageGB: 2048, // 2 TB
+    storageGB: 2048,
     seats: 10,
     workspaces: Infinity,
   },
 };
 
-export function polarConfig() {
+export function limitsForTier(tier: Tier): TierLimits {
+  return TIER_LIMITS[tier];
+}
+
+/**
+ * Paddle configuration. Empty strings during the migration window
+ * (pre-credentials). Callers that actually need Paddle should throw
+ * if these are missing via `requirePaddleConfig()` below.
+ */
+export function paddleConfig() {
   return {
-    accessToken: required("POLAR_ACCESS_TOKEN", process.env.POLAR_ACCESS_TOKEN),
-    orgId: required("POLAR_ORG_ID", process.env.POLAR_ORG_ID),
-    webhookSecret: process.env.POLAR_WEBHOOK_SECRET ?? "",
-    productIdPlus: required("POLAR_PRODUCT_ID_PLUS", process.env.POLAR_PRODUCT_ID_PLUS),
-    productIdPro: required("POLAR_PRODUCT_ID_PRO", process.env.POLAR_PRODUCT_ID_PRO),
+    apiKey: process.env.PADDLE_API_KEY ?? "",
+    clientToken: process.env.PADDLE_CLIENT_TOKEN ?? "",
+    webhookSecret: process.env.PADDLE_WEBHOOK_SECRET ?? "",
+    environment: (process.env.PADDLE_ENVIRONMENT ?? "sandbox") as "sandbox" | "production",
+    priceIdPlus: process.env.PADDLE_PRICE_ID_PLUS ?? "",
+    priceIdPro: process.env.PADDLE_PRICE_ID_PRO ?? "",
   };
 }
 
-/** Map a Polar product id back to the caller's tier. Unknown ids
- *  (e.g. a legacy archived metered product) return null and the
- *  caller falls back to free-tier limits — the safest default. */
-export function tierFromProductId(productId: string | null | undefined): Tier | null {
-  if (!productId) return null;
-  const cfg = polarConfig();
-  if (productId === cfg.productIdPlus) return "plus";
-  if (productId === cfg.productIdPro) return "pro";
-  return null;
+export function requirePaddleConfig() {
+  const cfg = paddleConfig();
+  for (const [name, value] of Object.entries(cfg)) {
+    if (!value) {
+      throw new Error(
+        `Paddle not configured: missing ${name.toUpperCase()}. See README.md → Paddle billing.`,
+      );
+    }
+  }
+  return cfg as Required<ReturnType<typeof paddleConfig>>;
 }
 
-export function limitsForTier(tier: Tier): TierLimits {
-  return TIER_LIMITS[tier];
+/** Map a Paddle price id back to a tier. */
+export function tierFromPriceId(priceId: string | null | undefined): Tier | null {
+  if (!priceId) return null;
+  const cfg = paddleConfig();
+  if (priceId === cfg.priceIdPlus) return "plus";
+  if (priceId === cfg.priceIdPro) return "pro";
+  return null;
 }
