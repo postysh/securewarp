@@ -92,6 +92,17 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     trashBytes: number; trashCount: number;
     sharedCount: number;
   } | null>(null);
+  const [billingStatus, setBillingStatus] = useState<{
+    plan: "free" | "pro";
+    subscription: { status: string; currentPeriodEnd: string | null } | null;
+    usage: { storageGB: number; seats: number; workspaces: number };
+    allowance: { storageGB: number; seats: number; workspaces: number };
+    billable: { storageGB: number; seats: number; workspaces: number };
+    estimatedMonthlyCents: number;
+    unitCents: { storagePerGB: number; seat: number; workspace: number };
+  } | null>(null);
+  const [openingPortal, setOpeningPortal] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
@@ -162,7 +173,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         })
         .catch(() => {});
     }
-  }, [open, activeTab, storageUsage]);
+    if (open && activeTab === "storage" && !billingStatus) {
+      fetch("/api/billing/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d && d.plan) setBillingStatus(d); })
+        .catch(() => {});
+    }
+  }, [open, activeTab, storageUsage, billingStatus]);
 
   useEffect(() => {
     if (!open) return;
@@ -630,7 +647,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       case "storage": {
         const used = storageUsage?.usedBytes ?? 0;
         const max = storageUsage?.maxBytes ?? 20 * 1024 * 1024 * 1024;
-        const pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
         const filesBytes = storageUsage?.filesBytes ?? 0;
         const trashBytes = storageUsage?.trashBytes ?? 0;
         const filesPct = max > 0 ? (filesBytes / max) * 100 : 0;
@@ -640,15 +656,83 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           { label: "Shared with me", size: `${storageUsage?.sharedCount ?? 0} files`, count: storageUsage?.sharedCount ?? 0, percent: 0, color: "var(--accent-green-primary)" },
           { label: "Trash", size: formatBytes(trashBytes), count: storageUsage?.trashCount ?? 0, percent: trashPct, color: "var(--accent-red-primary)" },
         ];
+
+        const isPro = billingStatus?.plan === "pro";
+        const cents = billingStatus?.estimatedMonthlyCents ?? 0;
+        const dollars = (cents / 100).toFixed(2);
+        const u = billingStatus?.usage ?? { storageGB: 0, seats: 0, workspaces: 0 };
+        const a = billingStatus?.allowance ?? { storageGB: 20, seats: 1, workspaces: 1 };
+
+        const handleUpgrade = async () => {
+          if (upgrading) return;
+          setUpgrading(true);
+          try {
+            const res = await fetch("/api/billing/checkout", { method: "POST" });
+            const data = await res.json();
+            if (res.ok && data.url) { window.location.href = data.url; return; }
+          } catch { /* */ }
+          setUpgrading(false);
+        };
+        const handleManage = async () => {
+          if (openingPortal) return;
+          setOpeningPortal(true);
+          try {
+            const res = await fetch("/api/billing/portal", { method: "POST" });
+            const data = await res.json();
+            if (res.ok && data.url) { window.location.href = data.url; return; }
+          } catch { /* */ }
+          setOpeningPortal(false);
+        };
+
         return (
           <div>
             <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-[14px] text-text-primary font-semibold">Free plan</p>
-                  <p className="text-[11px] text-text-disabled mt-0.5">{formatBytes(max)} storage included</p>
+                  <p className="text-[14px] text-text-primary font-semibold">
+                    {isPro ? "SecureWarp Pro" : "Free plan"}
+                  </p>
+                  <p className="text-[11px] text-text-disabled mt-0.5">
+                    {isPro
+                      ? `Pay-as-you-go. Next bill ≈ $${dollars}/mo at current usage.`
+                      : `${formatBytes(max)} storage included`}
+                  </p>
                 </div>
+                {isPro ? (
+                  <button
+                    onClick={handleManage}
+                    disabled={openingPortal}
+                    className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {openingPortal ? "Opening…" : "Manage"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleUpgrade}
+                    disabled={upgrading}
+                    className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                  >
+                    {upgrading ? "Opening…" : "Upgrade"}
+                  </button>
+                )}
               </div>
+
+              {billingStatus && (
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  {[
+                    { label: "Storage", value: `${u.storageGB.toFixed(2)} GB`, limit: `of ${a.storageGB} GB free` },
+                    { label: "Team seats", value: `${u.seats}`, limit: `${a.seats} free` },
+                    { label: "Workspaces", value: `${u.workspaces}`, limit: `${a.workspaces} free` },
+                  ].map((m) => (
+                    <div key={m.label} className="p-2.5 rounded-[8px] bg-bg-l2 border border-border-tertiary">
+                      <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider">{m.label}</p>
+                      <p className="text-[13px] text-text-primary font-medium mt-0.5">{m.value}</p>
+                      <p className="text-[10px] text-text-disabled mt-0.5">{m.limit}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="h-[8px] bg-bg-field rounded-full overflow-hidden flex">
                 {categories.filter((c) => c.percent > 0).map((cat) => (
                   <div
