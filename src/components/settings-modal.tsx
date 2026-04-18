@@ -665,55 +665,26 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           { label: "Trash", size: formatBytes(trashBytes), count: storageUsage?.trashCount ?? 0, percent: trashPct, color: "var(--accent-red-primary)" },
         ];
 
-        const usedPctExact = max > 0 ? (used / max) * 100 : 0;
-        const usedPct = Math.min(usedPctExact, 100);
-        // Bar fill never goes below 2px equivalent when there's any
-        // usage — a 40 MB file on a 500 GB plan is ~0.008%, which
-        // renders as a zero-pixel sliver. Guarantee a visible mark.
-        const displayWidth = used > 0 && usedPct < 0.5 ? "2px" : `${usedPct}%`;
-        const pctLabel =
-          used === 0
-            ? "0%"
-            : usedPct >= 1
-              ? `${usedPct.toFixed(usedPct < 10 ? 1 : 0)}%`
-              : usedPct >= 0.1
-                ? `${usedPct.toFixed(1)}%`
-                : "<0.1%";
         return (
           <div>
             <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-[14px] text-text-primary font-semibold">Storage usage</p>
-                <span className="text-[11px] text-text-disabled font-mono">
-                  {formatBytes(used)} of {formatBytes(max)}
-                </span>
-              </div>
-              <div
-                className="h-[8px] bg-bg-field rounded-full overflow-hidden"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(usedPct)}
-              >
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: displayWidth,
-                    minWidth: used > 0 ? "6px" : undefined,
-                    background:
-                      usedPct >= 95
-                        ? "var(--accent-red-primary)"
-                        : usedPct >= 80
-                          ? "var(--accent-yellow-primary)"
-                          : "var(--accent-green-primary)",
-                  }}
-                />
+              <div className="h-[8px] bg-bg-field rounded-full overflow-hidden flex">
+                {categories.filter((c) => c.percent > 0).map((cat) => (
+                  <div
+                    key={cat.label}
+                    className="h-full first:rounded-l-full last:rounded-r-full"
+                    style={{
+                      // Keep tiny usage visible: a few MB on a 500 GB plan
+                      // renders as sub-pixel width without this floor.
+                      width: `max(${cat.percent}%, 6px)`,
+                      backgroundColor: cat.color,
+                    }}
+                  />
+                ))}
               </div>
               <div className="flex items-center justify-between mt-2">
-                <span className="text-[11px] text-text-disabled">{pctLabel} used</span>
-                <span className="text-[11px] text-text-disabled">
-                  {formatBytes(Math.max(0, max - used))} free
-                </span>
+                <span className="text-[12px] text-text-primary font-medium">{formatBytes(used)} used</span>
+                <span className="text-[11px] text-text-disabled">of {formatBytes(max)}</span>
               </div>
             </div>
 
