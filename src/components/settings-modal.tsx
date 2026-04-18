@@ -36,7 +36,7 @@ const tabs: { id: TabId; label: string; icon: unknown; section?: string }[] = [
   { id: "security", label: "Security", icon: SecurityLockIcon, section: "General" },
   { id: "appearance", label: "Appearance", icon: PaintBrush01Icon, section: "General" },
   { id: "notifications", label: "Notifications", icon: Notification01Icon, section: "General" },
-  { id: "storage", label: "Storage", icon: CloudServerIcon, section: "Plan" },
+  { id: "storage", label: "Plan & billing", icon: CloudServerIcon, section: "Plan" },
 ];
 
 function SettingRow({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
@@ -103,6 +103,23 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   } | null>(null);
   const [openingPortal, setOpeningPortal] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
+  const [subscriptionDetail, setSubscriptionDetail] = useState<{
+    id: string;
+    status: string;
+    cancelAtPeriodEnd: boolean;
+    currentPeriodEnd: string | null;
+  } | null>(null);
+  const [invoices, setInvoices] = useState<{
+    id: string;
+    createdAt: string;
+    totalAmountCents: number;
+    currency: string;
+    paid: boolean;
+    status: string;
+  }[] | null>(null);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [invoiceBusy, setInvoiceBusy] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
@@ -180,6 +197,26 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         .catch(() => {});
     }
   }, [open, activeTab, storageUsage, billingStatus]);
+
+  // Once we know the user is Pro, pull their subscription detail +
+  // invoice list. Gated on billingStatus so we don't fire Polar
+  // lookups for Free users (they have no subscription row to query).
+  useEffect(() => {
+    if (!open || activeTab !== "storage") return;
+    if (billingStatus?.plan !== "pro") return;
+    if (!subscriptionDetail) {
+      fetch("/api/billing/subscription")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d?.subscription) setSubscriptionDetail(d.subscription); })
+        .catch(() => {});
+    }
+    if (!invoices) {
+      fetch("/api/billing/invoices")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d?.invoices) setInvoices(d.invoices); })
+        .catch(() => {});
+    }
+  }, [open, activeTab, billingStatus, subscriptionDetail, invoices]);
 
   useEffect(() => {
     if (!open) return;
@@ -666,11 +703,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         const handleUpgrade = async () => {
           if (upgrading) return;
           setUpgrading(true);
-          try {
-            const res = await fetch("/api/billing/checkout", { method: "POST" });
-            const data = await res.json();
-            if (res.ok && data.url) { window.location.href = data.url; return; }
-          } catch { /* */ }
+          const { openEmbeddedCheckout } = await import("@/lib/billing/embed-checkout");
+          await openEmbeddedCheckout(() => {
+            // Force a billing refetch so the Pro status + live bill
+            // show up without a full page reload after the webhook
+            // lands the subscription row.
+            setBillingStatus(null);
+          });
           setUpgrading(false);
         };
         const handleManage = async () => {
@@ -695,18 +734,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <p className="text-[11px] text-text-disabled mt-0.5">
                     {isPro
                       ? `Pay-as-you-go. Next bill ≈ $${dollars}/mo at current usage.`
-                      : `${formatBytes(max)} storage included`}
+                      : cents > 0
+                        ? `Your current usage would be $${dollars}/mo on Pro.`
+                        : `${formatBytes(max)} storage, 1 workspace, 1 user included.`}
                   </p>
                 </div>
-                {isPro ? (
-                  <button
-                    onClick={handleManage}
-                    disabled={openingPortal}
-                    className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    {openingPortal ? "Opening…" : "Manage"}
-                  </button>
-                ) : (
+                {!isPro && (
                   <button
                     onClick={handleUpgrade}
                     disabled={upgrading}
@@ -730,6 +763,65 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                       <p className="text-[10px] text-text-disabled mt-0.5">{m.limit}</p>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {isPro && subscriptionDetail && (
+                <div className="p-3 rounded-[8px] bg-bg-l2 border border-border-tertiary mb-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[12px] text-text-primary font-medium">
+                        {subscriptionDetail.cancelAtPeriodEnd
+                          ? "Cancellation scheduled"
+                          : "Active subscription"}
+                      </p>
+                      <p className="text-[11px] text-text-disabled mt-0.5">
+                        {subscriptionDetail.cancelAtPeriodEnd
+                          ? `Ends ${subscriptionDetail.currentPeriodEnd
+                              ? new Date(subscriptionDetail.currentPeriodEnd).toLocaleDateString()
+                              : "at period end"}. You can keep using Pro until then.`
+                          : `Next charge ${subscriptionDetail.currentPeriodEnd
+                              ? new Date(subscriptionDetail.currentPeriodEnd).toLocaleDateString()
+                              : "on renewal"}.`}
+                      </p>
+                    </div>
+                    {subscriptionDetail.cancelAtPeriodEnd ? (
+                      <button
+                        onClick={async () => {
+                          setCancelBusy(true);
+                          try {
+                            const res = await fetch("/api/billing/cancel", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ cancelAtPeriodEnd: false }),
+                            });
+                            if (res.ok) {
+                              setSubscriptionDetail(null);
+                              setBillingStatus(null);
+                            }
+                          } finally { setCancelBusy(false); }
+                        }}
+                        disabled={cancelBusy}
+                        className="h-[26px] px-2.5 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {cancelBusy ? "…" : "Resume"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setCancelConfirmOpen(true)}
+                        className="h-[26px] px-2.5 rounded-[6px] text-[11px] font-medium text-accent-red hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleManage}
+                    disabled={openingPortal}
+                    className="mt-3 text-[11px] text-text-tertiary hover:text-text-primary transition-colors cursor-pointer underline underline-offset-2 disabled:opacity-50"
+                  >
+                    {openingPortal ? "Opening…" : "Update payment method"}
+                  </button>
                 </div>
               )}
 
@@ -770,6 +862,45 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               <HugeiconsIcon icon={LockIcon} size={10} />
               Storage usage is calculated from encrypted file sizes
             </div>
+
+            {isPro && invoices && invoices.length > 0 && (
+              <div className="mt-6 pt-4 border-t border-border-tertiary">
+                <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-2">Invoices</p>
+                <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
+                  {invoices.slice(0, 10).map((inv) => {
+                    const amount = (inv.totalAmountCents / 100).toFixed(2);
+                    const date = new Date(inv.createdAt).toLocaleDateString();
+                    return (
+                      <div key={inv.id} className="flex items-center gap-3 px-3 py-2.5 border-b border-border-tertiary last:border-b-0">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] text-text-primary">{date}</p>
+                          <p className="text-[10px] text-text-disabled font-mono uppercase tracking-wider">
+                            {inv.paid ? "Paid" : inv.status}
+                          </p>
+                        </div>
+                        <span className="text-[12px] text-text-secondary font-mono">
+                          ${amount} {(inv.currency || "usd").toUpperCase()}
+                        </span>
+                        <button
+                          onClick={async () => {
+                            setInvoiceBusy(inv.id);
+                            try {
+                              const res = await fetch(`/api/billing/invoice/${inv.id}`);
+                              const data = await res.json();
+                              if (res.ok && data.url) window.open(data.url, "_blank", "noopener");
+                            } finally { setInvoiceBusy(null); }
+                          }}
+                          disabled={invoiceBusy === inv.id}
+                          className="h-[24px] px-2 rounded-[5px] text-[10px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {invoiceBusy === inv.id ? "…" : "PDF"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="mt-6 pt-4 border-t border-border-tertiary">
               <div className="flex items-center justify-between">
@@ -875,6 +1006,35 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       {auth.recoveryKey && (
         <RecoveryKeyModal open={true} onClose={auth.dismissRecoveryKey} recoveryKey={auth.recoveryKey} />
       )}
+      <ConfirmDialog
+        open={cancelConfirmOpen}
+        title="Cancel SecureWarp Pro?"
+        description={
+          subscriptionDetail?.currentPeriodEnd
+            ? `Your subscription will stay active until ${new Date(subscriptionDetail.currentPeriodEnd).toLocaleDateString()}. You can resume any time before then.`
+            : "Your subscription will stay active until the end of the current period. You can resume any time before then."
+        }
+        confirmLabel="Cancel subscription"
+        destructive
+        busy={cancelBusy}
+        busyLabel="Canceling…"
+        onConfirm={async () => {
+          setCancelBusy(true);
+          try {
+            const res = await fetch("/api/billing/cancel", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ cancelAtPeriodEnd: true }),
+            });
+            if (res.ok) {
+              setSubscriptionDetail(null);
+              setBillingStatus(null);
+              setCancelConfirmOpen(false);
+            }
+          } finally { setCancelBusy(false); }
+        }}
+        onCancel={() => setCancelConfirmOpen(false)}
+      />
     </>
   );
 }

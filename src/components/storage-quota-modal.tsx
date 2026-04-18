@@ -40,14 +40,13 @@ export function StorageQuotaModal({ open, onClose }: Props) {
   const handleUpgrade = async () => {
     if (upgrading) return;
     setUpgrading(true);
-    try {
-      const res = await fetch("/api/billing/checkout", { method: "POST" });
-      const data = await res.json();
-      if (res.ok && data.url) {
-        window.location.href = data.url;
-        return;
-      }
-    } catch { /* fall through */ }
+    const { openEmbeddedCheckout } = await import("@/lib/billing/embed-checkout");
+    await openEmbeddedCheckout(() => {
+      // Success — close the quota modal so the user lands back on
+      // the app. Subscription state flips via webhook; the next
+      // settings-panel open will show Pro.
+      onClose();
+    });
     setUpgrading(false);
   };
 

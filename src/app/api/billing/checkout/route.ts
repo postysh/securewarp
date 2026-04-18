@@ -44,6 +44,10 @@ export async function POST(request: Request) {
       products: [cfg.productIdPro],
       customerId,
       successUrl: `${origin}/drive?checkout={CHECKOUT_ID}`,
+      // Required for the in-app embedded checkout iframe to
+      // postMessage back to the parent. Must exactly match the
+      // origin that will host the iframe.
+      embedOrigin: origin,
       metadata: { userId: session.userId },
     });
 
