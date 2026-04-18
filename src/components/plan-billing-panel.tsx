@@ -76,6 +76,22 @@ export function PlanBillingPanel() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pendingTier, setPendingTier] = useState<"plus" | "pro" | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  // Track the Stripe subscription id the checkout creates so we can
+  // void it if the user bails before confirming payment — otherwise
+  // the dashboard fills up with "incomplete" subscriptions + open
+  // invoices from abandoned clicks.
+  const [pendingSubId, setPendingSubId] = useState<string | null>(null);
+  const abandonCheckout = useCallback(async (subId: string | null) => {
+    if (!subId) return;
+    try {
+      await fetch("/api/billing/checkout-abandon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscriptionId: subId }),
+      });
+    } catch { /* best-effort — the stale-incomplete cleanup in the
+                 next /api/billing/checkout call is a backstop. */ }
+  }, []);
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [openingPortal, setOpeningPortal] = useState(false);
@@ -134,6 +150,7 @@ export function PlanBillingPanel() {
         setStatus(data);
         setPendingTier(null);
         setClientSecret(null);
+        setPendingSubId(null);
         // Let the sidebar (and anything else listening) re-read their
         // plan label from /api/billing/status. Dispatched once per
         // successful convergence, so no polling traffic leaks out.
@@ -144,6 +161,27 @@ export function PlanBillingPanel() {
   }, []);
   useEffect(() => () => {
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+  }, []);
+
+  // If the user navigates away (tab switch, modal close) with a
+  // still-pending checkout, void the Stripe subscription on
+  // unmount. Ref-captured so the cleanup reads the latest value
+  // even if pendingSubId changes during the component's lifetime.
+  const pendingSubIdRef = useRef<string | null>(null);
+  useEffect(() => { pendingSubIdRef.current = pendingSubId; }, [pendingSubId]);
+  useEffect(() => () => {
+    const subId = pendingSubIdRef.current;
+    if (subId) {
+      // Fire-and-forget; we're unmounting so state updates are
+      // irrelevant. keepalive ensures the request survives a tab
+      // close or page navigation.
+      fetch("/api/billing/checkout-abandon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscriptionId: subId }),
+        keepalive: true,
+      }).catch(() => {});
+    }
   }, []);
 
   const startCheckout = async (tier: "plus" | "pro") => {
@@ -164,6 +202,9 @@ export function PlanBillingPanel() {
         return;
       }
       setClientSecret(data.clientSecret);
+      if (typeof data.subscriptionId === "string") {
+        setPendingSubId(data.subscriptionId);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start checkout");
       setPendingTier(null);
@@ -309,7 +350,15 @@ export function PlanBillingPanel() {
               Upgrade to SecureWarp {pendingTier === "pro" ? "Pro" : "Plus"}
             </p>
             <button
-              onClick={() => { setPendingTier(null); setClientSecret(null); }}
+              onClick={() => {
+                // Void the incomplete subscription on abandon so
+                // the Stripe dashboard doesn't fill up with
+                // orphaned `incomplete` subs + open invoices.
+                void abandonCheckout(pendingSubId);
+                setPendingTier(null);
+                setClientSecret(null);
+                setPendingSubId(null);
+              }}
               className="text-[11px] text-text-tertiary hover:text-text-primary transition-colors cursor-pointer"
             >
               Cancel

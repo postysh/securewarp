@@ -52,20 +52,49 @@ export async function POST(request: Request) {
     const cfg = stripeConfig();
     const priceId = tier === "pro" ? cfg.priceIdPro : cfg.priceIdPlus;
 
-    const subscription = await stripe().subscriptions.create({
+    // If the customer already has an `incomplete` subscription for
+    // the same price, reuse it. Clicking Upgrade, closing the modal,
+    // clicking Upgrade again shouldn't spawn a parallel incomplete
+    // subscription (+ a new draft invoice) every time. Any abandoned
+    // incomplete subs on OTHER prices get voided so the dashboard
+    // stays clean.
+    const existing = await stripe().subscriptions.list({
       customer: customerId,
-      items: [{ price: priceId }],
-      payment_behavior: "default_incomplete",
-      payment_settings: {
-        save_default_payment_method: "on_subscription",
-      },
-      // In current Stripe API versions the subscription's first
-      // invoice exposes the client secret via `confirmation_secret`,
-      // not `payment_intent.client_secret` (which returns empty on
-      // the invoice object post-2024). Expand for direct access.
-      expand: ["latest_invoice.confirmation_secret"],
-      metadata: { userId: session.userId, tier },
+      status: "incomplete",
+      limit: 20,
+      expand: ["data.latest_invoice.confirmation_secret"],
     });
+    let subscription = existing.data.find((s) => s.items.data[0]?.price?.id === priceId);
+    for (const stale of existing.data) {
+      if (stale === subscription) continue;
+      try {
+        const invId = typeof stale.latest_invoice === "string"
+          ? stale.latest_invoice
+          : stale.latest_invoice?.id;
+        if (invId) await stripe().invoices.voidInvoice(invId);
+        await stripe().subscriptions.cancel(stale.id);
+        await supabase.from("billing_subscriptions").delete().eq("polar_subscription_id", stale.id);
+      } catch (e) {
+        logError("billing.checkout.void_stale", e);
+      }
+    }
+
+    if (!subscription) {
+      subscription = await stripe().subscriptions.create({
+        customer: customerId,
+        items: [{ price: priceId }],
+        payment_behavior: "default_incomplete",
+        payment_settings: {
+          save_default_payment_method: "on_subscription",
+        },
+        // In current Stripe API versions the subscription's first
+        // invoice exposes the client secret via `confirmation_secret`,
+        // not `payment_intent.client_secret` (which returns empty on
+        // the invoice object post-2024). Expand for direct access.
+        expand: ["latest_invoice.confirmation_secret"],
+        metadata: { userId: session.userId, tier },
+      });
+    }
 
     const latestInvoice = subscription.latest_invoice;
     let clientSecret: string | null = null;
