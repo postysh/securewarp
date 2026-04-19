@@ -38,6 +38,13 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
+// Pre-hydration script. Reads the user's saved theme from localStorage
+// and sets `dark` on <html> BEFORE React paints, so returning dark-theme
+// users don't see a flash-of-light-theme on every refresh. Kept in sync
+// with src/components/theme-provider.tsx (same STORAGE_KEY + class).
+// Wrapped in try/catch because localStorage throws in privacy modes.
+const themeBootScript = `try{var t=localStorage.getItem('securewarp-theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -49,6 +56,9 @@ export default function RootLayout({
       className={`${chillax.variable} ${geistSans.variable} ${geistMono.variable} h-full`}
       suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
       <body className="h-full antialiased">
         {children}
       </body>
