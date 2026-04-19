@@ -6,11 +6,23 @@
 // lives only in window.location.hash and is never sent to the server.
 
 import { useEffect, useState, use } from "react";
+import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
+import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import File01Icon from "@hugeicons/core-free-icons/File01Icon";
+import Image01Icon from "@hugeicons/core-free-icons/Image01Icon";
+import CodeIcon from "@hugeicons/core-free-icons/CodeIcon";
+import Table01Icon from "@hugeicons/core-free-icons/Table01Icon";
+import MusicNote01Icon from "@hugeicons/core-free-icons/MusicNote01Icon";
+import Video01Icon from "@hugeicons/core-free-icons/Video01Icon";
+import Archive01Icon from "@hugeicons/core-free-icons/Archive01Icon";
+import Pdf01Icon from "@hugeicons/core-free-icons/Pdf01Icon";
+import Presentation01Icon from "@hugeicons/core-free-icons/Presentation01Icon";
+import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
+import type { FileKind } from "@/components/file-icon";
 import {
   decodeLinkKeyFromFragment,
   unwrapPrivateHierarchicalKeyFromLink,
@@ -61,6 +73,7 @@ interface LinkMetadataPayload {
   passwordSalt: string | null;
   passwordWrappedLinkKey: string | null;
   passwordWrapNonce: string | null;
+  sharedByName: string | null;
   file: {
     encryptedMetadata: string;
     publicHierarchicalKey: string;
@@ -74,8 +87,8 @@ type ShareState =
   | { kind: "loading" }
   | { kind: "invalid"; reason: string }
   | { kind: "password-required"; payload: LinkMetadataPayload; error?: string; submitting?: boolean }
-  | { kind: "file"; meta: FileMeta }
-  | { kind: "folder"; meta: FileMeta; stack: { id: string; name: string }[]; items: DecryptedChild[] };
+  | { kind: "file"; meta: FileMeta; sharedByName: string | null }
+  | { kind: "folder"; meta: FileMeta; sharedByName: string | null; stack: { id: string; name: string }[]; items: DecryptedChild[] };
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -84,6 +97,59 @@ function formatBytes(bytes: number): string {
   let size = bytes;
   while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
   return `${size.toFixed(size < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+// Same mapping used by the file-browser's getFileKind, duplicated here
+// so the anonymous share page doesn't pull in the authenticated
+// component. Keep in sync with src/components/file-browser.tsx.
+function getFileKind(name: string, type: string): FileKind {
+  if (type === "folder") return "folder";
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  const map: Record<string, FileKind> = {
+    pdf: "pdf", doc: "document", docx: "document", txt: "document", md: "document",
+    png: "image", jpg: "image", jpeg: "image", gif: "image", svg: "image", webp: "image",
+    js: "code", ts: "code", py: "code", rb: "code", go: "code", rs: "code", jsx: "code", tsx: "code",
+    xls: "spreadsheet", xlsx: "spreadsheet", csv: "spreadsheet",
+    mp3: "audio", wav: "audio", ogg: "audio", flac: "audio",
+    mp4: "video", mov: "video", avi: "video", mkv: "video",
+    zip: "archive", tar: "archive", gz: "archive", rar: "archive", "7z": "archive",
+    pptx: "presentation", ppt: "presentation", key: "presentation",
+  };
+  return map[ext] || "other";
+}
+
+const HERO_ICON: Record<FileKind, { icon: typeof File01Icon; color: string }> = {
+  folder:       { icon: Folder01Icon,       color: "var(--accent-blue-primary)" },
+  document:     { icon: File01Icon,         color: "var(--accent-dark-blue-primary)" },
+  image:        { icon: Image01Icon,        color: "var(--accent-pink-primary)" },
+  code:         { icon: CodeIcon,           color: "var(--accent-orange-primary)" },
+  spreadsheet:  { icon: Table01Icon,        color: "var(--accent-yellow-primary)" },
+  audio:        { icon: MusicNote01Icon,    color: "var(--accent-pink-primary)" },
+  video:        { icon: Video01Icon,        color: "var(--accent-red-primary)" },
+  archive:      { icon: Archive01Icon,      color: "var(--accent-yellow-primary)" },
+  pdf:          { icon: Pdf01Icon,          color: "var(--accent-red-primary)" },
+  presentation: { icon: Presentation01Icon, color: "var(--accent-orange-primary)" },
+  page:         { icon: FileEditIcon,       color: "var(--accent-dark-blue-primary)" },
+  other:        { icon: File01Icon,         color: "var(--icon-tertiary)" },
+};
+
+function EyebrowLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-disabled mb-3">
+      {children}
+    </div>
+  );
+}
+
+function TrustPill() {
+  return (
+    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-border-tertiary bg-bg-side">
+      <HugeiconsIcon icon={Shield01Icon} size={12} color="var(--text-link)" />
+      <span className="text-[11px] font-mono uppercase tracking-wider text-text-tertiary">
+        Encrypted end-to-end
+      </span>
+    </div>
+  );
 }
 
 function PasswordPrompt({
@@ -97,40 +163,31 @@ function PasswordPrompt({
 }) {
   const [password, setPassword] = useState("");
   return (
-    <div className="text-center">
-      <div className="w-14 h-14 mx-auto rounded-xl bg-accent-green/10 flex items-center justify-center mb-4">
-        <HugeiconsIcon icon={LockIcon} size={26} color="var(--accent-green-primary)" />
-      </div>
-      <div className="text-[14px] font-semibold text-text-primary mb-1">Password required</div>
-      <div className="text-[12px] text-text-disabled mb-4">
-        Enter the password to unlock this shared item.
-      </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!submitting && password) onSubmit(password);
-        }}
-        className="flex flex-col items-center gap-3"
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!submitting && password) onSubmit(password);
+      }}
+      className="flex flex-col items-center gap-3"
+    >
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="Password"
+        autoFocus
+        disabled={submitting}
+        className="w-full max-w-[280px] px-3 py-2 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 transition-all border border-transparent focus:border-text-link/40 disabled:opacity-60"
+      />
+      {error && <div className="text-[11px] text-accent-red">{error}</div>}
+      <button
+        type="submit"
+        disabled={submitting || password.length === 0}
+        className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
-          autoFocus
-          disabled={submitting}
-          className="w-full max-w-[280px] px-3 py-2 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40 disabled:opacity-60"
-        />
-        {error && <div className="text-[11px] text-accent-red">{error}</div>}
-        <button
-          type="submit"
-          disabled={submitting || password.length === 0}
-          className="h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {submitting ? "Unlocking…" : "Unlock"}
-        </button>
-      </form>
-    </div>
+        {submitting ? "Unlocking…" : "Unlock"}
+      </button>
+    </form>
   );
 }
 
@@ -142,6 +199,10 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
   // time and grown as child walks decrypt additional parent_keys_claim
   // payloads. Used by both folder browsing and file downloads.
   const [folderPrivHier, setFolderPrivHier] = useState<Map<string, string>>(new Map());
+  // Per-file-id download progress, 0..100. A null entry means not
+  // downloading; the button/row reads this to render the current
+  // chunk-fetch percent so large files don't feel stuck.
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
 
   // Deriving a linkKey from the link payload + caller's input (URL
   // fragment OR password) is the single decryption entry point. Split
@@ -178,11 +239,12 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
       setState({
         kind: "folder",
         meta: fileMeta,
+        sharedByName: payload.sharedByName,
         stack: [{ id: payload.fileId, name: meta.name }],
         items: [],
       });
     } else {
-      setState({ kind: "file", meta: fileMeta });
+      setState({ kind: "file", meta: fileMeta, sharedByName: payload.sharedByName });
     }
   };
 
@@ -310,19 +372,22 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
   }, [state.kind === "folder" ? state.stack[state.stack.length - 1]?.id : null]);
 
   const downloadFile = async (fileId: string, name: string, mime: string) => {
+    // Every fileId we render is either the link's root file (seeded
+    // into the cache on load) or a descendant unwrapped during a child
+    // walk (cached when we decrypted its parent_keys_claim). No
+    // fragment round-trip needed here.
+    const privHier = folderPrivHier.get(fileId);
+    if (!privHier) return;
+    if (downloadProgress[fileId] !== undefined) return; // already in flight
+    let sessionKey: Uint8Array | null = null;
     try {
-      // Every fileId we render is either the link's root file (seeded
-      // into the cache on load) or a descendant unwrapped during a child
-      // walk (cached when we decrypted its parent_keys_claim). No
-      // fragment round-trip needed here.
-      const privHier = folderPrivHier.get(fileId);
-      if (!privHier) return;
+      setDownloadProgress((p) => ({ ...p, [fileId]: 0 }));
 
       const res = await fetch(`/api/files/link/${id}/download?fileId=${fileId}`);
-      if (!res.ok) return;
+      if (!res.ok) throw new Error("download metadata");
       const data = await res.json();
 
-      const sessionKey = unwrapSessionKeyFromFile(
+      sessionKey = unwrapSessionKeyFromFile(
         data.encryptedSessionKeyByFile,
         data.sessionKeyNonce,
         data.ownerPublicKey,
@@ -338,7 +403,9 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
           isFinal: boolean;
         }[];
         const decryptedChunks: Uint8Array[] = [];
-        for (const chunk of chunks) {
+        const total = chunks.length;
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
           const r2Res = await fetch(chunk.downloadUrl);
           const encrypted = new Uint8Array(await r2Res.arrayBuffer());
           const decrypted = decryptChunk(
@@ -349,6 +416,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
             sessionKey
           );
           decryptedChunks.push(decrypted);
+          setDownloadProgress((p) => ({ ...p, [fileId]: Math.round(((i + 1) / total) * 100) }));
         }
         const totalSize = decryptedChunks.reduce((sum, c) => sum + c.length, 0);
         decryptedContent = new Uint8Array(totalSize);
@@ -362,6 +430,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
         const encrypted = new Uint8Array(await r2Res.arrayBuffer());
         const { decryptFileContent } = await import("@/lib/crypto/file-crypto");
         decryptedContent = decryptFileContent(encrypted, data.encryptionNonce, sessionKey);
+        setDownloadProgress((p) => ({ ...p, [fileId]: 100 }));
       }
 
       const blob = new Blob([new Uint8Array(decryptedContent)], { type: mime || "application/octet-stream" });
@@ -373,9 +442,15 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      sessionKey.fill(0);
     } catch (err) {
       console.error("share download", err);
+    } finally {
+      if (sessionKey) sessionKey.fill(0);
+      setDownloadProgress((p) => {
+        const next = { ...p };
+        delete next[fileId];
+        return next;
+      });
     }
   };
 
@@ -391,97 +466,174 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-bg-main p-6">
-      <div className="w-full max-w-[560px]">
-        <div className="rounded-2xl border border-border-primary bg-bg-l3 overflow-hidden" style={{ boxShadow: "var(--shadow-l2)" }}>
-          <div className="flex items-center gap-3 px-5 py-4 border-b border-border-tertiary">
-            <div className="w-8 h-8 rounded-[8px] bg-bg-overlay-tertiary flex items-center justify-center">
-              <HugeiconsIcon icon={LockIcon} size={18} color="var(--accent-green-primary)" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[14px] font-semibold text-text-primary truncate">Secure link</div>
-              <div className="text-[11px] text-text-disabled truncate">Encrypted end-to-end</div>
-            </div>
-          </div>
+    <div className="min-h-screen flex flex-col bg-bg-side">
+      {/* Brand bar — ties the anonymous link page back to the
+          marketing site so recipients see where the share came from. */}
+      <header className="flex items-center justify-between px-6 py-5">
+        <Link
+          href="/"
+          className="no-underline text-text-primary text-[13px] font-semibold tracking-[1px] hover:opacity-80 transition-opacity"
+          style={{ fontFamily: "var(--font-geist-mono), monospace" }}
+        >
+          SECUREWARP
+        </Link>
+        <div className="text-[11px] font-mono uppercase tracking-wider text-text-tertiary">
+          Shared with you
+        </div>
+      </header>
 
-          <div className="px-5 py-6">
+      <div className="flex-1 flex flex-col items-center justify-center px-6 pb-10">
+        <div className="w-full max-w-[480px]">
+          <div className="rounded-2xl border border-border-tertiary bg-bg-l3 overflow-hidden" style={{ boxShadow: "var(--shadow-l2)" }}>
             {state.kind === "loading" && (
-              <div className="text-center text-[13px] text-text-tertiary">Decrypting…</div>
+              <div className="px-6 py-14 text-center text-[13px] text-text-tertiary">Decrypting…</div>
             )}
+
             {state.kind === "invalid" && (
-              <div className="text-center">
-                <div className="text-[14px] text-text-primary mb-2">Link unavailable</div>
-                <div className="text-[12px] text-text-disabled">{state.reason}</div>
-              </div>
-            )}
-            {state.kind === "password-required" && (
-              <PasswordPrompt
-                error={state.error}
-                submitting={state.submitting ?? false}
-                onSubmit={submitPassword}
-              />
-            )}
-            {state.kind === "file" && (
-              <div className="text-center">
-                <div className="w-14 h-14 mx-auto rounded-xl bg-accent-green/10 flex items-center justify-center mb-4">
-                  <HugeiconsIcon icon={File01Icon} size={28} color="var(--accent-green-primary)" />
-                </div>
-                <div className="text-[15px] font-semibold text-text-primary truncate">{state.meta.name}</div>
-                <div className="text-[12px] text-text-disabled mt-1">{formatBytes(state.meta.size)}</div>
-                <button
-                  onClick={() => downloadFile(state.meta.id, state.meta.name, state.meta.type)}
-                  className="mt-5 h-[38px] px-5 rounded-[10px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] flex items-center gap-2 mx-auto"
-                >
-                  <HugeiconsIcon icon={Download04Icon} size={15} /> Download
-                </button>
-              </div>
-            )}
-            {state.kind === "folder" && (
-              <div>
-                <div className="flex items-center gap-2 mb-3 text-[12px] text-text-tertiary">
-                  {state.stack.length > 1 && (
-                    <button onClick={goBack} className="text-text-secondary hover:text-text-primary cursor-pointer transition-colors">
-                      ← Back
-                    </button>
-                  )}
-                  <span className="font-medium text-text-primary truncate">
-                    {state.stack[state.stack.length - 1].name}
-                  </span>
-                </div>
-                {state.items.length === 0 ? (
-                  <div className="py-8 text-center text-[12px] text-text-disabled">Empty folder</div>
-                ) : (
-                  <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
-                    {state.items.map((item) => (
-                      <button
-                        key={item.id}
-                        onClick={() =>
-                          item.isFolder
-                            ? enterFolder(item.id, item.name)
-                            : downloadFile(item.id, item.name, item.type)
-                        }
-                        className="w-full flex items-center gap-3 px-3 py-2.5 border-b border-border-tertiary last:border-b-0 hover:bg-bg-cell-hover transition-colors text-left cursor-pointer"
-                      >
-                        <HugeiconsIcon
-                          icon={item.isFolder ? Folder01Icon : File01Icon}
-                          size={18}
-                          color={item.isFolder ? "var(--accent-blue-primary)" : "var(--icon-secondary)"}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[13px] text-text-primary truncate">{item.name}</div>
-                          {!item.isFolder && (
-                            <div className="text-[11px] text-text-disabled">{formatBytes(item.size)}</div>
-                          )}
-                        </div>
-                        {!item.isFolder && (
-                          <HugeiconsIcon icon={Download04Icon} size={15} color="var(--icon-tertiary)" />
-                        )}
-                      </button>
-                    ))}
+              <>
+                <div className="bg-bg-side px-6 py-8 text-center border-b border-border-tertiary">
+                  <EyebrowLabel>Unavailable</EyebrowLabel>
+                  <div className="w-14 h-14 mx-auto rounded-xl bg-bg-l3 border border-border-tertiary flex items-center justify-center mb-4">
+                    <HugeiconsIcon icon={LockIcon} size={24} color="var(--icon-tertiary)" />
                   </div>
-                )}
-              </div>
+                  <div className="text-[15px] font-semibold text-text-primary mb-1">Link unavailable</div>
+                  <div className="text-[12px] text-text-disabled">{state.reason}</div>
+                </div>
+              </>
             )}
+
+            {state.kind === "password-required" && (
+              <>
+                <div className="bg-bg-side px-6 py-8 text-center border-b border-border-tertiary">
+                  <EyebrowLabel>Locked</EyebrowLabel>
+                  <div className="w-14 h-14 mx-auto rounded-xl bg-bg-l3 border border-border-tertiary flex items-center justify-center mb-4">
+                    <HugeiconsIcon icon={LockIcon} size={24} color="var(--text-link)" />
+                  </div>
+                  <div className="text-[15px] font-semibold text-text-primary mb-1">Password required</div>
+                  <div className="text-[12px] text-text-disabled">Enter the password to unlock this shared item.</div>
+                </div>
+                <div className="px-6 py-6">
+                  <PasswordPrompt
+                    error={state.error}
+                    submitting={state.submitting ?? false}
+                    onSubmit={submitPassword}
+                  />
+                </div>
+              </>
+            )}
+
+            {state.kind === "file" && (() => {
+              const kind = getFileKind(state.meta.name, state.meta.type);
+              const hero = HERO_ICON[kind];
+              const progress = downloadProgress[state.meta.id];
+              const downloading = progress !== undefined;
+              const sharedBy = state.sharedByName?.trim() || "A SecureWarp user";
+              return (
+                <>
+                  <div className="bg-bg-side px-6 py-8 text-center border-b border-border-tertiary">
+                    <EyebrowLabel>Shared file</EyebrowLabel>
+                    <div className="w-16 h-16 mx-auto rounded-2xl bg-bg-l3 border border-border-tertiary flex items-center justify-center mb-5">
+                      <HugeiconsIcon icon={hero.icon} size={30} color={hero.color} />
+                    </div>
+                    <div className="text-[16px] font-semibold text-text-primary truncate">{state.meta.name}</div>
+                    <div className="text-[12px] text-text-disabled mt-1">
+                      {formatBytes(state.meta.size)} · Shared by {sharedBy}
+                    </div>
+                  </div>
+                  <div className="px-6 py-6 flex flex-col items-center gap-4">
+                    <TrustPill />
+                    <button
+                      onClick={() => downloadFile(state.meta.id, state.meta.name, state.meta.type)}
+                      disabled={downloading}
+                      className="h-[40px] px-6 rounded-[10px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] flex items-center gap-2 disabled:opacity-80 disabled:cursor-wait disabled:active:scale-100"
+                    >
+                      <HugeiconsIcon icon={Download04Icon} size={15} />
+                      {downloading ? `Downloading… ${progress}%` : "Download"}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
+
+            {state.kind === "folder" && (() => {
+              const sharedBy = state.sharedByName?.trim() || "A SecureWarp user";
+              const folderName = state.stack[state.stack.length - 1].name;
+              return (
+                <>
+                  <div className="bg-bg-side px-6 py-6 border-b border-border-tertiary">
+                    <EyebrowLabel>Shared folder</EyebrowLabel>
+                    <div className="flex items-center gap-2 justify-center">
+                      {state.stack.length > 1 && (
+                        <button
+                          onClick={goBack}
+                          className="text-[12px] text-text-secondary hover:text-text-primary cursor-pointer transition-colors shrink-0"
+                        >
+                          ← Back
+                        </button>
+                      )}
+                      <HugeiconsIcon icon={Folder01Icon} size={16} color="var(--accent-blue-primary)" />
+                      <span className="text-[15px] font-semibold text-text-primary truncate">
+                        {folderName}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-text-disabled mt-1 text-center">Shared by {sharedBy}</div>
+                  </div>
+                  <div className="px-5 py-5">
+                    {state.items.length === 0 ? (
+                      <div className="py-8 text-center text-[12px] text-text-disabled">Empty folder</div>
+                    ) : (
+                      <div className="rounded-[10px] border border-border-tertiary overflow-hidden">
+                        {state.items.map((item) => {
+                          const itemKind = getFileKind(item.name, item.isFolder ? "folder" : item.type);
+                          const itemHero = HERO_ICON[itemKind];
+                          const itemProgress = downloadProgress[item.id];
+                          const itemDownloading = itemProgress !== undefined;
+                          return (
+                            <button
+                              key={item.id}
+                              onClick={() =>
+                                item.isFolder
+                                  ? enterFolder(item.id, item.name)
+                                  : downloadFile(item.id, item.name, item.type)
+                              }
+                              disabled={itemDownloading}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 border-b border-border-tertiary last:border-b-0 hover:bg-bg-cell-hover transition-colors text-left cursor-pointer disabled:cursor-wait"
+                            >
+                              <div className="w-8 h-8 rounded-md bg-bg-side flex items-center justify-center shrink-0">
+                                <HugeiconsIcon icon={itemHero.icon} size={16} color={itemHero.color} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[13px] text-text-primary truncate">{item.name}</div>
+                                {!item.isFolder && (
+                                  <div className="text-[11px] text-text-disabled">
+                                    {itemDownloading ? `Downloading… ${itemProgress}%` : formatBytes(item.size)}
+                                  </div>
+                                )}
+                              </div>
+                              {!item.isFolder && (
+                                <HugeiconsIcon icon={Download04Icon} size={15} color="var(--icon-tertiary)" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="mt-5 flex justify-center">
+                      <TrustPill />
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+          <div className="mt-5 text-center text-[12px] text-text-tertiary">
+            Encrypt your own files.{" "}
+            <Link
+              href="/"
+              className="text-text-primary font-medium hover:opacity-80 transition-opacity"
+            >
+              Get SecureWarp →
+            </Link>
           </div>
         </div>
       </div>

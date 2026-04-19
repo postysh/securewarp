@@ -101,7 +101,11 @@ function HeroSection() {
     <section
       style={{
         position: "relative",
-        padding: "112px 32px 32px",
+        // Bottom padding is 0 — the next section (StandardsSection)
+        // controls its own top spacing. The old 32px added below the
+        // dashboard was stacking with Standards' top padding,
+        // producing a top gap 3× larger than the bottom one.
+        padding: "112px 32px 0",
       }}
     >
       <div
@@ -2473,10 +2477,9 @@ function StandardsSection() {
   return (
     <section
       style={{
-        // Asymmetric padding — tight at the top so the eyebrow sits
-        // high in the section, short at the bottom so the whole
-        // strip stays compact.
-        padding: "20px 32px 16px",
+        // Symmetric top + bottom padding. Bump both together in
+        // equal amounts to keep the heading evenly sandwiched.
+        padding: "32px 32px",
       }}
     >
       <p
@@ -2489,6 +2492,11 @@ function StandardsSection() {
           marginBottom: 32,
           marginTop: 0,
           fontFamily: BRAND_MONO,
+          // `line-height: 1` collapses the <p>'s line-box to the
+          // text height, so the 16px section padding above is the
+          // exact visible gap from the top rule to the characters
+          // (no inherited 1.5 line-height adds extra slack).
+          lineHeight: 1,
         }}
       >
         Built on open cryptographic standards
@@ -2513,6 +2521,11 @@ function StandardsSection() {
               cursor: "default",
               transition: "opacity 150ms ease",
               fontFamily: BRAND_SANS,
+              // Tighten to the text height so the 16px section
+              // padding below is the exact visible gap — matches
+              // the same treatment on the "Built on…" heading so
+              // top and bottom gaps look symmetric.
+              lineHeight: 1,
             }}
             className="mockup-standard-label"
           >

@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
-import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 import Link04Icon from "@hugeicons/core-free-icons/Link04Icon";
 import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
 import { useFilesContext, type DecryptedFile, type Collaborator, type PermissionLevel } from "@/hooks/use-files";
@@ -265,22 +264,32 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
         role="dialog" aria-modal="true" aria-label="Share" className="relative w-full h-full md:h-auto max-w-none md:max-w-[480px] md:max-h-[85vh] mx-0 md:mx-4 rounded-none md:rounded-2xl bg-bg-l3 border-0 md:border border-border-primary overflow-hidden animate-fade-in"
         style={{ boxShadow: "var(--shadow-l2)" }}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border-tertiary">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-[8px] bg-bg-overlay-tertiary flex items-center justify-center shrink-0">
-              <HugeiconsIcon icon={UserAdd01Icon} size={18} color="var(--accent-blue-primary)" />
+        {/* Cream header band — eyebrow + icon tile + filename. Close
+            button sits in the top-right corner so it survives the band. */}
+        <div className="relative bg-bg-side px-6 py-5 border-b border-border-tertiary">
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+            aria-label="Close"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={16} />
+          </button>
+          <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-disabled mb-3">
+            {file.isFolder ? "Share folder" : "Share file"}
+          </div>
+          <div className="flex items-center gap-3 min-w-0 pr-8">
+            <div className="w-10 h-10 rounded-[10px] bg-bg-l3 border border-border-tertiary flex items-center justify-center shrink-0">
+              <HugeiconsIcon icon={UserAdd01Icon} size={18} color="var(--text-link)" />
             </div>
             <div className="min-w-0">
               <div className="text-[14px] font-semibold text-text-primary truncate">
-                {file.isFolder ? "Share folder" : "Share file"}
+                {file.name}
               </div>
-              <div className="text-[11px] text-text-disabled truncate">{file.name}</div>
+              <div className="text-[11px] text-text-disabled">
+                Encrypted end to end in your browser
+              </div>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer shrink-0">
-            <HugeiconsIcon icon={Cancel01Icon} size={16} />
-          </button>
         </div>
 
         {/* Body */}
@@ -296,7 +305,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                 onKeyDown={handleKeyDown}
                 placeholder="Recipient email"
                 disabled={submitting}
-                className="w-full px-3.5 py-2.5 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40 disabled:opacity-60"
+                className="w-full px-3.5 py-2.5 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 transition-all border border-transparent focus:border-text-link/40 disabled:opacity-60"
               />
               {inputError && <p className="text-[11px] text-accent-red mt-1 px-1">{inputError}</p>}
               {!inputError && info && <p className="text-[11px] text-accent-green mt-1 px-1">{info}</p>}
@@ -402,7 +411,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
                   value={linkPassword}
                   onChange={(e) => setLinkPassword(e.target.value)}
                   placeholder="Set a password"
-                  className="w-full px-3 py-2 rounded-[10px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40"
+                  className="w-full px-3 py-2 rounded-[10px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 transition-all border border-transparent focus:border-text-link/40"
                 />
                 <p className="mt-1 text-[10px] text-text-disabled">
                   Visitors must enter this password. Store it separately. We
@@ -468,17 +477,11 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
             )}
           </div>
 
-          {/* E2E note */}
-          <div className="flex items-center gap-1.5 mt-4 text-[11px] text-text-disabled">
-            <HugeiconsIcon icon={LockIcon} size={12} />
-            The session key is re-wrapped to each recipient&apos;s public key in your browser.
-          </div>
-
           {/* Actions */}
           <div className="flex items-center justify-end gap-2 mt-5">
             <button
               onClick={onClose}
-              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
+              className="h-[36px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer"
             >
               Done
             </button>

@@ -1401,6 +1401,7 @@ export interface AnonymousLinkPayload {
     encrypted_session_key_by_file: string;
     session_key_nonce: string;
     owner_public_key: string;
+    owner_display_name: string | null;
   };
 }
 
@@ -1454,7 +1455,7 @@ export async function getLinkById(linkId: string): Promise<AnonymousLinkPayload 
   const { data: file, error: fileErr } = await supabase
     .from("files")
     .select(
-      "id, owner_id, parent_id, encrypted_metadata, is_folder, size_bytes, storage_key, encryption_nonce, chunk_count, public_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, owner:users!files_owner_id_fkey(public_encryption_key)"
+      "id, owner_id, parent_id, encrypted_metadata, is_folder, size_bytes, storage_key, encryption_nonce, chunk_count, public_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, owner:users!files_owner_id_fkey(public_encryption_key, display_name)"
     )
     .eq("id", link.file_id)
     .eq("upload_complete", true)
@@ -1474,7 +1475,7 @@ export async function getLinkById(linkId: string): Promise<AnonymousLinkPayload 
     public_hierarchical_key: string;
     encrypted_session_key_by_file: string;
     session_key_nonce: string;
-    owner: { public_encryption_key: string } | null;
+    owner: { public_encryption_key: string; display_name: string | null } | null;
   };
 
   return {
@@ -1493,6 +1494,7 @@ export async function getLinkById(linkId: string): Promise<AnonymousLinkPayload 
       encrypted_session_key_by_file: fileRow.encrypted_session_key_by_file,
       session_key_nonce: fileRow.session_key_nonce,
       owner_public_key: fileRow.owner?.public_encryption_key ?? "",
+      owner_display_name: fileRow.owner?.display_name ?? null,
     },
   };
 }

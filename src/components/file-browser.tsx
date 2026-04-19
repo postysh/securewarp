@@ -1313,7 +1313,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           const height = Math.abs(rubberBand.currentY - rubberBand.startY);
           if (width < 5 && height < 5) return null;
           return (
-            <div style={{ position: "absolute", left, top, width, height, border: "1px solid var(--accent-green-primary)", background: "rgba(110,210,170,0.08)", borderRadius: 4, pointerEvents: "none", zIndex: 50 }} />
+            <div style={{ position: "absolute", left, top, width, height, border: "1px solid rgb(239,90,60)", background: "rgba(239,90,60,0.08)", borderRadius: 4, pointerEvents: "none", zIndex: 50 }} />
           );
         })()}
 
@@ -1534,9 +1534,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                       <span
                         className="text-[9px] font-mono font-semibold tracking-wider px-1.5 py-0.5 rounded shrink-0"
                         style={{
-                          background: "rgba(110,210,170,0.12)",
-                          color: "rgba(110,210,170,0.95)",
-                          border: "1px solid rgba(110,210,170,0.25)",
+                          background: "rgba(239,90,60,0.12)",
+                          color: "rgba(239,90,60,0.95)",
+                          border: "1px solid rgba(239,90,60,0.25)",
                           lineHeight: 1,
                         }}
                       >

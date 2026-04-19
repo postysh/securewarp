@@ -187,7 +187,7 @@ export default function AdminAnnouncementsPage() {
                     {/* Click-through Link on whole row */}
                     <button
                       onClick={() => setEditor({ mode: "edit", item: a })}
-                      className="absolute inset-0 rounded-[8px] focus:outline-none focus:ring-2 focus:ring-accent-green/50 cursor-pointer"
+                      className="absolute inset-0 rounded-[8px] focus:outline-none focus:ring-2 focus:ring-text-link/50 cursor-pointer"
                       aria-label={`Edit ${a.title}`}
                     />
 

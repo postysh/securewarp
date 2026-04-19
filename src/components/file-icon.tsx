@@ -21,9 +21,9 @@ export type FileKind =
 const iconMap: Record<FileKind, { icon: typeof Folder01Icon; color: string }> = {
   folder:       { icon: Folder01Icon,       color: "var(--accent-blue-primary)" },
   document:     { icon: File01Icon,         color: "var(--accent-dark-blue-primary)" },
-  image:        { icon: Image01Icon,        color: "var(--accent-green-primary)" },
+  image:        { icon: Image01Icon,        color: "var(--accent-pink-primary)" },
   code:         { icon: CodeIcon,           color: "var(--accent-orange-primary)" },
-  spreadsheet:  { icon: Table01Icon,        color: "var(--accent-green-primary)" },
+  spreadsheet:  { icon: Table01Icon,        color: "var(--accent-yellow-primary)" },
   audio:        { icon: MusicNote01Icon,     color: "var(--accent-pink-primary)" },
   video:        { icon: Video01Icon,        color: "var(--accent-red-primary)" },
   archive:      { icon: Archive01Icon,      color: "var(--accent-yellow-primary)" },
@@ -37,7 +37,7 @@ export function FileIcon({ type, size = 18 }: { type: FileKind; size?: number })
   const cfg = iconMap[type] || iconMap.other;
 
   return (
-    <div className={`flex h-8 w-8 items-center justify-center ${type === "folder" ? "rounded-lg" : "rounded-md"} bg-bg-l3`}>
+    <div className={`flex h-8 w-8 items-center justify-center ${type === "folder" ? "rounded-lg" : "rounded-md"} bg-bg-side`}>
       <HugeiconsIcon icon={cfg.icon} size={size} color={cfg.color} />
     </div>
   );

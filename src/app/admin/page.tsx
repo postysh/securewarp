@@ -437,10 +437,15 @@ function StatCard({
   );
 }
 
-function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+function SectionHeader({ title, subtitle, eyebrow }: { title: string; subtitle?: string; eyebrow?: string }) {
   return (
     <div className="mb-3 flex items-end justify-between">
       <div>
+        {eyebrow && (
+          <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-disabled mb-1.5">
+            {eyebrow}
+          </div>
+        )}
         <h2 className="text-[14px] font-semibold text-text-primary">{title}</h2>
         {subtitle && <p className="text-[12px] text-text-tertiary mt-0.5">{subtitle}</p>}
       </div>

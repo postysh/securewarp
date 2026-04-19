@@ -7,7 +7,7 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
-import LockIcon from "@hugeicons/core-free-icons/LockIcon";
+import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import { useFilesContext } from "@/hooks/use-files";
@@ -176,11 +176,13 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
       {/* Top bar */}
       <div className="flex items-center justify-between px-5 h-[56px] shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="flex items-center gap-1.5 text-white/40 text-[11px]">
-            <HugeiconsIcon icon={LockIcon} size={12} />
-            Decrypted locally
+          <div className="inline-flex items-center gap-1.5 px-2 py-[3px] rounded-full bg-white/8 border border-white/10">
+            <HugeiconsIcon icon={Shield01Icon} size={10} color="rgb(239,90,60)" />
+            <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-white/60">
+              Decrypted locally
+            </span>
           </div>
-          <span className="text-[14px] font-medium text-white truncate ml-2">
+          <span className="text-[14px] font-medium text-white truncate ml-1">
             {fileName}
           </span>
         </div>
@@ -253,8 +255,8 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
               <>
                 <div className="w-[200px] h-[4px] bg-white/10 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-white/70 rounded-full transition-all duration-200"
-                    style={{ width: `${decryptProgress}%` }}
+                    className="h-full rounded-full transition-all duration-200"
+                    style={{ width: `${decryptProgress}%`, background: "rgb(239,90,60)" }}
                   />
                 </div>
                 <span className="text-[13px] text-white/50">

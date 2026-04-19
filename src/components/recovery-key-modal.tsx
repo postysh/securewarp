@@ -9,7 +9,6 @@ import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import Alert01Icon from "@hugeicons/core-free-icons/Alert01Icon";
 import ViewIcon from "@hugeicons/core-free-icons/ViewIcon";
 import ViewOffIcon from "@hugeicons/core-free-icons/ViewOffIcon";
-import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 
 interface RecoveryKeyModalProps {
   open: boolean;
@@ -77,95 +76,88 @@ export function RecoveryKeyModal({ open, onClose, recoveryKey }: RecoveryKeyModa
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" />
 
       <div
-        className="relative w-full max-w-[480px] mx-4 rounded-2xl bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
+        className="relative w-full max-w-[520px] rounded-2xl bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
         style={{ boxShadow: "var(--shadow-l2)" }}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border-tertiary">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-[8px] bg-bg-overlay-tertiary flex items-center justify-center">
-              <HugeiconsIcon icon={Key02Icon} size={18} color="var(--accent-yellow-primary)" />
-            </div>
-            <span className="text-[14px] font-semibold text-text-primary">Recovery Key</span>
+        {/* Cream header band — eyebrow + key icon tile + headline. */}
+        <div className="bg-bg-side px-6 py-7 text-center border-b border-border-tertiary">
+          <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-disabled mb-3">
+            One-time setup
+          </div>
+          <div className="w-14 h-14 mx-auto rounded-xl bg-bg-l3 border border-border-tertiary flex items-center justify-center mb-4">
+            <HugeiconsIcon icon={Key02Icon} size={24} color="var(--text-link)" />
+          </div>
+          <div className="text-[16px] font-semibold text-text-primary">Your recovery phrase</div>
+          <div className="text-[12px] text-text-disabled mt-1 max-w-[360px] mx-auto leading-relaxed">
+            24 words. Your second path in if you ever lose your password.
           </div>
         </div>
 
-        {/* Body */}
-        <div className="px-5 py-5">
-          {/* Warning */}
-          <div className="flex items-start gap-3 p-3.5 rounded-[10px] bg-accent-yellow-bg border border-accent-yellow/10 text-[12px] text-accent-yellow mb-5">
-            <div className="w-6 h-6 rounded-[6px] bg-accent-yellow/15 flex items-center justify-center shrink-0 mt-0.5">
+        <div className="px-6 py-6">
+          {/* Warning card — warm amber, the single loudest element in the modal. */}
+          <div className="flex items-start gap-3 p-3.5 rounded-[10px] bg-accent-yellow-bg border border-accent-yellow/15 text-[12px] text-accent-yellow mb-5">
+            <div className="w-6 h-6 rounded-[6px] bg-accent-yellow/20 flex items-center justify-center shrink-0 mt-0.5">
               <HugeiconsIcon icon={Alert01Icon} size={13} />
             </div>
             <div>
-              <p className="font-medium">Save this recovery phrase somewhere safe</p>
-              <p className="opacity-70 mt-0.5 leading-relaxed">If you lose your password and this phrase, your files are permanently unrecoverable. We cannot reset this for you.</p>
+              <p className="font-medium">Store this somewhere offline</p>
+              <p className="opacity-75 mt-0.5 leading-relaxed">
+                We never see it and cannot reset it. Lose this and your
+                password, and your encrypted files are gone for good.
+              </p>
             </div>
           </div>
 
-          {/* Instructions */}
-          <div className="space-y-2 mb-5">
-            <div className="flex items-center gap-2 text-[12px] text-text-secondary">
-              <HugeiconsIcon icon={Key02Icon} size={14} color="var(--icon-tertiary)" />
-              <span>Copy or download your 24-word recovery phrase</span>
+          {/* Recovery phrase — blurred by default, revealed on tap. */}
+          <div className="relative rounded-[12px] border border-border-tertiary bg-bg-side overflow-hidden">
+            <div className="flex items-center justify-between px-3.5 py-2 border-b border-border-tertiary">
+              <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-disabled">
+                {words.length} words
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setIsBlurred(!isBlurred)}
+                  className="flex items-center gap-1.5 h-[26px] px-2 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={isBlurred ? ViewIcon : ViewOffIcon} size={12} />
+                  {isBlurred ? "Reveal" : "Hide"}
+                </button>
+                <button
+                  onClick={handleCopy}
+                  className="flex items-center gap-1.5 h-[26px] px-2 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={Copy01Icon} size={12} />
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-[12px] text-text-secondary">
-              <HugeiconsIcon icon={LockIcon} size={14} color="var(--icon-tertiary)" />
-              <span>Paste the entire phrase when recovering your account</span>
-            </div>
-          </div>
-
-          {/* Recovery phrase — single copyable block like Skiff */}
-          <div className="relative rounded-[10px] bg-bg-overlay-tertiary overflow-hidden">
             <div
-              className="p-4 transition-all duration-200 min-h-[80px]"
+              className="p-4 transition-all duration-200 min-h-[96px]"
               style={{ filter: isBlurred ? "blur(5px)" : "none" }}
             >
-              <p className={`text-[13px] leading-relaxed font-mono select-all break-words ${isBlurred ? "text-text-disabled" : "text-text-secondary"}`}>
+              <p className="text-[13px] leading-relaxed font-mono select-all break-words text-text-primary">
                 {recoveryKey}
               </p>
             </div>
-
-            {/* Actions overlay */}
-            <div className="absolute bottom-3 right-3 flex items-center gap-2">
-              <button
-                onClick={() => setIsBlurred(!isBlurred)}
-                className="flex items-center gap-1.5 h-[28px] px-2.5 rounded-[6px] text-[11px] font-medium text-text-secondary bg-bg-l3 hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={isBlurred ? ViewIcon : ViewOffIcon} size={12} />
-                {isBlurred ? "Reveal" : "Hide"}
-              </button>
-              <button
-                onClick={handleCopy}
-                className="flex items-center gap-1.5 h-[28px] px-2.5 rounded-[6px] text-[11px] font-medium text-text-secondary bg-bg-l3 hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={Copy01Icon} size={12} />
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
           </div>
 
-          {/* Word count indicator */}
-          <p className="text-[10px] text-text-disabled mt-2 px-1">{words.length} words</p>
-
-          {/* Actions */}
           <div className="flex items-center justify-between mt-5">
             <button
               onClick={handleDownload}
-              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer flex items-center gap-1.5"
+              className="h-[36px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer flex items-center gap-1.5"
             >
               <HugeiconsIcon icon={Download04Icon} size={14} />
-              {downloaded ? "Downloaded" : "Download backup"}
+              {downloaded ? "Downloaded" : "Download .txt"}
             </button>
             <button
               onClick={onClose}
-              className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer active:scale-[0.98]"
+              className="h-[36px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer active:scale-[0.98]"
             >
-              I&apos;ve saved my key
+              I have saved my phrase
             </button>
           </div>
         </div>

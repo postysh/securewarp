@@ -56,6 +56,10 @@ export async function GET(
       passwordSalt: payload.link.password_salt,
       passwordWrappedLinkKey: payload.link.password_wrapped_link_key,
       passwordWrapNonce: payload.link.password_wrap_nonce,
+      // Sharer identity — only the plaintext display_name is returned
+      // (never the email). Falls back to null so the client can show a
+      // generic "A SecureWarp user" label.
+      sharedByName: payload.file.owner_display_name,
       file: {
         encryptedMetadata: payload.file.encrypted_metadata,
         publicHierarchicalKey: payload.file.public_hierarchical_key,

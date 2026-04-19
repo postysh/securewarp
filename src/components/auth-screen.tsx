@@ -181,8 +181,8 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                 { label: "24 word recovery phrase", desc: "Your second path in. We never see it." },
               ].map((item) => (
                 <div key={item.label} className="flex items-start gap-3">
-                  <div className="w-5 h-5 rounded-md bg-accent-green/15 flex items-center justify-center mt-0.5 shrink-0">
-                    <div className="w-1.5 h-1.5 rounded-full bg-accent-green" />
+                  <div className="w-5 h-5 rounded-md bg-text-link/15 flex items-center justify-center mt-0.5 shrink-0">
+                    <div className="w-1.5 h-1.5 rounded-full bg-text-link" />
                   </div>
                   <div>
                     <div className="text-text-inverse/90 text-[13px] font-medium">{item.label}</div>
@@ -198,7 +198,7 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
               the same vertical axis as the green bullets. */}
           <div className="relative z-10 mt-auto flex items-center gap-3">
             <div className="w-5 flex items-center justify-center shrink-0">
-              <div className="w-1.5 h-1.5 rounded-full bg-accent-green" style={{ boxShadow: "0 0 6px rgba(72,191,145,0.5)" }} />
+              <div className="w-1.5 h-1.5 rounded-full bg-text-link" style={{ boxShadow: "0 0 6px rgba(239,90,60,0.5)" }} />
             </div>
             <span className="text-text-inverse/30 text-[11px] font-mono">
               Zero knowledge architecture

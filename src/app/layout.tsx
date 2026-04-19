@@ -46,7 +46,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${chillax.variable} ${geistSans.variable} ${geistMono.variable} h-full dark`}
+      className={`${chillax.variable} ${geistSans.variable} ${geistMono.variable} h-full`}
       suppressHydrationWarning
     >
       <body className="h-full antialiased">

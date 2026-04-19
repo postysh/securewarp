@@ -2,6 +2,14 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 
+/**
+ * Phase 1 of the dashboard light-theme migration: the app now
+ * defaults to `light` and no longer respects system prefers-dark
+ * or an older `theme=dark` in localStorage. Keeping the context +
+ * `toggle` API in place so later phases can re-enable a theme
+ * switcher without touching every consumer.
+ */
+
 type Theme = "light" | "dark";
 
 const ThemeContext = createContext<{
@@ -14,20 +22,10 @@ export function useTheme() {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("dark");
-
-  useEffect(() => {
-    const stored = localStorage.getItem("theme") as Theme | null;
-    if (stored) {
-      setTheme(stored);
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      setTheme("dark");
-    }
-  }, []);
+  const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem("theme", theme);
   }, [theme]);
 
   const toggle = () => setTheme((t) => (t === "dark" ? "light" : "dark"));

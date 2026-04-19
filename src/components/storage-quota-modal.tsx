@@ -36,9 +36,6 @@ export function StorageQuotaModal({ open, onClose }: Props) {
   }, [open]);
 
   const handleUpgrade = async () => {
-    // Billing is mid-integration (Stripe). Route the user to
-    // Settings → Plan & billing where the checkout UI will live
-    // once wired.
     window.dispatchEvent(new CustomEvent("securewarp-open-settings", { detail: { tab: "storage" } }));
     onClose();
   };
@@ -52,35 +49,35 @@ export function StorageQuotaModal({ open, onClose }: Props) {
   const trashCount = usage?.trashCount ?? 0;
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in"
         onClick={onClose}
       />
       <div
-        className="relative w-full max-w-[420px] mx-4 rounded-2xl bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
+        className="relative w-full max-w-[440px] rounded-2xl bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
         style={{ boxShadow: "var(--shadow-l2)" }}
       >
-        <div className="px-6 pt-6 pb-2">
-          <div className="w-12 h-12 rounded-[12px] bg-accent-red/12 flex items-center justify-center mb-4">
-            <HugeiconsIcon icon={CloudServerIcon} size={22} color="var(--accent-red-primary)" />
+        {/* Cream header band — eyebrow + storage glyph + headline. */}
+        <div className="bg-bg-side px-6 py-7 text-center border-b border-border-tertiary">
+          <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-disabled mb-3">
+            Storage limit reached
           </div>
-          <h2 className="text-[18px] font-semibold text-text-primary tracking-[-0.02em] mb-1">
-            Storage full
-          </h2>
-          <p className="text-text-secondary text-[13px] leading-relaxed mb-5">
-            Your upload could not be completed because your storage is full.
-            Free up space by deleting files or emptying your trash.
-          </p>
+          <div className="w-14 h-14 mx-auto rounded-xl bg-bg-l3 border border-border-tertiary flex items-center justify-center mb-4">
+            <HugeiconsIcon icon={CloudServerIcon} size={24} color="var(--accent-red-primary)" />
+          </div>
+          <div className="text-[16px] font-semibold text-text-primary">Your drive is full</div>
+          <div className="text-[12px] text-text-disabled mt-1 max-w-[320px] mx-auto leading-relaxed">
+            Free up room by emptying the trash or upgrade for more space.
+          </div>
         </div>
 
-        {/* Usage bar */}
-        <div className="px-6 pb-4">
+        <div className="px-6 py-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[12px] text-text-secondary">
               {formatBytes(used)} of {formatBytes(max)} used
             </span>
-            <span className="text-[12px] font-mono text-text-disabled">
+            <span className="text-[11px] font-mono text-text-disabled tracking-wider">
               {pct.toFixed(0)}%
             </span>
           </div>
@@ -89,18 +86,22 @@ export function StorageQuotaModal({ open, onClose }: Props) {
               className="h-full rounded-full transition-all duration-500"
               style={{
                 width: `${pct}%`,
-                background: pct > 90 ? "var(--accent-red-primary)" : "var(--accent-green-primary)",
+                background: pct > 90 ? "var(--accent-red-primary)" : "var(--text-link)",
               }}
             />
           </div>
 
           {trashBytes > 0 && (
-            <div className="flex items-center gap-2 mt-3 p-2.5 rounded-lg bg-accent-yellow-bg">
-              <HugeiconsIcon icon={Delete02Icon} size={14} color="var(--accent-yellow-primary)" />
-              <span className="text-[12px] text-text-secondary">
-                {formatBytes(trashBytes)} in trash ({trashCount} {trashCount === 1 ? "file" : "files"}).
-                Emptying it would free that space.
-              </span>
+            <div className="flex items-start gap-3 mt-4 p-3 rounded-[10px] bg-accent-yellow-bg border border-accent-yellow/15">
+              <div className="w-6 h-6 rounded-[6px] bg-accent-yellow/20 flex items-center justify-center shrink-0 mt-0.5">
+                <HugeiconsIcon icon={Delete02Icon} size={13} color="var(--accent-yellow-primary)" />
+              </div>
+              <div className="text-[12px] text-accent-yellow">
+                <p className="font-medium">Trash has {formatBytes(trashBytes)}</p>
+                <p className="opacity-75 mt-0.5 leading-relaxed">
+                  Emptying it would free that space instantly. {trashCount} {trashCount === 1 ? "file" : "files"} waiting.
+                </p>
+              </div>
             </div>
           )}
         </div>
@@ -108,13 +109,13 @@ export function StorageQuotaModal({ open, onClose }: Props) {
         <div className="px-6 pb-6 flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 h-[38px] rounded-[10px] bg-bg-field text-text-secondary text-[13px] font-medium hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            className="flex-1 h-[40px] rounded-[10px] bg-bg-field text-text-secondary text-[13px] font-medium hover:bg-bg-cell-hover transition-colors cursor-pointer"
           >
             Close
           </button>
           <button
             onClick={handleUpgrade}
-            className="flex-1 h-[38px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer"
+            className="flex-1 h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer active:scale-[0.98]"
           >
             Upgrade plan
           </button>

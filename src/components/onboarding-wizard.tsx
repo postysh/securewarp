@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
-import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
-import UserIcon from "@hugeicons/core-free-icons/UserIcon";
-import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import Sun01Icon from "@hugeicons/core-free-icons/Sun01Icon";
 import Moon02Icon from "@hugeicons/core-free-icons/Moon02Icon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
+import UserIcon from "@hugeicons/core-free-icons/UserIcon";
+import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import { useTheme } from "./theme-provider";
 
 type Step = "name" | "workspace" | "done";
@@ -123,59 +123,88 @@ export function OnboardingWizard() {
   const stepIndex = step === "name" ? 0 : step === "workspace" ? 1 : 2;
 
   return (
-    <div className="h-full flex items-center justify-center bg-bg-side p-4 relative">
-      <button
-        onClick={toggle}
-        className="absolute top-5 right-5 p-2 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer z-10"
-      >
-        <HugeiconsIcon icon={theme === "dark" ? Sun01Icon : Moon02Icon} size={16} />
-      </button>
+    <div className="min-h-screen flex flex-col bg-bg-side">
+      <header className="flex items-center justify-between px-6 py-5">
+        <Link
+          href="/"
+          className="no-underline text-text-primary text-[13px] font-semibold tracking-[1px] hover:opacity-80 transition-opacity"
+          style={{ fontFamily: "var(--font-geist-mono), monospace" }}
+        >
+          SECUREWARP
+        </Link>
+        <button
+          onClick={toggle}
+          className="p-2 rounded-[6px] text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+          aria-label="Toggle theme"
+        >
+          <HugeiconsIcon icon={theme === "dark" ? Sun01Icon : Moon02Icon} size={16} />
+        </button>
+      </header>
 
-      <div
-        className="w-full max-w-[480px] rounded-2xl border border-border-tertiary bg-bg-main p-10"
-        style={{ boxShadow: "var(--shadow-l2)" }}
-      >
-        <div className="flex items-center gap-2.5 mb-8">
-          <div className="w-8 h-8 rounded-lg bg-accent-green flex items-center justify-center">
-            <HugeiconsIcon icon={Shield01Icon} size={16} color="white" />
+      <div className="flex-1 flex items-center justify-center px-6 pb-10">
+        <div className="w-full max-w-[480px]">
+          <div
+            className="rounded-2xl border border-border-tertiary bg-bg-l3 overflow-hidden"
+            style={{ boxShadow: "var(--shadow-l2)" }}
+          >
+            <div className="bg-bg-side px-6 py-6 border-b border-border-tertiary">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-disabled">
+                  Set up your account
+                </div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-tertiary">
+                  Step {stepIndex + 1} of 2
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[0, 1].map((i) => (
+                  <div
+                    key={i}
+                    className="h-[3px] flex-1 rounded-full transition-colors"
+                    style={{
+                      background:
+                        i <= stepIndex ? "var(--text-link)" : "rgba(0,0,0,0.08)",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="px-6 py-7">
+              {step === "name" && (
+                <StepName
+                  displayName={displayName}
+                  setDisplayName={setDisplayName}
+                  onNext={handleNameNext}
+                  busy={busy}
+                  error={error}
+                  inputRef={nameRef}
+                />
+              )}
+
+              {step === "workspace" && (
+                <StepWorkspace
+                  workspaceName={workspaceName}
+                  setWorkspaceName={setWorkspaceName}
+                  onCreate={handleCreateWorkspace}
+                  onSkip={handleSkipWorkspace}
+                  busy={busy}
+                  error={error}
+                  inputRef={wsRef}
+                />
+              )}
+            </div>
           </div>
-          <span className="font-semibold text-[15px] text-text-primary">SecureWarp</span>
         </div>
-
-        <div className="flex items-center gap-2 mb-6">
-          {[0, 1].map((i) => (
-            <div
-              key={i}
-              className={`h-1 flex-1 rounded-full transition-colors ${
-                i <= stepIndex ? "bg-accent-green" : "bg-bg-field"
-              }`}
-            />
-          ))}
-        </div>
-
-        {step === "name" && (
-          <StepName
-            displayName={displayName}
-            setDisplayName={setDisplayName}
-            onNext={handleNameNext}
-            busy={busy}
-            error={error}
-            inputRef={nameRef}
-          />
-        )}
-
-        {step === "workspace" && (
-          <StepWorkspace
-            workspaceName={workspaceName}
-            setWorkspaceName={setWorkspaceName}
-            onCreate={handleCreateWorkspace}
-            onSkip={handleSkipWorkspace}
-            busy={busy}
-            error={error}
-            inputRef={wsRef}
-          />
-        )}
       </div>
+    </div>
+  );
+}
+
+function StepIcon({ icon }: { icon: typeof UserIcon }) {
+  return (
+    <div className="w-12 h-12 rounded-xl bg-bg-side border border-border-tertiary flex items-center justify-center mb-4">
+      <HugeiconsIcon icon={icon} size={22} color="var(--text-link)" />
     </div>
   );
 }
@@ -197,16 +226,13 @@ function StepName({
 }) {
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center gap-2 mb-2 text-text-tertiary">
-        <HugeiconsIcon icon={UserIcon} size={14} />
-        <span className="text-[11px] font-mono uppercase tracking-wide">Step 1 of 2</span>
-      </div>
-      <h1 className="text-[22px] font-semibold text-text-primary mb-2 tracking-[-0.01em]">
+      <StepIcon icon={UserIcon} />
+      <h1 className="text-[20px] font-semibold text-text-primary mb-1 tracking-[-0.01em]">
         What should we call you?
       </h1>
-      <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
-        Your display name is shown when you share files with teammates. Just
-        this, we can't see anything else about you.
+      <p className="text-[13px] text-text-tertiary leading-relaxed mb-5">
+        Your display name shows up when you share files. That is all we store,
+        we cannot see anything else about you.
       </p>
 
       <input
@@ -217,7 +243,7 @@ function StepName({
         onKeyDown={(e) => { if (e.key === "Enter" && !busy) onNext(); }}
         placeholder="Your name"
         maxLength={100}
-        className="w-full h-[42px] px-3 rounded-[8px] bg-bg-field border border-border-tertiary text-text-primary text-[14px] placeholder:text-text-disabled focus:outline-none focus:border-accent-green transition-colors"
+        className="w-full h-[42px] px-3 rounded-[10px] bg-bg-field border border-transparent text-text-primary text-[14px] placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 focus:border-text-link/40 transition-all"
       />
 
       {error && <p className="mt-3 text-[12px] text-accent-red">{error}</p>}
@@ -233,7 +259,7 @@ function StepName({
         <button
           onClick={onNext}
           disabled={busy}
-          className="flex items-center gap-1.5 px-4 h-[38px] rounded-[8px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+          className="flex items-center gap-1.5 px-5 h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer active:scale-[0.98] disabled:opacity-50"
         >
           Continue
           <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
@@ -262,14 +288,11 @@ function StepWorkspace({
 }) {
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center gap-2 mb-2 text-text-tertiary">
-        <HugeiconsIcon icon={UserGroupIcon} size={14} />
-        <span className="text-[11px] font-mono uppercase tracking-wide">Step 2 of 2</span>
-      </div>
-      <h1 className="text-[22px] font-semibold text-text-primary mb-2 tracking-[-0.01em]">
+      <StepIcon icon={UserGroupIcon} />
+      <h1 className="text-[20px] font-semibold text-text-primary mb-1 tracking-[-0.01em]">
         Collaborating with a team?
       </h1>
-      <p className="text-[13px] text-text-tertiary leading-relaxed mb-6">
+      <p className="text-[13px] text-text-tertiary leading-relaxed mb-5">
         Create a workspace to share a folder with your team. You can always do
         this later from the sidebar.
       </p>
@@ -282,7 +305,7 @@ function StepWorkspace({
         onKeyDown={(e) => { if (e.key === "Enter" && workspaceName.trim() && !busy) onCreate(); }}
         placeholder="Workspace name (e.g. Acme Inc.)"
         maxLength={100}
-        className="w-full h-[42px] px-3 rounded-[8px] bg-bg-field border border-border-tertiary text-text-primary text-[14px] placeholder:text-text-disabled focus:outline-none focus:border-accent-green transition-colors"
+        className="w-full h-[42px] px-3 rounded-[10px] bg-bg-field border border-transparent text-text-primary text-[14px] placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 focus:border-text-link/40 transition-all"
       />
 
       {error && <p className="mt-3 text-[12px] text-accent-red">{error}</p>}
@@ -293,14 +316,14 @@ function StepWorkspace({
           disabled={busy}
           className="text-[13px] text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer disabled:opacity-50"
         >
-          Skip, I'll do this later
+          Skip, I will do this later
         </button>
         <button
           onClick={onCreate}
           disabled={busy || !workspaceName.trim()}
-          className="flex items-center gap-1.5 px-4 h-[38px] rounded-[8px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+          className="flex items-center gap-1.5 px-5 h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer active:scale-[0.98] disabled:opacity-50"
         >
-          {busy ? "Creating..." : "Create workspace"}
+          {busy ? "Creating…" : "Create workspace"}
           {!busy && <HugeiconsIcon icon={Tick01Icon} size={14} />}
         </button>
       </div>

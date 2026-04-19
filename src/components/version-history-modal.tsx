@@ -345,8 +345,8 @@ export function VersionHistoryModal({
                             <span
                               className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
                               style={{
-                                background: "rgba(110,210,170,0.12)",
-                                color: "rgba(110,210,170,0.95)",
+                                background: "rgba(239,90,60,0.12)",
+                                color: "rgba(239,90,60,0.95)",
                               }}
                             >
                               Current

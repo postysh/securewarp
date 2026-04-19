@@ -40,7 +40,7 @@ const PRESET_COLORS = [
 ];
 
 const COLOR_NAMES: Record<string, string> = {
-  "var(--accent-green-primary)": "Green",
+  "var(--accent-green-primary)": "Coral",
   "var(--accent-blue-primary)": "Blue",
   "var(--accent-pink-primary)": "Pink",
   "var(--accent-orange-primary)": "Orange",

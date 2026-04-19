@@ -60,7 +60,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
   return (
     <button
       onClick={onChange}
-      className={`w-[36px] h-[20px] rounded-full transition-colors cursor-pointer ${checked ? "bg-accent-green" : "bg-bg-field"}`}
+      className={`w-[36px] h-[20px] rounded-full transition-colors cursor-pointer ${checked ? "bg-text-link" : "bg-bg-field"}`}
     >
       <div className={`w-[16px] h-[16px] rounded-full bg-white transition-transform mx-[2px] ${checked ? "translate-x-[16px]" : ""}`} style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
     </button>
@@ -218,7 +218,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                     onChange={(e) => setNameInput(e.target.value)}
                     placeholder="Your name"
                     autoFocus
-                    className="w-[160px] px-2 py-1.5 rounded-[6px] bg-bg-field text-[12px] text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40"
+                    className="w-[160px] px-2 py-1.5 rounded-[6px] bg-bg-field text-[12px] text-text-primary focus:outline-none focus:ring-2 focus:ring-text-link/25 border border-transparent focus:border-text-link/40"
                   />
                   <button
                     onClick={async () => {
@@ -269,9 +269,9 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                 <div className="mt-3 space-y-2 animate-fade-in">
                   {pwStatus && <p className="text-[11px] text-accent-green">{pwStatus}</p>}
                   {auth.error && <p className="text-[11px] text-accent-red">{auth.error}</p>}
-                  <input type="password" placeholder="Current password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
-                  <input type="password" placeholder="New password (min 8 characters)" value={newPw} onChange={(e) => setNewPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
-                  <input type="password" placeholder="Confirm new password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 border border-transparent focus:border-accent-green/40" />
+                  <input type="password" placeholder="Current password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 border border-transparent focus:border-text-link/40" />
+                  <input type="password" placeholder="New password (min 8 characters)" value={newPw} onChange={(e) => setNewPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 border border-transparent focus:border-text-link/40" />
+                  <input type="password" placeholder="Confirm new password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-bg-field text-[12px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 border border-transparent focus:border-text-link/40" />
                   {newPw && confirmPw && newPw !== confirmPw && <p className="text-[11px] text-accent-red">Passwords don&apos;t match</p>}
                   <div className="flex gap-2 pt-1">
                     <button onClick={() => { setChangingPassword(false); setOldPw(""); setNewPw(""); setConfirmPw(""); setPwStatus(null); }} className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer">Cancel</button>
@@ -517,12 +517,15 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                     id: "light",
                     label: "Light",
                     icon: Sun01Icon,
-                    sidebar: "#f5f5f5",
+                    sidebar: "#faf8f4",
                     bg: "#fbfbfb",
                     card: "#ffffff",
                     text: "#111111",
                     border: "rgba(0,0,0,0.1)",
-                    accent: "#04a45c",
+                    // Accents in each preview tile mirror the real
+                    // theme's --text-link value, so picking a theme
+                    // matches what the preview showed.
+                    accent: "rgb(239,90,60)",
                   },
                   {
                     id: "dark",
@@ -533,7 +536,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                     card: "#222222",
                     text: "#ffffff",
                     border: "rgba(255,255,255,0.08)",
-                    accent: "#04a45c",
+                    accent: "rgba(255,142,120,0.88)",
                   },
                 ].map((t) => {
                   const active = t.id === theme;

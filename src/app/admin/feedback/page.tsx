@@ -199,7 +199,7 @@ export default function AdminFeedbackPage() {
 
 function StatusBadge({ status }: { status: FeedbackStatus }) {
   const palette: Record<FeedbackStatus, { label: string; bg: string; color: string }> = {
-    new: { label: "New", bg: "rgba(110,210,170,0.12)", color: "rgba(110,210,170,0.95)" },
+    new: { label: "New", bg: "rgba(239,90,60,0.12)", color: "rgba(239,90,60,0.95)" },
     read: { label: "Read", bg: "var(--bg-overlay-tertiary)", color: "var(--text-tertiary)" },
     resolved: { label: "Resolved", bg: "rgba(125,148,179,0.12)", color: "var(--text-tertiary)" },
   };

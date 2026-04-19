@@ -249,7 +249,7 @@ export default function AdminUsersPage() {
             >
               <Link
                 href={`/admin/users/${u.id}`}
-                className="absolute inset-0 rounded-[8px] focus:outline-none focus:ring-2 focus:ring-accent-green/50"
+                className="absolute inset-0 rounded-[8px] focus:outline-none focus:ring-2 focus:ring-text-link/50"
                 aria-label={`Open ${u.email}`}
               />
               {/* Avatar + email */}

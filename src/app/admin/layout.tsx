@@ -227,7 +227,7 @@ function AdminSidebar({
                     <span
                       className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full"
                       style={{
-                        background: "var(--accent-green-primary)",
+                        background: "rgb(239,90,60)",
                         boxShadow: "0 0 0 1.5px var(--bg-side)",
                       }}
                       aria-label={`${newFeedback} new`}
@@ -241,8 +241,8 @@ function AdminSidebar({
                       <span
                         className="ml-auto text-[10px] font-mono font-semibold px-1.5 py-[1px] rounded-full"
                         style={{
-                          background: "rgba(110,210,170,0.15)",
-                          color: "var(--accent-green-primary)",
+                          background: "rgba(239,90,60,0.15)",
+                          color: "rgb(239,90,60)",
                           minWidth: 18,
                           textAlign: "center",
                         }}
