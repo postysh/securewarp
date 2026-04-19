@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 import Link03Icon from "@hugeicons/core-free-icons/Link03Icon";
@@ -1033,7 +1033,7 @@ function PricingSection() {
         "Up to 10 team seats",
         "Unlimited workspaces",
         "Everything in Plus",
-        "Workspace admin controls",
+        "Priority email support",
       ],
       cta: "Start Pro",
       ctaHref: "/signup?plan=pro",
@@ -1053,7 +1053,6 @@ function PricingSection() {
     { label: "Password protected links", values: ["check", "check", "check"] },
     { label: "File versioning", values: ["check", "check", "check"] },
     { label: "Two factor authentication", values: ["check", "check", "check"] },
-    { label: "Workspace admin controls", values: ["dash", "check", "check"] },
     { label: "Priority support", values: ["dash", "check", "check"] },
   ];
 
@@ -1478,7 +1477,12 @@ function HowItWorksSection() {
           style={{
             fontSize: "2rem",
             lineHeight: 1.1,
-            maxWidth: 576,
+            // Bumped from 576 → 720 so the full headline fits on
+            // one line on desktop. On narrower viewports the h2
+            // wraps naturally and the highlighted span below
+            // stays intact as a single unit (whiteSpace: nowrap)
+            // so "minutes" can't end up orphaned on its own line.
+            maxWidth: 720,
             color: TEXT,
             fontFamily: BRAND_SERIF,
             fontWeight: 400,
@@ -1486,8 +1490,8 @@ function HowItWorksSection() {
             margin: 0,
           }}
         >
-          Up and running,{" "}
-          <span style={{ color: GREEN }}>in under a minute</span>
+          Up and running{" "}
+          <span style={{ color: GREEN, whiteSpace: "nowrap" }}>in a couple of minutes</span>
         </h2>
         <p
           style={{
@@ -1499,8 +1503,8 @@ function HowItWorksSection() {
             margin: 0,
           }}
         >
-          No keys to manage, no tech setup. Open your browser, pick a
-          password, and your encrypted drive is live.
+          Open your browser, pick a password, save your recovery
+          phrase. Your encrypted drive is live.
         </p>
       </div>
 
@@ -2338,14 +2342,14 @@ function WorkspacesPanel() {
  */
 function BillingPanel() {
   const metrics = [
-    { label: "Storage", value: "48.2 GB", cap: "200 GB", pct: 24 },
-    { label: "Team seats", value: "3", cap: "5", pct: 60 },
-    { label: "Workspaces", value: "2", cap: "3", pct: 66 },
+    { label: "Storage", value: "48.2 GB", cap: "500 GB", pct: 10 },
+    { label: "Team seats", value: "2", cap: "3", pct: 66 },
+    { label: "Workspaces", value: "2", cap: "∞", pct: 0 },
   ];
 
   const tiers = [
     { name: "Free", price: "$0", storage: "20 GB", active: false },
-    { name: "Plus", price: "$4.99", storage: "200 GB", active: true },
+    { name: "Plus", price: "$4.99", storage: "500 GB", active: true },
     { name: "Pro", price: "$9.99", storage: "2 TB", active: false },
   ];
 
@@ -2367,7 +2371,7 @@ function BillingPanel() {
               SecureWarp Plus
             </p>
             <p style={{ margin: "3px 0 0", fontSize: 11, color: TEXT_MUTED, opacity: 0.9, lineHeight: 1.3 }}>
-              $4.99/mo. 200 GB storage, 5 seats, 3 workspaces.
+              $4.99/mo. 500 GB storage, 3 seats, unlimited workspaces.
             </p>
           </div>
           <button
@@ -2597,7 +2601,7 @@ function SecurityPanel() {
                 gap: 5,
                 fontSize: 10.5,
                 padding: "3px 8px",
-                borderRadius: 999,
+                borderRadius: 6,
                 background: "rgba(239,90,60,0.1)",
                 border: "1px solid rgba(239,90,60,0.25)",
                 color: GREEN,
@@ -2672,7 +2676,13 @@ function Pill({ children }: { children: React.ReactNode }) {
       style={{
         fontSize: 10,
         padding: "2px 8px",
-        borderRadius: 999,
+        // Softly rounded rectangle — matches the 8 px radius used
+        // by the hero CTAs ("See how it works", "Log in") so the
+        // mono-uppercase labels across the page share one corner
+        // language instead of mixing stadium-shaped chips + square
+        // buttons. Dropped to 6 here because the pill is tiny and
+        // a full 8 reads as too round at this scale.
+        borderRadius: 6,
         background: "rgba(239,90,60,0.1)",
         color: GREEN,
         fontFamily: BRAND_MONO,
@@ -2924,7 +2934,7 @@ function NodePill({
 function HighlightIllustrationPricing() {
   const tiers = [
     { name: "Free", price: "$0", storage: "20 GB" },
-    { name: "Plus", price: "$4.99", storage: "200 GB" },
+    { name: "Plus", price: "$4.99", storage: "500 GB" },
     { name: "Pro", price: "$9.99", storage: "2 TB" },
   ];
   return (
@@ -2970,23 +2980,22 @@ function HighlightIllustrationPricing() {
 }
 
 /**
- * Cell 3: mock 12-word BIP39 recovery phrase in a 3-column grid.
+ * Cell 3: mock 24-word BIP39 recovery phrase in a 3-column grid.
  * Shows "you hold the keys" without any interactive complexity.
+ * 24 words × 3 columns = 8 rows, tightened padding + gap so it
+ * still fits the 256 px cell height alongside the other two
+ * illustrations.
  */
 function HighlightIllustrationRecovery() {
   const words = [
-    "cipher",
-    "forest",
-    "anchor",
-    "silent",
-    "river",
-    "shadow",
-    "violet",
-    "echo",
-    "harbor",
-    "candle",
-    "marble",
-    "quiet",
+    "cipher", "forest", "anchor",
+    "silent", "river", "shadow",
+    "violet", "echo", "harbor",
+    "candle", "marble", "quiet",
+    "lantern", "gather", "orbit",
+    "pebble", "velvet", "canyon",
+    "mantle", "breeze", "ribbon",
+    "harvest", "kernel", "summit",
   ];
   return (
     <div
@@ -2996,15 +3005,15 @@ function HighlightIllustrationRecovery() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: 20,
+        padding: 16,
       }}
     >
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-          gap: 6,
-          maxWidth: 240,
+          gap: 4,
+          maxWidth: 260,
           width: "100%",
         }}
       >
@@ -3014,9 +3023,9 @@ function HighlightIllustrationRecovery() {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 6,
-              padding: "6px 8px",
-              borderRadius: 6,
+              gap: 5,
+              padding: "3px 6px",
+              borderRadius: 5,
               background: BG,
               border: `1px solid ${BORDER}`,
             }}
@@ -3026,13 +3035,13 @@ function HighlightIllustrationRecovery() {
                 fontSize: 8,
                 fontFamily: BRAND_MONO,
                 color: TEXT_MUTED,
-                letterSpacing: "0.1em",
+                letterSpacing: "0.08em",
                 minWidth: 14,
               }}
             >
               {String(i + 1).padStart(2, "0")}
             </span>
-            <span style={{ fontSize: 11, fontFamily: BRAND_SANS, color: TEXT }}>
+            <span style={{ fontSize: 10, fontFamily: BRAND_SANS, color: TEXT }}>
               {w}
             </span>
           </div>
@@ -3366,18 +3375,107 @@ function StandardsSection() {
  * side-by-side with the "can't read your files" headline turns the
  * promise into a visual in one glance.
  */
+// Hero cipher-cascade rotation. Each tick:
+//   1. The top "You see" card swaps to the next file (key-based
+//      remount triggers `animate-fade-in`).
+//   2. A rAF loop pumps random characters into the bottom
+//      "Server sees" block for SCRAMBLE_MS, then settles back
+//      to the deterministic per-file ciphertext.
+// Honors prefers-reduced-motion — pauses the cycle and the
+// scramble on users who asked not to see motion.
+const CIPHER_FILES = [
+  { name: "Budget 2026.xlsx", meta: "2.4 MB · Private",          icon: Table01Icon, color: "rgb(210,180,80)" },
+  { name: "Invoice Q3.pdf",    meta: "1.1 MB · Private",          icon: Pdf01Icon,   color: "rgb(220,120,120)" },
+  { name: "Team photo.jpg",    meta: "4.8 MB · Shared · 3",       icon: Image01Icon, color: "rgb(200,140,175)" },
+  { name: "Meeting notes.docx", meta: "420 KB · Private",          icon: File01Icon,  color: "rgb(120,150,220)" },
+  { name: "Launch demo.mp4",   meta: "87 MB · Shared · 2",        icon: Video01Icon, color: "rgb(220,120,120)" },
+];
+
+const CIPHER_ALPHABET =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/";
+
+// Cycle cadence + scramble duration. Cadence is long enough to
+// read each file line and notice the transition; scramble is
+// short enough that the ciphertext isn't unreadable for
+// meaningful time.
+const CIPHER_CYCLE_MS = 3500;
+const CIPHER_SCRAMBLE_MS = 420;
+
+function randomCipherRow(len: number): string {
+  let s = "";
+  for (let i = 0; i < len; i++) {
+    s += CIPHER_ALPHABET[Math.floor(Math.random() * CIPHER_ALPHABET.length)];
+  }
+  return s;
+}
+
 function CipherCascade() {
-  const filename = "Budget 2026.xlsx";
-  const meta = "2.4 MB · Private";
-  // Deterministic FNV-1a + LCG over the filename so the ciphertext
-  // rows look busy-but-stable across renders. Same trick used on
-  // the existing landing's `mockCipher()` helper.
-  const cipherRows = [
-    scramble(filename + ":0", 34),
-    scramble(filename + ":1", 34),
-    scramble(filename + ":2", 34),
-    scramble(filename + ":3", 34),
-  ];
+  const [idx, setIdx] = useState(0);
+  // When non-null, shown in place of the deterministic ciphertext —
+  // a set of 4 random rows regenerated each animation frame.
+  const [scramble4, setScramble4] = useState<string[] | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  // Respect reduced-motion. Resolved once on mount; no listener
+  // because the media query rarely flips during a page view and
+  // the impact of missing a toggle is cosmetic.
+  const reducedMotion = useRef(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    reducedMotion.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }, []);
+
+  // File rotation. Stops the interval on unmount and never
+  // double-schedules.
+  useEffect(() => {
+    if (reducedMotion.current) return;
+    const id = setInterval(() => {
+      setIdx((i) => (i + 1) % CIPHER_FILES.length);
+    }, CIPHER_CYCLE_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  // Scramble phase, re-triggered on every idx change (including
+  // the initial mount so the first transition feels alive too).
+  // The rAF loop exits cleanly on unmount via the ref-check in
+  // cleanup.
+  useEffect(() => {
+    if (reducedMotion.current) return;
+    const start = performance.now();
+    const tick = () => {
+      const elapsed = performance.now() - start;
+      if (elapsed >= CIPHER_SCRAMBLE_MS) {
+        setScramble4(null);
+        rafRef.current = null;
+        return;
+      }
+      setScramble4([
+        randomCipherRow(34),
+        randomCipherRow(34),
+        randomCipherRow(34),
+        randomCipherRow(34),
+      ]);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [idx]);
+
+  const file = CIPHER_FILES[idx];
+  // Settled deterministic ciphertext — shown between scrambles.
+  const settledRows = useMemo(
+    () => [
+      scramble(file.name + ":0", 34),
+      scramble(file.name + ":1", 34),
+      scramble(file.name + ":2", 34),
+      scramble(file.name + ":3", 34),
+    ],
+    [file.name],
+  );
+  const displayRows = scramble4 ?? settledRows;
 
   return (
     <div
@@ -3395,7 +3493,12 @@ function CipherCascade() {
       {/* ── What you see ───────────────────────────────────── */}
       <div style={{ padding: "20px 22px 16px" }}>
         <CipherPill>You see</CipherPill>
+        {/* key={idx} forces a remount on each cycle so the global
+            `animate-fade-in` keyframe runs fresh (0.3 s) and the
+            file card reads as "the next one just arrived". */}
         <div
+          key={idx}
+          className="animate-fade-in"
           style={{
             marginTop: 12,
             display: "flex",
@@ -3411,7 +3514,9 @@ function CipherCascade() {
               width: 32,
               height: 32,
               borderRadius: 8,
-              background: "rgba(239,90,60,0.1)",
+              // File-type tinted tile — matches the real file-browser
+              // convention. Alpha is baked into the inline rgba.
+              background: `color-mix(in srgb, ${file.color} 14%, transparent)`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -3419,9 +3524,9 @@ function CipherCascade() {
             }}
           >
             <HugeiconsIcon
-              icon={LockIcon}
+              icon={file.icon}
               size={15}
-              color={GREEN}
+              color={file.color}
               strokeWidth={2}
             />
           </span>
@@ -3437,7 +3542,7 @@ function CipherCascade() {
                 textOverflow: "ellipsis",
               }}
             >
-              {filename}
+              {file.name}
             </div>
             <div
               style={{
@@ -3447,13 +3552,20 @@ function CipherCascade() {
                 marginTop: 2,
               }}
             >
-              {meta}
+              {file.meta}
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── Encryption boundary ────────────────────────────── */}
+      {/* ── Encryption boundary ─────────────────────────────
+          Two vertical dashed SVG lines meet at a centered
+          Encrypt pill. Top segment animates downward (file
+          streaming into encryption); bottom segment animates
+          upward (key rising up to meet the file). Same
+          stroke-dashoffset trick the "Client side by design"
+          illustration uses — dasharray cycle (5 + 11 = 16) and
+          animation delta match so the loop is seamless. */}
       <div
         style={{
           position: "relative",
@@ -3461,17 +3573,64 @@ function CipherCascade() {
           borderBottom: `1px dashed ${BORDER}`,
           background:
             "repeating-linear-gradient(-45deg, rgba(239,90,60,0.05) 0 6px, transparent 6px 12px)",
-          padding: "10px 22px",
-          textAlign: "center",
-          fontSize: 10,
-          fontFamily: BRAND_MONO,
-          letterSpacing: "0.18em",
-          textTransform: "uppercase",
-          color: GREEN,
-          fontWeight: 600,
+          height: 56,
         }}
       >
-        Encrypted in your browser
+        <svg
+          width="40"
+          height="56"
+          viewBox="0 0 40 56"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: "50%",
+            transform: "translateX(-50%)",
+            pointerEvents: "none",
+          }}
+          aria-hidden
+        >
+          {/* Top: file → Encrypt pill. Offset counts down (16→0)
+              so dashes flow forward along the path, i.e. DOWN. */}
+          <line x1="20" y1="0" x2="20" y2="20" stroke={BORDER} strokeWidth="1.5" strokeLinecap="round" />
+          <line x1="20" y1="0" x2="20" y2="20" stroke={GREEN} strokeWidth="2" strokeLinecap="round" strokeDasharray="5 11" opacity="0.9">
+            <animate attributeName="stroke-dashoffset" from="16" to="0" dur="1.2s" repeatCount="indefinite" />
+          </line>
+          {/* Bottom: Encrypt pill → ciphertext. Offset counts up
+              (0→16) so dashes flow BACKWARD along the path, i.e.
+              UP — reads as "key rising to meet the file". */}
+          <line x1="20" y1="36" x2="20" y2="56" stroke={BORDER} strokeWidth="1.5" strokeLinecap="round" />
+          <line x1="20" y1="36" x2="20" y2="56" stroke={GREEN} strokeWidth="2" strokeLinecap="round" strokeDasharray="5 11" opacity="0.9">
+            <animate attributeName="stroke-dashoffset" from="0" to="16" dur="1.2s" repeatCount="indefinite" />
+          </line>
+        </svg>
+        {/* Centered Encrypt pill — sits above the SVG so the
+            dashed lines visually "enter" + "leave" the pill. */}
+        <div
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "#fff",
+            border: `1px solid ${BORDER}`,
+            borderRadius: 6,
+            padding: "5px 11px",
+            fontSize: 10,
+            fontFamily: BRAND_MONO,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            color: GREEN,
+            fontWeight: 600,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+            lineHeight: 1,
+          }}
+        >
+          <HugeiconsIcon icon={Key01Icon} size={10} color={GREEN} strokeWidth={2} />
+          Encrypt
+        </div>
       </div>
 
       {/* ── What the server sees ───────────────────────────── */}
@@ -3492,7 +3651,7 @@ function CipherCascade() {
             overflow: "hidden",
           }}
         >
-          {cipherRows.map((row, i) => (
+          {displayRows.map((row, i) => (
             <div
               key={i}
               style={{
@@ -3534,7 +3693,7 @@ function CipherPill({
         background: muted ? "rgba(0,0,0,0.04)" : "rgba(239,90,60,0.1)",
         border: `1px solid ${muted ? BORDER : "rgba(239,90,60,0.25)"}`,
         padding: "3px 8px",
-        borderRadius: 999,
+        borderRadius: 6,
       }}
     >
       {children}

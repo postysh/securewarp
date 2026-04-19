@@ -89,7 +89,7 @@ const TIERS: Array<{
       "Up to 10 team seats",
       "Unlimited workspaces",
       "Everything in Plus",
-      "Workspace admin controls",
+      "Priority email support",
     ],
     cta: "Start Pro",
     ctaHref: "/signup?plan=pro",
@@ -109,7 +109,6 @@ const COMPARE_ROWS: Array<{
   { label: "Password protected links", values: ["check", "check", "check"] },
   { label: "File versioning", values: ["check", "check", "check"] },
   { label: "Two factor authentication", values: ["check", "check", "check"] },
-  { label: "Workspace admin controls", values: ["dash", "check", "check"] },
   { label: "Priority support", values: ["dash", "check", "check"] },
 ];
 
