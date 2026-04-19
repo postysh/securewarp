@@ -1,6 +1,41 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+// ──────────────────────────────────────────────────────────────────────
+// Wrangler `vars` → Next build-time env inlining
+// ──────────────────────────────────────────────────────────────────────
+// Cloudflare splits config into two stores: wrangler.jsonc `vars` (runtime
+// bindings the Worker sees at request time) and Builds dashboard vars
+// (exposed to `next build` as process.env). `NEXT_PUBLIC_*` must be baked
+// into the client bundle at build time, so keeping the value only in
+// wrangler.jsonc leaves it undefined during `next build` and the key
+// never reaches the browser. Read wrangler.jsonc here, extract every
+// `NEXT_PUBLIC_*` entry from `vars`, and inject into Next's `env` block
+// so the single source of truth is this file — no dashboard duplication.
+function readWranglerPublicVars(): Record<string, string> {
+  try {
+    const raw = readFileSync(join(process.cwd(), "wrangler.jsonc"), "utf8");
+    // Strip // and /* */ comments and trailing commas so JSON.parse
+    // accepts JSONC. Crude but sufficient for our config file — no
+    // strings contain `//` today.
+    const stripped = raw
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:"'])\/\/.*$/gm, "$1")
+      .replace(/,(\s*[}\]])/g, "$1");
+    const parsed = JSON.parse(stripped) as { vars?: Record<string, unknown> };
+    const vars = parsed.vars ?? {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(vars)) {
+      if (k.startsWith("NEXT_PUBLIC_") && typeof v === "string") out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // Build version string — exposed to the client as
@@ -263,10 +298,13 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // Inlined into the client bundle so the footer build tag updates
-  // automatically per deploy (see getBuildVersion above).
+  // Inlined into the client bundle. Next.js only reads `process.env`
+  // and `.env*` files at build time, so anything living in
+  // wrangler.jsonc `vars` (runtime-only) has to be forwarded here to
+  // actually reach the browser. See readWranglerPublicVars above.
   env: {
     NEXT_PUBLIC_BUILD_VERSION: getBuildVersion(),
+    ...readWranglerPublicVars(),
   },
   async headers() {
     // Local dev runs over http://localhost:3000 and the security
