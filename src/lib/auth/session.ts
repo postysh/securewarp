@@ -68,6 +68,33 @@ export async function createSession(
   const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000);
   const ctx = extractSessionContext(request);
 
+  // Prune the caller's prior session on this device before minting
+  // a new one. Without this step every re-login on the same device
+  // (cookie-expired reuse, a second tab signing in, a password
+  // change without the explicit revoke-all path, ...) would leave
+  // the old row behind and the Active Sessions UI would accumulate
+  // orphan "devices" that aren't actually signed in anywhere.
+  //
+  // Best-effort: a malformed/expired JWT just falls through the
+  // catch, so we don't block fresh logins on a broken old cookie.
+  // jti is whatever the cookie says — the service-role client can
+  // delete any row, but the delete is no-op if it doesn't match an
+  // existing jti, so a forged cookie (crypto-invalid) never lands
+  // here anyway (jwtVerify would throw first).
+  try {
+    const cookieStore = await cookies();
+    const existingToken = cookieStore.get(SESSION_COOKIE)?.value;
+    if (existingToken) {
+      const { payload: existing } = await jwtVerify(existingToken, getSecret());
+      const existingJti = existing.jti as string | undefined;
+      if (existingJti) {
+        await supabase.from("sessions").delete().eq("jti", existingJti);
+      }
+    }
+  } catch {
+    // Cookie missing, invalid, or expired — nothing to prune.
+  }
+
   // Create a session record with a unique jti for revocation.
   // `created_at`, `last_seen_at` default to now() at the DB level.
   const { data: session, error } = await supabase
