@@ -13,6 +13,11 @@ const DeleteSchema = z.object({
   labelId: z.string().uuid(),
 });
 
+const UpdateSchema = z.object({
+  labelId: z.string().uuid(),
+  name: z.string().min(1).max(50),
+});
+
 export async function GET() {
   try {
     const session = await getSession();
@@ -63,6 +68,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ label: data });
   } catch (err) {
     logError("labels.create", err);
+    return NextResponse.json({ error: "Failed" }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const body = await request.json();
+    const parsed = UpdateSchema.safeParse(body);
+    if (!parsed.success) return NextResponse.json({ error: "Invalid data" }, { status: 400 });
+
+    const { data, error } = await supabase
+      .from("labels")
+      .update({ name: parsed.data.name })
+      .eq("id", parsed.data.labelId)
+      .eq("user_id", session.userId)
+      .select("id, name, color")
+      .single();
+    if (error) {
+      if (error.code === "23505") return NextResponse.json({ error: "Label already exists" }, { status: 409 });
+      throw error;
+    }
+    if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    return NextResponse.json({ label: data });
+  } catch (err) {
+    logError("labels.update", err);
     return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }

@@ -21,12 +21,15 @@ import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import Logout01Icon from "@hugeicons/core-free-icons/Logout01Icon";
 import Key01Icon from "@hugeicons/core-free-icons/Key01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
+import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import MessageMultiple01Icon from "@hugeicons/core-free-icons/MessageMultiple01Icon";
 import { useTheme } from "./theme-provider";
 import { Tooltip } from "./tooltip";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 import { SettingsModal } from "./settings-modal";
 import { FeedbackModal } from "./feedback-modal";
+import { ConfirmDialog } from "./confirm-dialog";
 import { useState, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useUserKeys } from "@/hooks/use-user-keys";
@@ -346,6 +349,11 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const [labels, setLabels] = useState<{ id: string; name: string; color: string }[]>([]);
   const [newLabelName, setNewLabelName] = useState("");
   const [showNewLabel, setShowNewLabel] = useState(false);
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
+  const [editingLabelName, setEditingLabelName] = useState("");
+  const [labelPendingDelete, setLabelPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deletingLabel, setDeletingLabel] = useState(false);
 
   const labelColors = [
     "var(--accent-blue-primary)",
@@ -564,85 +572,196 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
             <div className="flex items-center justify-between px-2.5 mb-1">
               <span className="text-[11px] font-mono uppercase text-text-disabled">Labels</span>
               {labels.length < 10 && (
-                <button
-                  onClick={() => setShowNewLabel(!showNewLabel)}
-                  className="p-0.5 rounded text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
-                >
-                  <HugeiconsIcon icon={PlusSignIcon} size={12} />
-                </button>
+                <Tooltip label={showNewLabel ? "Cancel" : "Add label"} side="bottom">
+                  <button
+                    onClick={() => {
+                      setShowNewLabel((v) => !v);
+                      setColorPickerOpen(false);
+                      setNewLabelName("");
+                    }}
+                    className="p-0.5 rounded text-icon-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
+                  >
+                    <HugeiconsIcon icon={PlusSignIcon} size={12} />
+                  </button>
+                </Tooltip>
               )}
             </div>
-            {showNewLabel && (
-              <div className="px-2.5 mb-2 space-y-1.5 animate-fade-in">
-                <input
-                  type="text"
-                  value={newLabelName}
-                  onChange={(e) => setNewLabelName(e.target.value)}
-                  placeholder="Label name"
-                  className="w-full px-2 py-1.5 rounded-[6px] bg-bg-field text-[11px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-green/30"
-                  onKeyDown={async (e) => {
-                    if (e.key === "Enter" && newLabelName.trim()) {
-                      const res = await fetch("/api/labels", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ name: newLabelName.trim(), color: newLabelColor }),
-                      });
-                      if (res.ok) {
-                        const d = await res.json();
-                        setLabels((prev) => [...prev, d.label]);
-                        setNewLabelName("");
-                        setShowNewLabel(false);
-                      }
-                    }
-                    if (e.key === "Escape") setShowNewLabel(false);
-                  }}
-                />
-                <div className="flex gap-1">
-                  {labelColors.map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => setNewLabelColor(c)}
-                      className={`w-5 h-5 rounded-full cursor-pointer transition-transform ${newLabelColor === c ? "scale-125 ring-2 ring-white/30" : ""}`}
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
+            {showNewLabel && (() => {
+              const submitNewLabel = async () => {
+                const name = newLabelName.trim();
+                if (!name) return;
+                const res = await fetch("/api/labels", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ name, color: newLabelColor }),
+                });
+                if (res.ok) {
+                  const d = await res.json();
+                  setLabels((prev) => [...prev, d.label]);
+                  setNewLabelName("");
+                  setShowNewLabel(false);
+                  setColorPickerOpen(false);
+                }
+              };
+              return (
+                <div className="px-2.5 mb-2 animate-fade-in">
+                  <div className="flex items-center gap-1.5">
+                    <div className="relative shrink-0">
+                      <Tooltip label="Pick color" side="bottom">
+                        <button
+                          onClick={() => setColorPickerOpen((v) => !v)}
+                          className="h-[26px] w-[26px] rounded-[6px] bg-bg-field flex items-center justify-center cursor-pointer hover:bg-cta-nav-hover transition-colors"
+                          aria-label="Pick label color"
+                          aria-expanded={colorPickerOpen}
+                        >
+                          <span
+                            className="w-[12px] h-[12px] rounded-full ring-1 ring-inset ring-black/10"
+                            style={{ backgroundColor: newLabelColor }}
+                          />
+                        </button>
+                      </Tooltip>
+                      {colorPickerOpen && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-[60]"
+                            onClick={() => setColorPickerOpen(false)}
+                          />
+                          <div className="absolute left-0 top-[30px] z-[61] p-2 rounded-[8px] bg-bg-l3 border border-border-primary animate-fade-in" style={{ boxShadow: "var(--shadow-l1)" }}>
+                            <div className="flex gap-1.5">
+                              {labelColors.map((c) => (
+                                <button
+                                  key={c}
+                                  onClick={() => { setNewLabelColor(c); setColorPickerOpen(false); }}
+                                  className={`w-[18px] h-[18px] rounded-full cursor-pointer transition-transform shrink-0 ${newLabelColor === c ? "ring-2 ring-offset-1 ring-offset-bg-l3 ring-white/40" : "hover:scale-110"}`}
+                                  style={{ backgroundColor: c }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 relative">
+                      <input
+                        type="text"
+                        autoFocus
+                        value={newLabelName}
+                        onChange={(e) => setNewLabelName(e.target.value)}
+                        placeholder="Label name"
+                        maxLength={50}
+                        className="w-full pl-2 pr-7 h-[26px] rounded-[6px] bg-bg-field text-[11px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-green/30"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); void submitNewLabel(); }
+                          else if (e.key === "Escape") {
+                            setShowNewLabel(false);
+                            setNewLabelName("");
+                            setColorPickerOpen(false);
+                          }
+                        }}
+                      />
+                      {newLabelName.trim() && (
+                        <kbd className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-text-disabled bg-bg-l3 px-1 py-0.5 rounded pointer-events-none">
+                          ↵
+                        </kbd>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
             {labels.length === 0 && !showNewLabel ? (
               <p className="px-2.5 text-[11px] text-text-disabled">No labels yet</p>
             ) : (
               <div className="flex flex-col gap-[2px] max-h-[240px] overflow-y-auto">
-                {labels.slice(0, 10).map((tag) => (
-                  <div
-                    key={tag.id}
-                    className="group w-full flex items-center gap-3 px-2.5 h-[30px] rounded-[6px] text-[12px] text-text-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
-                  >
-                    <button
-                      onClick={() => {
-                        window.dispatchEvent(new CustomEvent("securewarp-filter-label", { detail: { id: tag.id, name: tag.name, color: tag.color } }));
-                      }}
-                      className="flex items-center gap-3 flex-1 min-w-0"
+                {labels.slice(0, 10).map((tag) => {
+                  const isEditing = editingLabelId === tag.id;
+                  const commitRename = async () => {
+                    const next = editingLabelName.trim();
+                    setEditingLabelId(null);
+                    if (!next || next === tag.name) return;
+                    // Optimistic rename — rollback on failure so the
+                    // sidebar doesn't lie to the user about server state.
+                    const prev = tag.name;
+                    setLabels((ls) => ls.map((l) => (l.id === tag.id ? { ...l, name: next } : l)));
+                    try {
+                      const res = await fetch("/api/labels", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ labelId: tag.id, name: next }),
+                      });
+                      if (!res.ok) throw new Error(String(res.status));
+                    } catch {
+                      setLabels((ls) => ls.map((l) => (l.id === tag.id ? { ...l, name: prev } : l)));
+                    }
+                  };
+                  return (
+                    <div
+                      key={tag.id}
+                      className="group w-full flex items-center gap-3 px-2.5 h-[30px] rounded-[6px] text-[12px] text-text-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer"
                     >
                       <div className="w-[10px] h-[10px] rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
-                      <span className="whitespace-nowrap truncate">{tag.name}</span>
-                    </button>
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        await fetch("/api/labels", {
-                          method: "DELETE",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ labelId: tag.id }),
-                        });
-                        setLabels((prev) => prev.filter((l) => l.id !== tag.id));
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-icon-tertiary hover:text-accent-red transition-all cursor-pointer shrink-0"
-                    >
-                      <HugeiconsIcon icon={Cancel01Icon} size={10} />
-                    </button>
-                  </div>
-                ))}
+                      {isEditing ? (
+                        <input
+                          autoFocus
+                          value={editingLabelName}
+                          onChange={(e) => setEditingLabelName(e.target.value)}
+                          onBlur={commitRename}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                            else if (e.key === "Escape") { e.preventDefault(); setEditingLabelId(null); }
+                          }}
+                          maxLength={50}
+                          className="flex-1 min-w-0 bg-transparent outline-none text-[12px] text-text-primary"
+                        />
+                      ) : (
+                        <button
+                          onClick={() => {
+                            window.dispatchEvent(new CustomEvent("securewarp-filter-label", { detail: { id: tag.id, name: tag.name, color: tag.color } }));
+                          }}
+                          className="flex-1 min-w-0 text-left"
+                        >
+                          <span className="whitespace-nowrap truncate">{tag.name}</span>
+                        </button>
+                      )}
+                      {!isEditing && (
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                          <Tooltip label="Rename label" side="bottom">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingLabelId(tag.id);
+                                setEditingLabelName(tag.name);
+                              }}
+                              className="p-0.5 rounded text-icon-tertiary hover:text-text-primary transition-colors cursor-pointer"
+                            >
+                              <HugeiconsIcon icon={Edit02Icon} size={11} />
+                            </button>
+                          </Tooltip>
+                          <Tooltip label="Delete label" side="bottom">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setLabelPendingDelete({ id: tag.id, name: tag.name });
+                              }}
+                              className="p-0.5 rounded text-icon-tertiary hover:text-accent-red transition-colors cursor-pointer"
+                            >
+                              <HugeiconsIcon icon={Cancel01Icon} size={11} />
+                            </button>
+                          </Tooltip>
+                        </div>
+                      )}
+                      {isEditing && (
+                        <button
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={commitRename}
+                          className="p-0.5 rounded text-icon-tertiary hover:text-accent-green transition-colors cursor-pointer shrink-0"
+                        >
+                          <HugeiconsIcon icon={Tick01Icon} size={11} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -689,6 +808,42 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
         <UserMenu collapsed={collapsed} />
       </div>
 
+      <ConfirmDialog
+        open={!!labelPendingDelete}
+        title="Delete label"
+        description={
+          <>
+            Delete the label <strong>&ldquo;{labelPendingDelete?.name}&rdquo;</strong>? It will be removed from every file and folder it&apos;s currently assigned to. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete label"
+        destructive
+        busy={deletingLabel}
+        busyLabel="Deleting…"
+        onCancel={() => { if (!deletingLabel) setLabelPendingDelete(null); }}
+        onConfirm={async () => {
+          if (!labelPendingDelete) return;
+          setDeletingLabel(true);
+          try {
+            const res = await fetch("/api/labels", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ labelId: labelPendingDelete.id }),
+            });
+            if (!res.ok) throw new Error(String(res.status));
+            setLabels((ls) => ls.filter((l) => l.id !== labelPendingDelete.id));
+            window.dispatchEvent(
+              new CustomEvent("securewarp-label-deleted", { detail: { labelId: labelPendingDelete.id } }),
+            );
+            setLabelPendingDelete(null);
+          } catch {
+            // Leave the dialog open so the user sees the action didn't
+            // take — they can retry or cancel.
+          } finally {
+            setDeletingLabel(false);
+          }
+        }}
+      />
     </aside>
   );
 }

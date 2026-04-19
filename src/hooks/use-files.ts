@@ -340,6 +340,29 @@ export function useFiles(keys: {
     fileListCache.current.clear();
   }, []);
 
+  // Scrub a deleted label id off every file's `fileLabels` in state
+  // and invalidate the cache so the next fetch doesn't re-surface
+  // stale rows from the list cache. Dispatched by the sidebar when
+  // a label is deleted — without this, the coloured dot lingers on
+  // every previously-tagged file/folder until the page is reloaded.
+  useEffect(() => {
+    const onDeleted = (e: Event) => {
+      const labelId = (e as CustomEvent<{ labelId: string }>).detail?.labelId;
+      if (!labelId) return;
+      fileListCache.current.clear();
+      setState((s) => ({
+        ...s,
+        files: s.files.map((f) =>
+          f.fileLabels.some((l) => l.id === labelId)
+            ? { ...f, fileLabels: f.fileLabels.filter((l) => l.id !== labelId) }
+            : f,
+        ),
+      }));
+    };
+    window.addEventListener("securewarp-label-deleted", onDeleted);
+    return () => window.removeEventListener("securewarp-label-deleted", onDeleted);
+  }, []);
+
   /** Prefetch a folder's contents in the background (hover intent).
    *  Runs the full fetch + decrypt + cache pipeline silently. When the
    *  user clicks, the stale-while-revalidate shows cached data instantly. */

@@ -519,13 +519,21 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       const label = (e as CustomEvent).detail;
       setFilterLabel(label ?? null);
     };
+    const onLabelDeleted = (e: Event) => {
+      const labelId = (e as CustomEvent<{ labelId: string }>).detail?.labelId;
+      if (!labelId) return;
+      setUserLabels((ls) => ls.filter((l) => l.id !== labelId));
+      setFilterLabel((f) => (f?.id === labelId ? null : f));
+    };
     window.addEventListener("securewarp-open-search", openSearch);
     window.addEventListener("securewarp-preview-file", previewFromPin);
     window.addEventListener("securewarp-filter-label", filterByLabel);
+    window.addEventListener("securewarp-label-deleted", onLabelDeleted);
     return () => {
       window.removeEventListener("securewarp-open-search", openSearch);
       window.removeEventListener("securewarp-preview-file", previewFromPin);
       window.removeEventListener("securewarp-filter-label", filterByLabel);
+      window.removeEventListener("securewarp-label-deleted", onLabelDeleted);
     };
   }, []);
 
