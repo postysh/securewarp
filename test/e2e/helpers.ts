@@ -93,7 +93,7 @@ export async function signUpAndLandOnDrive(
 
   // Recovery-key modal — accept.
   await page
-    .getByRole("button", { name: /I've saved my key/i })
+    .getByRole("button", { name: /I (have |')saved my (key|phrase)/i })
     .click({ timeout: 30_000 });
 
   // Onboarding wizard: Skip name, skip workspace, land on /drive.
@@ -101,7 +101,7 @@ export async function signUpAndLandOnDrive(
     .getByRole("button", { name: /Skip for now/i })
     .click({ timeout: 15_000 });
   await page
-    .getByRole("button", { name: /Skip, I'll do this later/i })
+    .getByRole("button", { name: /Skip, I (will |')do this later/i })
     .click({ timeout: 15_000 });
   await page.waitForURL(/\/drive/, { timeout: 15_000 });
 

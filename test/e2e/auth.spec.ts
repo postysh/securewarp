@@ -48,7 +48,7 @@ test("signup creates a user row with only ciphertext — no plaintext leaked", a
   // Recovery key modal appears on successful signup — wait for its
   // distinctive CTA. Argon2 + key derivation takes ~1–2 s; 30 s is
   // plenty of headroom.
-  await expect(page.getByRole("button", { name: /I've saved my key/i })).toBeVisible({
+  await expect(page.getByRole("button", { name: /I (have |')saved my (key|phrase)/i })).toBeVisible({
     timeout: 30_000,
   });
 
@@ -63,7 +63,7 @@ test("signup creates a user row with only ciphertext — no plaintext leaked", a
   //                wasn't in the register body.
   // The modal renders each BIP39 word in its own element. Grab
   // everything visible and then intersect with the request body.
-  const modal = page.getByRole("button", { name: /I've saved my key/i }).locator("..").locator("..");
+  const modal = page.getByRole("button", { name: /I (have |')saved my (key|phrase)/i }).locator("..").locator("..");
   const words = (await modal.textContent())?.match(/[a-z]{3,8}/gi) ?? [];
   // We expect 24 BIP39 words.
   expect(words.length).toBeGreaterThanOrEqual(24);
@@ -106,6 +106,6 @@ test("signup creates a user row with only ciphertext — no plaintext leaked", a
   // Close the recovery key modal; new signups route to the onboarding
   // screen first (/welcome), then to /drive once completed. Accept
   // either as a successful landing.
-  await page.getByRole("button", { name: /I've saved my key/i }).click();
+  await page.getByRole("button", { name: /I (have |')saved my (key|phrase)/i }).click();
   await page.waitForURL(/\/(welcome|drive)/, { timeout: 15_000 });
 });
