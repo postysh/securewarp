@@ -281,7 +281,7 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
 
   const handleRevokeLink = async (linkId: string) => {
     if (!file) return;
-    const result = await fileOps.revokeLink(linkId);
+    const result = await fileOps.revokeLink(linkId, file.id);
     if (!result.ok) {
       setInputError(result.error);
       return;

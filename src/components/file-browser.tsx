@@ -7,6 +7,7 @@ import ArrowUp01Icon from "@hugeicons/core-free-icons/ArrowUp01Icon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import Share01Icon from "@hugeicons/core-free-icons/Share01Icon";
+import Link03Icon from "@hugeicons/core-free-icons/Link03Icon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
@@ -169,17 +170,43 @@ function CollaboratorAvatar({ c, size = 24 }: { c: FileCollaboratorPreview; size
   );
 }
 
-function CollaboratorStack({ collaborators }: { collaborators: FileCollaboratorPreview[] }) {
-  if (!collaborators || collaborators.length === 0) {
-    return <span className="text-[11px] text-text-disabled">Private</span>;
-  }
-  // A lone owner means nobody else has access — treat as private so the
-  // owner's own avatar doesn't feel like the file has "members".
-  if (collaborators.length === 1 && collaborators[0].isOwner) {
-    return <span className="text-[11px] text-text-disabled">Private</span>;
+function PublicLinkPill() {
+  return (
+    <Tooltip label="Reachable via public link" side="bottom">
+      <div className="inline-flex items-center gap-1 h-[20px] px-1.5 rounded-[5px] bg-accent-green/10 text-accent-green">
+        <HugeiconsIcon icon={Link03Icon} size={10} />
+        <span className="text-[10px] font-mono uppercase tracking-wider font-semibold leading-none">Public</span>
+      </div>
+    </Tooltip>
+  );
+}
+
+function PrivatePill() {
+  return (
+    <Tooltip label="Only you can access this" side="bottom">
+      <div className="inline-flex items-center gap-1 h-[20px] px-1.5 rounded-[5px] bg-bg-field text-text-disabled">
+        <HugeiconsIcon icon={LockIcon} size={10} />
+        <span className="text-[10px] font-mono uppercase tracking-wider font-semibold leading-none">Private</span>
+      </div>
+    </Tooltip>
+  );
+}
+
+function CollaboratorStack({ collaborators, hasActiveLink }: { collaborators: FileCollaboratorPreview[]; hasActiveLink?: boolean }) {
+  const nonOwnerCollabs = (collaborators ?? []).filter((c) => !c.isOwner);
+  const hasMembers = nonOwnerCollabs.length > 0;
+
+  if (!hasMembers && !hasActiveLink) {
+    return <PrivatePill />;
   }
 
-  const MAX = 3;
+  if (hasActiveLink && !hasMembers) {
+    return <PublicLinkPill />;
+  }
+
+  // Members path — optionally preceded by the Public pill when both
+  // share modes are active on the same file.
+  const MAX = hasActiveLink ? 2 : 3;
   const visible = collaborators.slice(0, MAX);
   const overflow = collaborators.slice(MAX);
   const overflowContent = (
@@ -194,17 +221,20 @@ function CollaboratorStack({ collaborators }: { collaborators: FileCollaboratorP
   );
 
   return (
-    <div className="flex items-center -space-x-1.5">
-      {visible.map((c) => (
-        <CollaboratorAvatar key={c.userId} c={c} />
-      ))}
-      {overflow.length > 0 && (
-        <Tooltip label={`+${overflow.length} more`} content={overflowContent} side="bottom">
-          <div className="w-6 h-6 rounded-full border-2 border-bg-main bg-bg-field flex items-center justify-center text-[9px] font-bold text-text-tertiary">
-            +{overflow.length}
-          </div>
-        </Tooltip>
-      )}
+    <div className="flex items-center gap-1.5">
+      {hasActiveLink && <PublicLinkPill />}
+      <div className="flex items-center -space-x-1.5">
+        {visible.map((c) => (
+          <CollaboratorAvatar key={c.userId} c={c} />
+        ))}
+        {overflow.length > 0 && (
+          <Tooltip label={`+${overflow.length} more`} content={overflowContent} side="bottom">
+            <div className="w-6 h-6 rounded-full border-2 border-bg-main bg-bg-field flex items-center justify-center text-[9px] font-bold text-text-tertiary">
+              +{overflow.length}
+            </div>
+          </Tooltip>
+        )}
+      </div>
     </div>
   );
 }
@@ -495,6 +525,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     uploading: f.uploading,
     uploadProgress: f.uploadProgress,
     collaborators: f.collaborators,
+    hasActiveLink: f.hasActiveLink,
     ownerEmail: f.ownerEmail,
     ownerDisplayName: f.ownerDisplayName ?? null,
     // NEW badge flag — file was created in the last 24h and the
@@ -1082,7 +1113,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 Size <SortArrow field="size" />
               </button>
             </div>
-            <div className="w-[110px] justify-end hidden md:flex">
+            <div className="w-[110px] justify-center items-center hidden md:flex">
               <span className="text-[11px] font-mono uppercase text-text-disabled">{fileOps.activeWorkspace ? "Owner" : "Shared"}</span>
             </div>
             <div className="w-[100px] justify-end hidden lg:flex">
@@ -1576,7 +1607,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <div className="w-[100px] flex justify-end">
                   <span className="text-[12px] text-text-disabled">{file.size}</span>
                 </div>
-                <div className="w-[110px] justify-end hidden md:flex">
+                <div className="w-[110px] justify-center items-center hidden md:flex">
                   {fileOps.activeWorkspace && file.ownerEmail ? (
                     <Tooltip label={userLabel({ email: file.ownerEmail, displayName: file.ownerDisplayName })}>
                       <div className="flex items-center justify-end">
@@ -1589,7 +1620,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                       </div>
                     </Tooltip>
                   ) : (
-                    <CollaboratorStack collaborators={file.collaborators} />
+                    <CollaboratorStack collaborators={file.collaborators} hasActiveLink={file.hasActiveLink} />
                   )}
                 </div>
                 <div className={`w-[100px] justify-end hidden lg:flex transition-opacity ${

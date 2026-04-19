@@ -11,7 +11,7 @@ import MegaphoneIcon01 from "@hugeicons/core-free-icons/Megaphone01Icon";
 import Flag03Icon from "@hugeicons/core-free-icons/Flag03Icon";
 import MessageMultiple01Icon from "@hugeicons/core-free-icons/MessageMultiple01Icon";
 import ArrowLeft02Icon from "@hugeicons/core-free-icons/ArrowLeft02Icon";
-import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
+import { BrandMark } from "@/components/brand-mark";
 import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import Logout01Icon from "@hugeicons/core-free-icons/Logout01Icon";
 import Sun01Icon from "@hugeicons/core-free-icons/Sun01Icon";
@@ -186,10 +186,8 @@ function AdminSidebar({
     >
       {/* Brand / admin label */}
       <div className={`shrink-0 transition-all duration-200 ${collapsed ? "flex justify-center py-3" : "px-3 py-3"}`}>
-        <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2.5 px-2.5"} h-[36px]`}>
-          <div className="w-6 h-6 rounded-[6px] bg-bg-overlay-tertiary flex items-center justify-center shrink-0">
-            <HugeiconsIcon icon={Shield01Icon} size={14} color="var(--accent-green-primary)" />
-          </div>
+        <div className={`flex items-center ${collapsed ? "justify-center" : "gap-1 px-2.5"} h-[36px]`}>
+          <BrandMark size={28} />
           {!collapsed && (
             <div className="flex flex-col leading-none">
               <span className="text-[12px] font-semibold text-text-primary">SecureWarp</span>

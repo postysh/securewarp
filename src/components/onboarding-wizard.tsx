@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { BrandMark } from "./brand-mark";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import Sun01Icon from "@hugeicons/core-free-icons/Sun01Icon";
 import Moon02Icon from "@hugeicons/core-free-icons/Moon02Icon";
@@ -127,9 +128,10 @@ export function OnboardingWizard() {
       <header className="flex items-center justify-between px-6 py-5">
         <Link
           href="/"
-          className="no-underline text-text-primary text-[13px] font-semibold tracking-[1px] hover:opacity-80 transition-opacity"
+          className="no-underline text-text-primary text-[13px] font-semibold tracking-[1px] hover:opacity-80 transition-opacity flex items-center gap-1"
           style={{ fontFamily: "var(--font-geist-mono), monospace" }}
         >
+          <BrandMark size={40} />
           SECUREWARP
         </Link>
         <button

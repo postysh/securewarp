@@ -8,6 +8,7 @@
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { BrandMark } from "@/components/brand-mark";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
@@ -472,9 +473,10 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
       <header className="flex items-center justify-between px-6 py-5">
         <Link
           href="/"
-          className="no-underline text-text-primary text-[13px] font-semibold tracking-[1px] hover:opacity-80 transition-opacity"
-          style={{ fontFamily: "var(--font-geist-mono), monospace" }}
+          className="no-underline text-text-primary text-[13px] font-semibold hover:opacity-80 transition-opacity flex items-center gap-2"
+          style={{ fontFamily: "var(--font-geist-mono), monospace", letterSpacing: "0.1em" }}
         >
+          <BrandMark size={72} />
           SECUREWARP
         </Link>
         <div className="text-[11px] font-mono uppercase tracking-wider text-text-tertiary">

@@ -34,6 +34,7 @@ import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import Setting07Icon from "@hugeicons/core-free-icons/Setting07Icon";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import { BrandMark } from "@/components/brand-mark";
 
 /**
  * Mockup landing — mirroring Gately's frame.
@@ -605,6 +606,7 @@ function MockupFooter() {
         {/* Brand col */}
         <div className="mockup-footer-brand">
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <BrandMark size={52} />
             <span
               style={{
                 fontSize: 13,
@@ -3991,6 +3993,7 @@ function HeaderBar() {
             fontFamily: BRAND_MONO,
           }}
         >
+          <BrandMark size={72} />
           <LogoReveal text="SECUREWARP" />
           <span
             style={{

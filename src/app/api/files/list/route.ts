@@ -58,15 +58,31 @@ export async function GET(request: Request) {
     // Run all three queries in parallel to minimize latency.
     const fileIds = files.map((f) => f.id);
 
-    const [collaboratorMap, starResult, labelResult] = await Promise.all([
+    // Active-link probe — just returns file_ids that have at least one
+    // public link still in force. No key material or link tokens ever
+    // cross this boundary; the client only learns a boolean per file so
+    // the "Public" badge can render in the Shared column. Kept as a
+    // separate query (NOT a LIST_SELECT join) per the invariant that
+    // file_keys and file_links must never be co-joined: they have
+    // different wrap semantics and lifetimes.
+    const nowIso = new Date().toISOString();
+    const [collaboratorMap, starResult, labelResult, linksResult] = await Promise.all([
       getCollaboratorsBulk(fileIds),
       supabase.from("user_stars").select("file_id").eq("user_id", session.userId).in("file_id", fileIds),
       supabase.from("file_labels").select("file_id, label_id, label:labels!file_labels_label_id_fkey(id, name, color, user_id)").in("file_id", fileIds),
+      supabase
+        .from("file_links")
+        .select("file_id")
+        .in("file_id", fileIds)
+        .is("revoked_at", null)
+        .or(`expires_at.is.null,expires_at.gt.${nowIso}`),
     ]);
 
     const { data: starRows } = starResult;
     const { data: fileLabelRows } = labelResult;
+    const { data: linkRows } = linksResult;
     const starredSet = new Set((starRows || []).map((r) => r.file_id as string));
+    const activeLinkSet = new Set((linkRows || []).map((r) => r.file_id as string));
     const labelsByFile = new Map<string, { id: string; name: string; color: string }[]>();
     for (const row of (fileLabelRows || [])) {
       const fid = row.file_id as string;
@@ -93,6 +109,7 @@ export async function GET(request: Request) {
       owner_email: ownerEmailMap.get(f.owner_id) ?? null,
       owner_display_name: ownerNameMap.get(f.owner_id) ?? null,
       is_starred: starredSet.has(f.id),
+      has_active_link: activeLinkSet.has(f.id),
       file_labels: labelsByFile.get(f.id) ?? [],
       collaborators: (collaboratorMap.get(f.id) ?? []).map((c) => ({
         userId: c.user_id,

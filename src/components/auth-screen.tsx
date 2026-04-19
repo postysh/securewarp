@@ -12,6 +12,7 @@ import {
   type LockCacheMeta,
 } from "@/lib/auth/lock-cache";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
+import { BrandMark } from "./brand-mark";
 import ViewIcon from "@hugeicons/core-free-icons/ViewIcon";
 import ViewOffIcon from "@hugeicons/core-free-icons/ViewOffIcon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
@@ -156,8 +157,9 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
         {/* Left branding panel */}
         <div className="hidden lg:flex lg:w-[45%] bg-cta-primary relative overflow-hidden flex-col p-12 rounded-l-2xl">
           {/* Logo — matches the nav bar: monospace, uppercase, no icon */}
-          <Link href="/" className="relative z-10 mb-auto no-underline">
-            <span className="font-semibold text-[14px] text-text-inverse" style={{ fontFamily: "var(--font-geist-mono), monospace", letterSpacing: 1 }}>
+          <Link href="/" className="relative z-10 mb-auto no-underline flex items-center gap-2 text-text-inverse">
+            <BrandMark size={72} tone="mono" />
+            <span className="font-semibold text-[13px]" style={{ fontFamily: "var(--font-geist-mono), monospace", letterSpacing: "0.1em" }}>
               SECUREWARP
             </span>
           </Link>
@@ -211,8 +213,9 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
           <FadeIn keyVal={lockCache ? "unlock" : mode}>
           <div className="w-full max-w-[340px]">
             {/* Mobile logo — matches nav bar style */}
-            <Link href="/" className="lg:hidden mb-8 no-underline inline-block">
-              <span className="font-semibold text-[14px] text-text-primary" style={{ fontFamily: "var(--font-geist-mono), monospace", letterSpacing: 1 }}>
+            <Link href="/" className="lg:hidden mb-8 no-underline flex items-center gap-2 text-text-primary">
+              <BrandMark size={72} tone="mono" />
+              <span className="font-semibold text-[13px]" style={{ fontFamily: "var(--font-geist-mono), monospace", letterSpacing: "0.1em" }}>
                 SECUREWARP
               </span>
             </Link>

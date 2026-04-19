@@ -89,6 +89,11 @@ export interface DecryptedFile {
   // max-expiry) when a workspace admin has set a posture.
   workspaceId: string | null;
   isStarred: boolean;
+  // True when at least one non-revoked, non-expired public link exists
+  // for this file. Surfaced as a "Public" pill in the Shared column so
+  // the owner can tell at a glance which files are reachable without
+  // an account.
+  hasActiveLink: boolean;
   fileLabels: { id: string; name: string; color: string }[];
   isShared: boolean;
   // Everyone who holds a wrapped hierarchical-private-key for this file,
@@ -404,7 +409,7 @@ export function useFiles(keys: {
               ownerPublicKey: (f.owner_public_key as string) || "", publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
               encryptedSessionKeyByFile: f.encrypted_session_key_by_file as string, sessionKeyNonce: f.session_key_nonce as string,
               parentKeysClaim: (f.parent_keys_claim as string | null) ?? null, parentKeysClaimWrappedBy: (f.parent_keys_claim_wrapped_by as string | null) ?? null,
-              isStarred: !!(f.is_starred), fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
+              isStarred: !!(f.is_starred), hasActiveLink: !!(f.has_active_link), fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
               isShared: false, collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
               name: meta.name, type: meta.type, size: meta.size,
             } as DecryptedFile);
@@ -558,6 +563,7 @@ export function useFiles(keys: {
             parentKeysClaimWrappedBy,
             workspaceId: (f.workspace_id as string | null) ?? null,
             isStarred: !!(f.is_starred),
+            hasActiveLink: !!(f.has_active_link),
             fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
             isShared: mode === "shared",
             collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
@@ -585,6 +591,7 @@ export function useFiles(keys: {
           parentKeysClaimWrappedBy: (f.parent_keys_claim_wrapped_by as string | null) ?? null,
           workspaceId: (f.workspace_id as string | null) ?? null,
           isStarred: !!(f.is_starred),
+          hasActiveLink: !!(f.has_active_link),
           fileLabels: [],
           isShared: mode === "shared",
           collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
@@ -708,6 +715,7 @@ export function useFiles(keys: {
       parentKeysClaimWrappedBy: null,
       workspaceId: state.activeWorkspace?.id ?? null,
       isStarred: false,
+      hasActiveLink: false,
       fileLabels: [],
       isShared: false,
       collaborators: [],
@@ -2633,6 +2641,13 @@ export function useFiles(keys: {
         const url = passwordPayload
           ? `${window.location.origin}/share/${data.id}`
           : `${window.location.origin}/share/${data.id}#${fragment}`;
+        // Flip the per-file indicator so the "Public" pill in the
+        // Shared column updates without waiting for a refetch.
+        fileListCache.current.clear();
+        setState((s) => ({
+          ...s,
+          files: s.files.map((f) => (f.id === file.id ? { ...f, hasActiveLink: true } : f)),
+        }));
         return { ok: true, id: data.id, url };
       } catch (err) {
         console.error("Create link error:", err);
@@ -2643,11 +2658,29 @@ export function useFiles(keys: {
   );
 
   const revokeLink = useCallback(
-    async (linkId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    async (linkId: string, fileId?: string): Promise<{ ok: true } | { ok: false; error: string }> => {
       try {
         const res = await fetch(`/api/files/link/${linkId}/revoke`, { method: "POST" });
         const data = await res.json();
         if (!res.ok) return { ok: false, error: data.error || "Failed to revoke" };
+        // When the caller tells us which file this link belonged to,
+        // re-probe that file's remaining active links and flip the
+        // per-file indicator if none remain. The share modal is the
+        // canonical caller; it already knows the file id.
+        if (fileId) {
+          try {
+            const linkRes = await fetch(`/api/files/link/list?fileId=${fileId}`);
+            const linkData = await linkRes.json();
+            const remaining: { id: string }[] = linkData?.links ?? [];
+            if (remaining.length === 0) {
+              fileListCache.current.clear();
+              setState((s) => ({
+                ...s,
+                files: s.files.map((f) => (f.id === fileId ? { ...f, hasActiveLink: false } : f)),
+              }));
+            }
+          } catch { /* best-effort — next refetch will correct */ }
+        }
         return { ok: true };
       } catch (err) {
         console.error("Revoke link error:", err);
@@ -3479,7 +3512,7 @@ export function useFiles(keys: {
             ownerPublicKey: f.owner_public_key || "", publicHierarchicalKey: f.public_hierarchical_key || "",
             encryptedSessionKeyByFile: f.encrypted_session_key_by_file, sessionKeyNonce: f.session_key_nonce,
             parentKeysClaim: f.parent_keys_claim ?? null, parentKeysClaimWrappedBy: f.parent_keys_claim_wrapped_by ?? null,
-            isStarred: !!(f.is_starred), fileLabels: f.file_labels ?? [],
+            isStarred: !!(f.is_starred), hasActiveLink: !!(f.has_active_link), fileLabels: f.file_labels ?? [],
             isShared: false, collaborators: f.collaborators ?? [],
           } as DecryptedFile);
         } catch { /* skip */ }

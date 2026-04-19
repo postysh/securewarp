@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { BrandMark } from "./brand-mark";
 
 /**
  * Shared shell for every / page — layout wrapper + sticky
@@ -228,6 +229,7 @@ export function HeaderBar() {
             fontFamily: BRAND_MONO,
           }}
         >
+          <BrandMark size={72} />
           <LogoReveal text="SECUREWARP" />
           <span
             style={{
@@ -395,6 +397,7 @@ export function MockupFooter() {
               marginBottom: 12,
             }}
           >
+            <BrandMark size={52} />
             <span
               style={{
                 fontSize: 13,
