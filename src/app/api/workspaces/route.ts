@@ -18,18 +18,41 @@ export async function GET() {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    // All workspaces the user is a member of
+    // All workspaces the user is a member of. Includes security
+    // policy fields so the client can render the `lockedByTwoFactor`
+    // state on each row without an extra round-trip.
     const { data, error } = await supabase
       .from("workspace_members")
-      .select("role, workspace:workspaces!workspace_members_workspace_id_fkey(id, name, root_folder_id, owner_id, color, description, default_role)")
+      .select(
+        "role, workspace:workspaces!workspace_members_workspace_id_fkey(" +
+          "id, name, root_folder_id, owner_id, color, description, default_role, " +
+          "require_2fa, links_disabled, links_require_password, links_max_expiry_days" +
+          ")",
+      )
       .eq("user_id", session.userId);
     if (error) throw error;
 
-    const workspaces = (data || []).map((row) => {
-      const ws = (row.workspace as unknown) as {
+    // Fetch the caller's TOTP state once; used to compute the
+    // `lockedByTwoFactor` flag per workspace.
+    const { data: me } = await supabase
+      .from("users")
+      .select("totp_secret")
+      .eq("id", session.userId)
+      .single();
+    const hasTotp = Boolean(me?.totp_secret);
+
+    const workspaces = ((data || []) as unknown as Array<{
+      role: string;
+      workspace: {
         id: string; name: string; root_folder_id: string; owner_id: string;
         color: string; description: string; default_role: string;
+        require_2fa: boolean;
+        links_disabled: boolean;
+        links_require_password: boolean;
+        links_max_expiry_days: number | null;
       };
+    }>).map((row) => {
+      const ws = row.workspace;
       return {
         id: ws.id,
         name: ws.name,
@@ -39,6 +62,14 @@ export async function GET() {
         description: ws.description,
         defaultRole: ws.default_role,
         role: row.role,
+        require2fa: ws.require_2fa,
+        linksDisabled: ws.links_disabled,
+        linksRequirePassword: ws.links_require_password,
+        linksMaxExpiryDays: ws.links_max_expiry_days,
+        // True when the workspace demands 2FA and the caller hasn't
+        // enabled TOTP yet. Client shows a lock badge on the switcher
+        // row; actual file-op blocking is a follow-up.
+        lockedByTwoFactor: ws.require_2fa && !hasTotp,
       };
     });
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getFileById, createLink, getEffectivePermission } from "@/lib/db/files";
+import { supabase } from "@/lib/db/supabase";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
@@ -65,6 +66,57 @@ export async function POST(request: Request) {
       const perm = await getEffectivePermission(parsed.data.fileId, session.userId);
       if (!perm || perm === "viewer") {
         return NextResponse.json({ error: "File not found" }, { status: 404 });
+      }
+    }
+
+    // Workspace link-policy gate. Admins can:
+    //   - disable public links entirely (links_disabled)
+    //   - require a password on every link (links_require_password)
+    //   - cap expiry at N days (links_max_expiry_days)
+    // Enforced server-side here because the UI toggle alone isn't
+    // load-bearing — a malicious client can bypass any client-only
+    // check.
+    const { data: policyFile } = await supabase
+      .from("files")
+      .select("workspace_id")
+      .eq("id", parsed.data.fileId)
+      .single();
+    const workspaceId = policyFile?.workspace_id as string | null | undefined;
+    if (workspaceId) {
+      const { data: ws } = await supabase
+        .from("workspaces")
+        .select("links_disabled, links_require_password, links_max_expiry_days")
+        .eq("id", workspaceId)
+        .single();
+      if (ws) {
+        if (ws.links_disabled) {
+          return NextResponse.json(
+            { error: "Link sharing is disabled for this workspace" },
+            { status: 403 },
+          );
+        }
+        if (ws.links_require_password && !parsed.data.passwordSalt) {
+          return NextResponse.json(
+            { error: "This workspace requires a password on every public link" },
+            { status: 400 },
+          );
+        }
+        const maxDays = ws.links_max_expiry_days as number | null;
+        if (maxDays) {
+          if (!parsed.data.expiresAt) {
+            return NextResponse.json(
+              { error: `This workspace requires links to expire within ${maxDays} days` },
+              { status: 400 },
+            );
+          }
+          const maxAt = Date.now() + maxDays * 24 * 60 * 60 * 1000;
+          if (new Date(parsed.data.expiresAt).getTime() > maxAt) {
+            return NextResponse.json(
+              { error: `Link expiry exceeds the workspace cap of ${maxDays} days` },
+              { status: 400 },
+            );
+          }
+        }
       }
     }
 

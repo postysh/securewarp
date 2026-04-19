@@ -84,6 +84,10 @@ export interface DecryptedFile {
   // Phase 3 parent_keys_claim. Non-null for any file with a parent.
   parentKeysClaim: string | null;
   parentKeysClaimWrappedBy: string | null;
+  // Workspace membership — null for personal-drive files. Used by
+  // the Share modal to pull link-policy (disable/require-password/
+  // max-expiry) when a workspace admin has set a posture.
+  workspaceId: string | null;
   isStarred: boolean;
   fileLabels: { id: string; name: string; color: string }[];
   isShared: boolean;
@@ -529,6 +533,7 @@ export function useFiles(keys: {
             sessionKeyNonce,
             parentKeysClaim,
             parentKeysClaimWrappedBy,
+            workspaceId: (f.workspace_id as string | null) ?? null,
             isStarred: !!(f.is_starred),
             fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
             isShared: mode === "shared",
@@ -555,6 +560,7 @@ export function useFiles(keys: {
           sessionKeyNonce: (f.session_key_nonce as string) || "",
           parentKeysClaim: (f.parent_keys_claim as string | null) ?? null,
           parentKeysClaimWrappedBy: (f.parent_keys_claim_wrapped_by as string | null) ?? null,
+          workspaceId: (f.workspace_id as string | null) ?? null,
           isStarred: !!(f.is_starred),
           fileLabels: [],
           isShared: mode === "shared",
@@ -677,6 +683,7 @@ export function useFiles(keys: {
       sessionKeyNonce: "",
       parentKeysClaim: null,
       parentKeysClaimWrappedBy: null,
+      workspaceId: state.activeWorkspace?.id ?? null,
       isStarred: false,
       fileLabels: [],
       isShared: false,
@@ -1814,6 +1821,79 @@ export function useFiles(keys: {
   }, [fetchFiles, state.currentFolder, state.viewMode]);
 
   /**
+   * Resolve the private hierarchical key for a file the caller can
+   * decrypt. Two paths:
+   *
+   *   1. Direct — the caller has a `file_keys` row for this file.
+   *      We use the already-populated fields on the DecryptedFile
+   *      and unwrap in one hop. Zero server round-trip.
+   *   2. Inherited — workspace member (or personal-drive
+   *      collaborator) whose access is the parent_keys_claim
+   *      chain rooted at an ancestor. Those files come down with
+   *      empty `encryptedPrivateHierarchicalKey` /
+   *      `wrappedByPublicKey`, so unwrap would throw "bad public
+   *      key size". Hit `/api/files/chunk-download` to get the
+   *      ancestor key + chain and walk it — same logic
+   *      `unwrapSessionKeyFromDownload` uses, just returning the
+   *      priv hier key instead of the session key.
+   *
+   * Used by shareFile + createLink so both invite-by-email and
+   * public-link creation work for workspace files regardless of
+   * how the caller has access.
+   */
+  const resolvePrivHier = useCallback(
+    async (file: DecryptedFile): Promise<string> => {
+      if (!keys) throw new Error("Not signed in");
+      // Fast path — direct-key file, one local unwrap.
+      if (file.encryptedPrivateHierarchicalKey && file.wrappedByPublicKey) {
+        return unwrapPrivateHierarchicalKey(
+          file.encryptedPrivateHierarchicalKey,
+          file.wrappedByPublicKey,
+          keys.encryptionPrivateKey,
+        );
+      }
+      // Inherited path — grab the server's parent-chain payload
+      // and walk it. chunk-download is the existing endpoint that
+      // already returns ancestorKey + parentChain; other fields
+      // (download URLs, session key nonce) are ignored here.
+      const res = await fetch(`/api/files/chunk-download?fileId=${file.id}`);
+      if (!res.ok) throw new Error("Failed to fetch key chain");
+      const data = await res.json();
+      if (data.encryptedPrivateHierarchicalKey && data.wrappedByPublicKey) {
+        return unwrapPrivateHierarchicalKey(
+          data.encryptedPrivateHierarchicalKey,
+          data.wrappedByPublicKey,
+          keys.encryptionPrivateKey,
+        );
+      }
+      if (!data.ancestorKey || !data.parentChain?.length) {
+        throw new Error("No decryption path available");
+      }
+      let currentPrivHier = unwrapPrivateHierarchicalKey(
+        data.ancestorKey.encrypted_private_hierarchical_key,
+        data.ancestorKey.wrapped_by_public_key,
+        keys.encryptionPrivateKey,
+      );
+      for (const link of data.parentChain) {
+        const unwrapped = unwrapParentKeysClaim(
+          link.parentKeysClaim,
+          link.parentKeysClaimWrappedBy,
+          currentPrivHier,
+        );
+        currentPrivHier = unwrapped.childPrivateHierarchicalKey;
+        // The session key is a by-product of the same unwrap. We
+        // don't need it here (share/link flows derive their own
+        // wrapping of privHier, not the session key directly), but
+        // zero it out so we don't leave plaintext key material
+        // lingering in the closure.
+        unwrapped.sessionKey.fill(0);
+      }
+      return currentPrivHier;
+    },
+    [keys],
+  );
+
+  /**
    * Grant a user access to a file by re-wrapping its session key to their
    * public encryption key. Client-side only — the server never sees the raw
    * session key. Requires the caller to hold valid decryption keys.
@@ -1832,14 +1912,11 @@ export function useFiles(keys: {
         const pkData = await pkRes.json();
         if (!pkRes.ok) return { ok: false, error: pkData.error || "User not found" };
 
-        // 2. Unwrap our own file_keys row to recover the file's private
-        //    hierarchical key. We hold it whether we're the owner or a
-        //    prior collaborator — Phase 2 allows either to re-share.
-        const privHier = unwrapPrivateHierarchicalKey(
-          file.encryptedPrivateHierarchicalKey,
-          file.wrappedByPublicKey,
-          keys.encryptionPrivateKey
-        );
+        // 2. Recover the file's private hierarchical key. Direct-key
+        //    collaborators unwrap their own file_keys row in one hop;
+        //    workspace members with inherited-only access need the
+        //    parent_keys_claim chain (resolvePrivHier handles both).
+        const privHier = await resolvePrivHier(file);
 
         // 3. Wrap it to the recipient's public key, with our private key
         //    as the box sender. The recipient will use our public key
@@ -1872,7 +1949,7 @@ export function useFiles(keys: {
         return { ok: false, error: "Share failed — check your keys and try again" };
       }
     },
-    [keys, fetchFiles, state.currentFolder, state.viewMode]
+    [keys, resolvePrivHier, fetchFiles, state.currentFolder, state.viewMode]
   );
 
   /**
@@ -2492,11 +2569,9 @@ export function useFiles(keys: {
     ): Promise<{ ok: true; url: string; id: string } | { ok: false; error: string }> => {
       if (!keys) return { ok: false, error: "Not signed in" };
       try {
-        const privHier = unwrapPrivateHierarchicalKey(
-          file.encryptedPrivateHierarchicalKey,
-          file.wrappedByPublicKey,
-          keys.encryptionPrivateKey
-        );
+        // Handles both direct-key and inherited (workspace /
+        // subtree) access — see resolvePrivHier above.
+        const privHier = await resolvePrivHier(file);
         const linkKey = generateLinkKey();
         const { encryptedPrivateHierarchicalKey, linkKeyNonce } =
           wrapPrivateHierarchicalKeyForLink(privHier, linkKey);
@@ -2541,7 +2616,7 @@ export function useFiles(keys: {
         return { ok: false, error: "Failed to create link" };
       }
     },
-    [keys]
+    [keys, resolvePrivHier]
   );
 
   const revokeLink = useCallback(

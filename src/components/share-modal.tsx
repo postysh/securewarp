@@ -28,6 +28,18 @@ const EXPIRY_LABELS: Record<string, string> = {
   "30d": "30 days",
 };
 
+// Days each EXPIRY_OPTIONS entry costs. "never" is Infinity so the
+// max-expiry filter drops it when the workspace caps lifetime.
+// Kept here rather than inline so the filter math doesn't repeat
+// the 3600-vs-86400 conversion in two places.
+const EXPIRY_DAYS: Record<string, number> = {
+  never: Infinity,
+  "1h": 1 / 24,
+  "1d": 1,
+  "7d": 7,
+  "30d": 30,
+};
+
 interface ShareModalProps {
   file: DecryptedFile | null;
   onClose: () => void;
@@ -65,6 +77,16 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
   // Themed confirmation dialog state. Holds the collaborator pending
   // revoke until the user confirms or cancels.
   const [revokeTarget, setRevokeTarget] = useState<Collaborator | null>(null);
+  // Workspace link policy (null outside a workspace or while the
+  // policy is still loading). Populated from
+  // /api/workspaces/stats when the modal opens on a workspace
+  // file. Drives the expiry dropdown, password toggle, and
+  // create-link button state below.
+  const [linkPolicy, setLinkPolicy] = useState<{
+    disabled: boolean;
+    requirePassword: boolean;
+    maxExpiryDays: number | null;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const open = file !== null;
@@ -79,12 +101,50 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
     setLinkPassword("");
     setShowPasswordField(false);
     setLinkExpiry("never");
+    setLinkPolicy(null);
     setLoadingCollabs(true);
     fileOps
       .loadCollaborators(file.id)
       .then((list) => setCollaborators(list))
       .finally(() => setLoadingCollabs(false));
     fileOps.listLinks(file.id).then((list) => setLinks(list));
+
+    // Fetch the workspace link-policy when sharing a workspace
+    // file. Outside a workspace there's nothing to enforce; the
+    // default UI (all expiry options, optional password) applies.
+    const wsId = file.workspaceId;
+    if (wsId) {
+      fetch(`/api/workspaces/stats?workspaceId=${wsId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!d) return;
+          const policy = {
+            disabled: Boolean(d.linksDisabled),
+            requirePassword: Boolean(d.linksRequirePassword),
+            maxExpiryDays: d.linksMaxExpiryDays == null ? null : Number(d.linksMaxExpiryDays),
+          };
+          setLinkPolicy(policy);
+          // If the workspace requires a password on every link,
+          // pre-reveal the password field so the admin doesn't
+          // have to click "Password" to see it. Same reason for
+          // snapping expiry to the cap if the default "never"
+          // exceeds it — prevents submitting an invalid request.
+          if (policy.requirePassword) setShowPasswordField(true);
+          if (policy.maxExpiryDays != null) {
+            const allowed = EXPIRY_OPTIONS.filter(
+              (opt) => EXPIRY_DAYS[opt] <= (policy.maxExpiryDays ?? Infinity),
+            );
+            const longest = allowed[allowed.length - 1] ?? "1d";
+            setLinkExpiry(longest);
+          }
+        })
+        .catch(() => {
+          // Fall through — the server will still reject bad
+          // requests at create time even if the client policy
+          // fetch fails.
+        });
+    }
+
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [open, file, fileOps]);
 
@@ -376,6 +436,22 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
 
           {/* Link access */}
           <div className="mt-5">
+            {/* Filtered expiry list — drops "never" and anything
+                longer than the workspace cap when the admin has
+                set one. Policy checks below also disable the
+                password toggle (when required) and the whole
+                Create button (when links are disabled outright). */}
+            {(() => {
+              const maxDays = linkPolicy?.maxExpiryDays ?? null;
+              const allowedExpiry = maxDays == null
+                ? EXPIRY_OPTIONS
+                : (EXPIRY_OPTIONS.filter(
+                    (opt) => EXPIRY_DAYS[opt] <= maxDays,
+                  ) as unknown as typeof EXPIRY_OPTIONS);
+              const linksDisabled = linkPolicy?.disabled ?? false;
+              const passwordLocked = linkPolicy?.requirePassword ?? false;
+              return (
+            <>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <HugeiconsIcon icon={Link04Icon} size={14} color="var(--icon-tertiary)" />
@@ -384,27 +460,63 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
               <div className="flex items-center gap-2">
                 <RoleDropdown
                   value={linkExpiry}
-                  options={EXPIRY_OPTIONS}
+                  options={allowedExpiry}
                   labels={EXPIRY_LABELS}
                   onChange={(v) => setLinkExpiry(v)}
+                  disabled={linksDisabled}
                 />
                 <button
-                  onClick={() => setShowPasswordField((v) => !v)}
-                  className="text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer"
+                  onClick={() => {
+                    if (passwordLocked || linksDisabled) return;
+                    setShowPasswordField((v) => !v);
+                  }}
+                  disabled={passwordLocked || linksDisabled}
+                  className="text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    linksDisabled
+                      ? "Public links are disabled for this workspace"
+                      : passwordLocked
+                        ? "Password is required by this workspace"
+                        : undefined
+                  }
                 >
                   {showPasswordField ? "No password" : "Password"}
                 </button>
                 <button
                   onClick={handleCreateLink}
-                  disabled={creatingLink || (showPasswordField && linkPassword.length === 0)}
+                  disabled={
+                    creatingLink ||
+                    linksDisabled ||
+                    (showPasswordField && linkPassword.length === 0)
+                  }
                   className="text-[11px] text-accent-green hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={linksDisabled ? "Public links are disabled for this workspace" : undefined}
                 >
                   {creatingLink ? "Creating…" : "Create link"}
                 </button>
               </div>
             </div>
+            {/* Workspace policy note — only shown when at least one
+                flag is set, so personal-drive sharing stays
+                uncluttered. */}
+            {(linksDisabled || passwordLocked || maxDays != null) && (
+              <p className="mb-2 text-[10px] text-text-disabled">
+                {linksDisabled
+                  ? "This workspace has disabled public links."
+                  : [
+                      passwordLocked ? "password required" : null,
+                      maxDays != null ? `max expiry ${maxDays} days` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                      .replace(/^./, (s) => s.toUpperCase()) + " by workspace policy."}
+              </p>
+            )}
+            </>
+              );
+            })()}
 
-            {showPasswordField && (
+            {showPasswordField && !linkPolicy?.disabled && (
               <div className="mb-2">
                 <input
                   type="password"

@@ -991,7 +991,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             >
               <HugeiconsIcon icon={Download04Icon} size={15} />
             </button>
-            {fileOps.callerPermission !== "viewer" && !fileOps.activeWorkspace && (
+            {fileOps.callerPermission !== "viewer" && (
               <button
                 onClick={() => {
                   const first = fileOps.files.find((f) => selected.has(f.id));
@@ -1615,7 +1615,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                       </Tooltip>
                     );
                   })()}
-                  {fileOps.viewMode === "own" && !fileOps.activeWorkspace && (
+                  {fileOps.viewMode === "own" && fileOps.callerPermission !== "viewer" && (
                     <Tooltip label="Share" side="bottom">
                       <button
                         onClick={(e) => {
@@ -1911,7 +1911,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <HugeiconsIcon icon={ArrowLeft01Icon} size={14} color="var(--icon-tertiary)" /> Restore
             </button>
           )}
-          {fileOps.viewMode === "own" && !fileOps.activeWorkspace && (
+          {fileOps.viewMode === "own" && fileOps.callerPermission !== "viewer" && (
             <button
               onClick={() => {
                 if (contextMenu) {
@@ -2144,7 +2144,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             case "a1": fileInputRef.current?.click(); break;
             case "a2": setNewFolderOpen(true); break;
             case "a3": {
-              if (!fileOps.activeWorkspace) {
+              if (fileOps.callerPermission !== "viewer") {
                 const first = fileOps.files[0];
                 if (first) setShareTarget(first);
               }

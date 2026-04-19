@@ -578,6 +578,39 @@ ALTER TABLE billing_subscriptions  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE billing_usage_events   ENABLE ROW LEVEL SECURITY;
 ```
 
+#### Workspace security policy
+
+```sql
+-- Per-workspace admin toggles surfaced in Workspace Settings →
+-- Security. Enforcement lives in the API layer:
+--   * require_2fa              — /api/workspaces/list marks
+--                                 the workspace "locked" for any
+--                                 member without totp_secret; the
+--                                 switcher dims it + a follow-up
+--                                 will extend the check into
+--                                 /api/files/* routes.
+--   * links_disabled           — /api/files/link/create rejects
+--                                 when the file's workspace has
+--                                 this flag true.
+--   * links_require_password   — same endpoint, rejects if no
+--                                 passwordSalt/wrap passed.
+--   * links_max_expiry_days    — same endpoint, rejects if the
+--                                 requested expiresAt is null
+--                                 (no expiry) or too far in the
+--                                 future.
+ALTER TABLE workspaces
+  ADD COLUMN IF NOT EXISTS require_2fa boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS links_disabled boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS links_require_password boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS links_max_expiry_days integer;
+
+-- 1..365 day cap so a typo ("3650") doesn't mint effectively-
+-- permanent links inside a workspace that claims to cap expiry.
+ALTER TABLE workspaces
+  ADD CONSTRAINT workspaces_links_max_expiry_days_range
+    CHECK (links_max_expiry_days IS NULL OR (links_max_expiry_days > 0 AND links_max_expiry_days <= 365));
+```
+
 #### Active sessions UI metadata
 
 ```sql

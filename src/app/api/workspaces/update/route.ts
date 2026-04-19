@@ -18,6 +18,16 @@ const Schema = z.object({
   color: z.string().refine((v) => ALLOWED_COLORS.includes(v)).optional(),
   description: z.string().max(200).optional(),
   defaultRole: z.enum(["admin", "editor", "viewer"]).optional(),
+  // Security policy — see README migration block for the
+  // enforcement map. All nullable/optional so partial updates from
+  // the UI only touch what the admin changed.
+  require2fa: z.boolean().optional(),
+  linksDisabled: z.boolean().optional(),
+  linksRequirePassword: z.boolean().optional(),
+  // null explicitly clears the cap; undefined leaves it untouched.
+  linksMaxExpiryDays: z
+    .union([z.number().int().min(1).max(365), z.null()])
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -40,10 +50,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Only admins can update settings" }, { status: 403 });
     }
 
-    const updates: Record<string, string> = {};
+    const updates: Record<string, string | boolean | number | null> = {};
     if (parsed.data.color !== undefined) updates.color = parsed.data.color;
     if (parsed.data.description !== undefined) updates.description = parsed.data.description;
     if (parsed.data.defaultRole !== undefined) updates.default_role = parsed.data.defaultRole;
+    if (parsed.data.require2fa !== undefined) updates.require_2fa = parsed.data.require2fa;
+    if (parsed.data.linksDisabled !== undefined) updates.links_disabled = parsed.data.linksDisabled;
+    if (parsed.data.linksRequirePassword !== undefined) updates.links_require_password = parsed.data.linksRequirePassword;
+    if (parsed.data.linksMaxExpiryDays !== undefined) updates.links_max_expiry_days = parsed.data.linksMaxExpiryDays;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No fields to update" }, { status: 400 });
