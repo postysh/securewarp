@@ -527,7 +527,12 @@ export function WorkspaceSettings({ open, onClose, workspace, onDeleted, onUpdat
               </p>
             </div>
           </div>
-          <div className="flex-1 px-2 py-2 flex md:block gap-1 md:gap-0 overflow-x-auto">
+          {/* Vertical 2 px gap between tab buttons so hover /
+              active backgrounds don't sit flush against each
+              other — matches the main Settings modal's sidebar
+              spacing. `gap-1` stays on mobile where the row is
+              horizontal. */}
+          <div className="flex-1 px-2 py-2 flex md:flex-col gap-1 md:gap-[2px] overflow-x-auto">
             {TABS.map((t) => (
               <button
                 key={t.id}

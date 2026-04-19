@@ -2144,28 +2144,35 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             case "a1": fileInputRef.current?.click(); break;
             case "a2": setNewFolderOpen(true); break;
             case "a3": {
-              if (fileOps.callerPermission !== "viewer") {
-                const first = fileOps.files[0];
-                if (first) setShareTarget(first);
-              }
+              // Invite member — only surfaced in the palette when
+              // we're inside a workspace (see command-palette's
+              // availableActions filter), so no extra guard needed
+              // here. Admins see the real invite form; editors /
+              // viewers will get a 403 from the server if they
+              // submit. Opening the modal is still fine — lets
+              // them read the form and close it.
+              if (fileOps.activeWorkspace) setWorkspaceInviteOpen(true);
               break;
             }
+            case "a4":
+              // Settings — dispatch the same event the sidebar's
+              // cog button fires so we don't duplicate the
+              // state-lift needed to open <SettingsModal />.
+              window.dispatchEvent(new CustomEvent("securewarp-open-settings"));
+              break;
             case "a5": fileOps.setViewMode("starred"); break;
             case "a6": fileOps.setViewMode("trash"); break;
           }
         }}
-        onOpenFile={(fileId, isFolder, name) => {
-          if (isFolder) {
-            // Prefer the locally-loaded files list for the freshest
-            // name, but fall back to the name passed from the search
-            // result (or, finally, a generic placeholder) so the
-            // breadcrumb never shows the literal word "Folder".
-            const f = fileOps.files.find((x) => x.id === fileId);
-            const resolvedName = f?.name ?? name ?? "Folder";
-            fileOps.navigateToFolder(fileId, resolvedName);
-          } else {
-            setPreviewFileId(fileId);
-          }
+        onOpenFile={async (fileId) => {
+          // Jump to the result's real location instead of
+          // appending to the current breadcrumb — otherwise a
+          // hit inside "Projects/Q3/Reports" would read as
+          // "My Drive / Reports" after clicking from anywhere
+          // else in the tree. For a file hit, navigate to the
+          // parent folder and then open the preview on top.
+          const { fileIdToPreview } = await fileOps.navigateToSearchResult(fileId);
+          if (fileIdToPreview) setPreviewFileId(fileIdToPreview);
         }}
       />
 

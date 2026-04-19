@@ -146,7 +146,17 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
     }
 
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [open, file, fileOps]);
+    // Dependencies intentionally scoped to `open` + `file?.id`.
+    // fileOps changes reference whenever the parent's use-files
+    // hook re-renders (which happens on every permission change,
+    // role update, rename, etc.). Re-running this effect on those
+    // reference flips re-ran the collaborator load and flipped
+    // `loadingCollabs` to true, making the list flicker to
+    // "Loading…" after every inline action. Keying on file.id is
+    // enough: the real "open the modal on a different file" flow
+    // always changes that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, file?.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -306,7 +316,9 @@ export function ShareModal({ file, onClose }: ShareModalProps) {
       );
       return;
     }
-    setInfo(`${c.email} is now a ${level}`);
+    // No success toast — the role dropdown updates optimistically,
+    // so the visible row change is feedback enough. The banner
+    // under the email input was just noise.
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

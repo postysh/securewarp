@@ -103,8 +103,19 @@ export function CommandPalette({ open, onClose, onAction, onOpenFile }: CommandP
       try {
         const results = await fileOps.searchFiles(q);
         if (searchSeqRef.current !== mySeq) return;
+        // Scope results to the current workspace context. Personal
+        // (activeWorkspace=null) matches only rows with no
+        // workspace_id; a specific workspace matches only its own
+        // rows. Without this, hitting ⌘K in Personal would surface
+        // workspace files and vice versa — the search cache is
+        // global but the header's intent is "search what I'm
+        // currently looking at".
+        const activeId = fileOps.activeWorkspace?.id ?? null;
+        const scoped = results.filter((f) =>
+          activeId === null ? f.workspaceId === null : f.workspaceId === activeId,
+        );
         setSearchResults(
-          results.map((f) => ({
+          scoped.map((f) => ({
             id: f.id,
             label: f.name,
             icon: f.isFolder ? Folder01Icon : File01Icon,
@@ -131,9 +142,15 @@ export function CommandPalette({ open, onClose, onAction, onOpenFile }: CommandP
 
   const hasQuery = query.trim().length > 0;
   const fileResults = hasQuery ? searchResults : [];
+  // "Invite member" only makes sense inside a team workspace — in
+  // Personal there's nobody to invite, so hide it from the quick
+  // actions list entirely (not just disabled).
+  const availableActions = fileOps.activeWorkspace
+    ? quickActions
+    : quickActions.filter((a) => a.id !== "a3");
   const actionResults = hasQuery
-    ? quickActions.filter((a) => a.label.toLowerCase().includes(query.toLowerCase()))
-    : quickActions;
+    ? availableActions.filter((a) => a.label.toLowerCase().includes(query.toLowerCase()))
+    : availableActions;
   const flatResults = [...fileResults, ...actionResults];
 
   const handleSelect = (item: SearchItem) => {

@@ -2736,6 +2736,84 @@ export function useFiles(keys: {
     fetchFiles(null, "own", bc);
   }, [fetchFiles]);
 
+  /**
+   * Jump to a file or folder returned by the search palette and
+   * rebuild the breadcrumb from that entry's actual position in
+   * the tree — not by appending to the current breadcrumb, which
+   * is what navigateToFolder does.
+   *
+   *   - Folder hit: navigate INTO the folder; breadcrumb ends at
+   *     the folder itself.
+   *   - File hit: navigate into the file's PARENT folder so the
+   *     drive reads as "here's the folder that contains the
+   *     search hit", and return the fileId so the caller can open
+   *     a preview on top.
+   *
+   * Resolves the chain from `searchEntriesRef.current` — each
+   * entry has `parentId` + `workspaceId` + `workspaceName`,
+   * enough to walk from the hit up to its workspace root (or the
+   * personal-drive root for non-workspace entries). Bails early
+   * if the chain is broken (cache drift) and falls back to
+   * navigateToFolder with the entry's immediate name so the user
+   * still moves somewhere.
+   */
+  const navigateToSearchResult = useCallback(
+    async (entryId: string): Promise<{ fileIdToPreview: string | null }> => {
+      const entries = searchEntriesRef.current ?? [];
+      const entryById = new Map(entries.map((e) => [e.id, e] as const));
+      const target = entryById.get(entryId);
+      if (!target) return { fileIdToPreview: null };
+
+      // Walk parents from the target up, collecting id + name
+      // pairs for each intermediate folder. Depth cap mirrors the
+      // 32-deep guard in buildBreadcrumb.
+      const ancestors: { id: string; name: string }[] = [];
+      let cursorId = target.parentId;
+      let depth = 0;
+      while (cursorId && depth < 32) {
+        const parent = entryById.get(cursorId);
+        if (!parent) break; // cache gap — stop the walk cleanly
+        ancestors.unshift({ id: parent.id, name: parent.name });
+        cursorId = parent.parentId;
+        depth++;
+      }
+
+      // Root crumb depends on whether we're in a workspace.
+      const rootCrumb: { id: string | null; name: string } =
+        target.workspaceId
+          ? {
+              // The workspace's root folder id isn't stored on
+              // search entries, but `state.activeWorkspace` has it
+              // whenever the caller is inside that workspace, which
+              // the palette already scopes to.
+              id: state.activeWorkspace?.id === target.workspaceId
+                ? state.activeWorkspace.rootFolderId
+                : null,
+              name: target.workspaceName ?? "Workspace",
+            }
+          : { id: null, name: "My Drive" };
+
+      if (target.isFolder) {
+        const bc = [rootCrumb, ...ancestors, { id: target.id, name: target.name }];
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("securewarp-file-opened", { detail: { fileId: target.id } }),
+          );
+        }
+        await fetchFiles(target.id, "own", bc);
+        return { fileIdToPreview: null };
+      }
+
+      // File hit — navigate into the immediate parent folder (or
+      // the drive root when the file sits at the top level).
+      const parentId = target.parentId ?? rootCrumb.id;
+      const bc = [rootCrumb, ...ancestors];
+      await fetchFiles(parentId, "own", bc);
+      return { fileIdToPreview: target.id };
+    },
+    [fetchFiles, state.activeWorkspace],
+  );
+
   const navigateToBreadcrumb = useCallback(async (index: number) => {
     const bc = state.breadcrumb.slice(0, index + 1);
     const target = state.breadcrumb[index];
@@ -3426,6 +3504,7 @@ export function useFiles(keys: {
     navigateToWorkspace,
     leaveWorkspace,
     navigateToBreadcrumb,
+    navigateToSearchResult,
     clearError,
     invalidateCache,
     loadMore,
