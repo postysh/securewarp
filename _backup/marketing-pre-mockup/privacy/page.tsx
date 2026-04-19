@@ -1,123 +1,64 @@
 "use client";
 
+import { FloatingParticles } from "@/components/floating-particles";
+import { MarketingNav } from "@/components/marketing-nav";
+import { MarketingFooter } from "@/components/marketing-footer";
 import {
-  MarketingShell,
-  TEXT,
-  TEXT_MUTED,
-  BORDER,
-  GREEN,
-  BRAND_SANS,
-  BRAND_SERIF,
-  BRAND_MONO,
-} from "@/components/marketing-shell";
-
-/**
- * Privacy policy — /privacy. Reuses the MarketingShell wrapper
- * so header, rules, dots, and footer stay identical to the rest of the marketing surface.
- * Copy lifted verbatim from src/app/(marketing)/privacy/page.tsx so
- * both surfaces say the same thing; keep them in sync when the
- * policy is updated.
- */
+  SECTION_MAX,
+  EYEBROW_STYLE,
+  H2_STYLE,
+} from "@/lib/marketing-style";
 
 const EFFECTIVE = "April 16, 2026";
 
-export default function MockupPrivacy() {
+export default function Privacy() {
   return (
-    <MarketingShell>
-      {/* Hero */}
+    <div
+      style={{
+        fontFamily: "var(--font-chillax), var(--font-geist-sans), system-ui, sans-serif",
+        background: "#111",
+        minHeight: "100vh",
+        position: "relative",
+      }}
+    >
+      <FloatingParticles count={40} />
+      <MarketingNav />
+
       <section
         style={{
-          padding: "96px 32px 32px",
+          padding: "140px 32px 0",
+          maxWidth: SECTION_MAX,
+          margin: "0 auto",
           textAlign: "center",
         }}
       >
-        <span
-          style={{
-            fontSize: 12,
-            fontWeight: 500,
-            textTransform: "uppercase",
-            letterSpacing: "0.14em",
-            color: GREEN,
-            fontFamily: BRAND_MONO,
-          }}
-        >
-          Legal
-        </span>
-        <h1
-          style={{
-            marginTop: 12,
-            fontSize: "clamp(2.25rem, 4vw, 3rem)",
-            lineHeight: 1.1,
-            color: TEXT,
-            fontFamily: BRAND_SERIF,
-            fontWeight: 700,
-            letterSpacing: -0.8,
-            margin: "12px 0 8px",
-          }}
-        >
-          Privacy <span style={{ color: GREEN }}>Policy</span>
+        <span style={EYEBROW_STYLE}>Legal</span>
+        <h1 style={{ ...H2_STYLE, fontSize: "clamp(32px, 4.2vw, 48px)", margin: "0 0 12px" }}>
+          Privacy Policy
         </h1>
-        <p
-          style={{
-            fontSize: 13,
-            color: TEXT_MUTED,
-            margin: 0,
-            fontFamily: BRAND_MONO,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-          }}
-        >
+        <p style={{ fontSize: 14, color: "rgba(255,255,255,0.45)", margin: "0 0 48px" }}>
           Effective {EFFECTIVE}
         </p>
       </section>
 
-      {/* Body — Gately-pattern: max-w-3xl column, intro paragraph,
-          then numbered sections each with a 1px top rule + compact
-          h2 + paragraph. Same content shape as /privacy but a
-          tighter, tabular layout. */}
-      <style jsx>{`
-        .legal-body p {
-          margin: 0 0 12px;
-          text-wrap: pretty;
-        }
-        .legal-body p:last-child {
-          margin-bottom: 0;
-        }
-        .legal-body ul {
-          margin: 0 0 12px;
-          padding-left: 20px;
-        }
-        .legal-body li {
-          margin-bottom: 4px;
-        }
-        .legal-body strong {
-          color: ${TEXT};
-          font-weight: 600;
-        }
+      {/* eslint-disable-next-line react/no-unknown-property */}
+      <style>{`
+        .legal-body p { margin: 0 0 12px; text-wrap: pretty; }
+        .legal-body p:last-child { margin-bottom: 0; }
+        .legal-body ul { margin: 0 0 12px; padding-left: 20px; }
+        .legal-body li { margin-bottom: 4px; }
       `}</style>
-      <div
+      <section
         className="legal-body"
         style={{
-          maxWidth: 768,
+          padding: "0 32px 96px",
+          maxWidth: 760,
           margin: "0 auto",
-          padding: "24px 32px 96px",
-          fontFamily: BRAND_SANS,
+          fontSize: 15,
+          lineHeight: 1.65,
+          color: "rgba(255,255,255,0.65)",
         }}
       >
-        <p
-          style={{
-            fontSize: 15,
-            lineHeight: 1.65,
-            color: TEXT_MUTED,
-            marginBottom: 48,
-            marginTop: 0,
-          }}
-        >
-          Your privacy matters to us. This policy explains what data we
-          collect, how we use it, and the zero knowledge promises we have
-          built into the product.
-        </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 40 }}>
         <Block title="1. Who we are">
           <p>
             SecureWarp is a zero knowledge encrypted cloud storage service
@@ -130,8 +71,7 @@ export default function MockupPrivacy() {
           <p>
             Every file, folder name, and share is encrypted in your browser
             before it reaches our servers. We store only ciphertext and do not
-            hold the keys to decrypt it. Your password never leaves your
-            device.
+            hold the keys to decrypt it. Your password never leaves your device.
           </p>
           <p>
             If you lose both your password and your 24 word recovery phrase,
@@ -143,22 +83,10 @@ export default function MockupPrivacy() {
         <Block title="3. What we collect">
           <p>We collect the minimum data required to run the service:</p>
           <ul>
-            <Li>
-              <strong>Account info:</strong> email address, optional display
-              name
-            </Li>
-            <Li>
-              <strong>Encrypted files:</strong> stored as ciphertext we cannot
-              read
-            </Li>
-            <Li>
-              <strong>Metadata:</strong> file sizes, timestamps, sharing
-              relationships
-            </Li>
-            <Li>
-              <strong>Technical data:</strong> IP address (temporarily, for
-              rate limiting), session cookies (for authentication)
-            </Li>
+            <Li><strong>Account info:</strong> email address, optional display name</Li>
+            <Li><strong>Encrypted files:</strong> stored as ciphertext we cannot read</Li>
+            <Li><strong>Metadata:</strong> file sizes, timestamps, sharing relationships</Li>
+            <Li><strong>Technical data:</strong> IP address (temporarily, for rate limiting), session cookies (for authentication)</Li>
           </ul>
           <p>
             We use cookieless, aggregated analytics that do not build per user
@@ -166,8 +94,8 @@ export default function MockupPrivacy() {
             before transmission.
           </p>
           <p>
-            <strong>We do not collect</strong> plaintext file contents,
-            filenames, passwords, or recovery phrases.
+            <strong>We do not collect</strong> plaintext file contents, filenames,
+            passwords, or recovery phrases.
           </p>
         </Block>
 
@@ -186,12 +114,12 @@ export default function MockupPrivacy() {
             advertisers or data brokers.
           </p>
           <p>
-            We use a small number of service providers to operate the platform
-            (hosting, database, email delivery, error monitoring). Each
-            processes data only as necessary to deliver their service to us
-            and is not authorized to use it for their own purposes. Your file
-            contents remain encrypted and unreadable to all parties, including
-            us and our providers.
+            We use a small number of service providers to operate the
+            platform (hosting, database, email delivery, error monitoring).
+            Each processes data only as necessary to deliver their service to
+            us and is not authorized to use it for their own purposes. Your
+            file contents remain encrypted and unreadable to all parties,
+            including us and our providers.
           </p>
         </Block>
 
@@ -264,72 +192,46 @@ export default function MockupPrivacy() {
 
         <Block title="12. Contact">
           <p>
-            Questions or data rights requests:{" "}
-            <A href="mailto:hello@securewarp.com">hello@securewarp.com</A>.
+            Questions or data rights
+            requests: <A href="mailto:hello@securewarp.com">hello@securewarp.com</A>.
           </p>
         </Block>
-        </div>
-      </div>
-    </MarketingShell>
+      </section>
+
+      <MarketingFooter />
+    </div>
   );
 }
 
-function Block({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        borderTop: `1px solid ${BORDER}`,
-        paddingTop: 32,
-      }}
-    >
+    <div style={{ marginBottom: 40 }}>
       <h2
         style={{
-          fontSize: 16,
+          fontSize: 20,
           fontWeight: 600,
-          color: TEXT,
-          margin: "0 0 12px",
-          fontFamily: BRAND_SANS,
+          color: "white",
+          margin: "0 0 16px",
+          letterSpacing: -0.3,
         }}
       >
         {title}
       </h2>
-      <div
-        style={{
-          fontSize: 14,
-          lineHeight: 1.65,
-          color: TEXT_MUTED,
-        }}
-      >
-        {children}
-      </div>
+      {children}
     </div>
   );
 }
 
 function Li({ children }: { children: React.ReactNode }) {
-  return <li style={{ marginBottom: 6, paddingLeft: 4 }}>{children}</li>;
+  return (
+    <li style={{ marginBottom: 6, paddingLeft: 4 }}>{children}</li>
+  );
 }
 
-function A({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
+function A({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <a
-      href={href}
-      style={{ color: GREEN, textDecoration: "none", fontWeight: 500 }}
-    >
+    <a href={href} style={{ color: "rgba(110,210,170,0.9)", textDecoration: "none" }}>
       {children}
     </a>
   );
 }
-

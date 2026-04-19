@@ -1,24 +1,15 @@
 "use client";
 
 import { useState } from "react";
-
+import { FloatingParticles } from "@/components/floating-particles";
+import { MarketingNav } from "@/components/marketing-nav";
+import { MarketingFooter } from "@/components/marketing-footer";
 import {
-  MarketingShell,
-  TEXT,
-  TEXT_MUTED,
-  BORDER,
-  GREEN,
-  BRAND_SANS,
-  BRAND_MONO,
-} from "@/components/marketing-shell";
-
-/**
- * Support page — /support. Mirrors the layout of the real
- * support page but retuned for the mockup's light theme: cream
- * body column + orange accent + BRAND_* font tokens. Form submits
- * to the same /api/support/message endpoint so the backend stays
- * untouched.
- */
+  SECTION_MAX,
+  SECTION_PAD_Y,
+  EYEBROW_STYLE,
+  H2_STYLE,
+} from "@/lib/marketing-style";
 
 type SubmitState =
   | { kind: "idle" }
@@ -26,9 +17,9 @@ type SubmitState =
   | { kind: "ok" }
   | { kind: "error"; message: string };
 
-export default function MockupSupport() {
-  const [name, setName] = useState("");
+export default function Support() {
   const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [state, setState] = useState<SubmitState>({ kind: "idle" });
@@ -44,13 +35,8 @@ export default function MockupSupport() {
         body: JSON.stringify({ email, name, subject, message }),
       });
       if (!res.ok) {
-        const body = await res
-          .json()
-          .catch(() => ({ error: "Something went wrong." }));
-        setState({
-          kind: "error",
-          message: body.error || "Something went wrong.",
-        });
+        const body = await res.json().catch(() => ({ error: "Something went wrong." }));
+        setState({ kind: "error", message: body.error || "Something went wrong." });
         return;
       }
       setState({ kind: "ok" });
@@ -64,63 +50,52 @@ export default function MockupSupport() {
   };
 
   return (
-    <MarketingShell>
-      {/* Hero */}
+    <div
+      style={{
+        fontFamily: "var(--font-chillax), var(--font-geist-sans), system-ui, sans-serif",
+        background: "#111",
+        minHeight: "100vh",
+        position: "relative",
+      }}
+    >
+      <FloatingParticles count={60} />
+      <MarketingNav current="support" />
+
       <section
         style={{
-          padding: "96px 32px 48px",
+          padding: "140px 32px 0",
+          maxWidth: SECTION_MAX,
+          margin: "0 auto",
           textAlign: "center",
         }}
       >
-        <span
-          style={{
-            fontSize: 12,
-            fontWeight: 500,
-            textTransform: "uppercase",
-            letterSpacing: "0.14em",
-            color: GREEN,
-            fontFamily: BRAND_MONO,
-          }}
-        >
-          Get in touch
-        </span>
-        <h1
-          style={{
-            marginTop: 12,
-            fontSize: "clamp(2.5rem, 5vw, 3.5rem)",
-            lineHeight: 1.05,
-            color: TEXT,
-            fontFamily: BRAND_SANS,
-            fontWeight: 400,
-            letterSpacing: -1,
-            margin: "12px auto 20px",
-            maxWidth: 720,
-          }}
-        >
-          Questions, bug reports, or{" "}
-          <span style={{ color: GREEN }}>anything else</span>.
-        </h1>
-        <p
-          style={{
-            fontSize: 17,
-            lineHeight: 1.6,
-            maxWidth: 560,
-            margin: "0 auto",
-            color: TEXT_MUTED,
-            fontFamily: BRAND_SANS,
-            textWrap: "pretty",
-          }}
-        >
-          Real humans read every message. We usually reply within a day or
-          two. If it&apos;s a security concern, put &quot;security&quot; in the
-          subject and we&apos;ll bump it to the top.
-        </p>
+        <div style={{ maxWidth: 640, margin: "0 auto" }}>
+          <span style={EYEBROW_STYLE}>Get in touch</span>
+          <h1 style={{ ...H2_STYLE, fontSize: "clamp(32px, 4.2vw, 48px)", margin: "0 0 18px" }}>
+            Questions, bug reports,
+            <br />
+            or anything else.
+          </h1>
+          <p
+            style={{
+              fontSize: 17,
+              lineHeight: 1.6,
+              color: "rgba(255,255,255,0.55)",
+              margin: "0 auto",
+              maxWidth: 520,
+              textWrap: "pretty",
+            }}
+          >
+            Real humans read every message. We usually reply within a day or
+            two. If it&apos;s a security concern, put &quot;security&quot; in the subject and
+            we&apos;ll bump it to the top.
+          </p>
+        </div>
       </section>
 
-      {/* Form card */}
       <section
         style={{
-          padding: "0 32px 48px",
+          padding: `${SECTION_PAD_Y}px 32px 64px`,
           maxWidth: 720,
           margin: "0 auto",
         }}
@@ -128,11 +103,10 @@ export default function MockupSupport() {
         <form
           onSubmit={submit}
           style={{
-            background: "#fff",
-            border: `1px solid ${BORDER}`,
+            background: "#1a1a1a",
+            border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: 16,
-            padding: 32,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.03)",
+            padding: "32px",
           }}
         >
           <Field label="Your name" optional>
@@ -180,11 +154,10 @@ export default function MockupSupport() {
             <div
               style={{
                 fontSize: 11,
-                color: TEXT_MUTED,
+                color: "rgba(255,255,255,0.35)",
                 textAlign: "right",
                 marginTop: 6,
-                fontFamily: BRAND_MONO,
-                letterSpacing: "0.04em",
+                fontFamily: "var(--font-geist-mono), monospace",
               }}
             >
               {message.length} / 4000
@@ -198,12 +171,11 @@ export default function MockupSupport() {
                 marginBottom: 18,
                 padding: "12px 14px",
                 borderRadius: 10,
-                background: "rgba(239,90,60,0.06)",
-                border: "1px solid rgba(239,90,60,0.3)",
-                color: GREEN,
+                background: "rgba(232,93,48,0.08)",
+                border: "1px solid rgba(232,93,48,0.3)",
+                color: "rgba(255,180,160,0.9)",
                 fontSize: 13,
                 lineHeight: 1.5,
-                fontFamily: BRAND_SANS,
               }}
             >
               {state.message}
@@ -216,19 +188,16 @@ export default function MockupSupport() {
               style={{
                 padding: "16px 18px",
                 borderRadius: 10,
-                background: "rgba(239,90,60,0.06)",
-                border: "1px solid rgba(239,90,60,0.3)",
-                color: TEXT,
+                background: "rgba(110,210,170,0.08)",
+                border: "1px solid rgba(110,210,170,0.3)",
+                color: "rgba(190,240,215,0.95)",
                 fontSize: 14,
                 lineHeight: 1.6,
-                fontFamily: BRAND_SANS,
               }}
             >
-              <div style={{ fontWeight: 600, marginBottom: 4, color: GREEN }}>
-                Message sent.
-              </div>
-              We&apos;ll reply to the email address you provided within a day
-              or two. Check your inbox for a confirmation.
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Message sent.</div>
+              We&apos;ll reply to the email address you provided within a day or two.
+              Check your inbox for a confirmation.
             </div>
           ) : (
             <button
@@ -240,18 +209,16 @@ export default function MockupSupport() {
                 justifyContent: "center",
                 gap: 8,
                 padding: "12px 24px",
-                fontSize: 12,
+                fontSize: 14,
                 fontWeight: 500,
-                color: "white",
-                background: GREEN,
-                borderRadius: 8,
+                color: "#111",
+                background: "white",
+                borderRadius: 10,
                 border: "none",
                 cursor: state.kind === "submitting" ? "default" : "pointer",
                 opacity: state.kind === "submitting" ? 0.6 : 1,
                 transition: "opacity 160ms ease",
-                fontFamily: BRAND_MONO,
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
+                fontFamily: "inherit",
               }}
             >
               {state.kind === "submitting" ? "Sending..." : "Send message"}
@@ -262,32 +229,29 @@ export default function MockupSupport() {
         <p
           style={{
             fontSize: 13,
-            color: TEXT_MUTED,
+            color: "rgba(255,255,255,0.4)",
             lineHeight: 1.6,
             marginTop: 24,
             textAlign: "center",
-            fontFamily: BRAND_SANS,
           }}
         >
           Or email us directly at{" "}
           <a
             href="mailto:hello@securewarp.com"
-            style={{
-              color: GREEN,
-              textDecoration: "none",
-              fontWeight: 500,
-            }}
+            style={{ color: "rgba(110,210,170,0.9)", textDecoration: "none" }}
           >
             hello@securewarp.com
           </a>
           .
         </p>
       </section>
-    </MarketingShell>
+
+      <MarketingFooter />
+    </div>
   );
 }
 
-// ─── Form primitives ──────────────────────────────────────────
+// ── Form primitives ────────────────────────────────────────────────
 
 function Field({
   label,
@@ -306,24 +270,16 @@ function Field({
           justifyContent: "space-between",
           alignItems: "baseline",
           fontSize: 11,
-          fontFamily: BRAND_MONO,
+          fontFamily: "var(--font-geist-mono), monospace",
           textTransform: "uppercase",
-          letterSpacing: "0.12em",
-          color: TEXT_MUTED,
+          letterSpacing: 1.5,
+          color: "rgba(255,255,255,0.45)",
           marginBottom: 8,
         }}
       >
         <span>{label}</span>
         {optional && (
-          <span
-            style={{
-              color: TEXT_MUTED,
-              opacity: 0.7,
-              fontSize: 10,
-            }}
-          >
-            Optional
-          </span>
+          <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>Optional</span>
         )}
       </label>
       {children}
@@ -331,19 +287,17 @@ function Field({
   );
 }
 
-function inputBaseStyle(
-  opts: { multiline?: boolean } = {},
-): React.CSSProperties {
+function inputBaseStyle(opts: { multiline?: boolean } = {}): React.CSSProperties {
   return {
     width: "100%",
-    background: "rgba(0,0,0,0.025)",
-    border: `1px solid ${BORDER}`,
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: 10,
     padding: "12px 14px",
     fontSize: 14,
-    color: TEXT,
+    color: "white",
     outline: "none",
-    fontFamily: BRAND_SANS,
+    fontFamily: "inherit",
     resize: opts.multiline ? "vertical" : "none",
     lineHeight: opts.multiline ? 1.55 : undefined,
   };
