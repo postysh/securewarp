@@ -2774,7 +2774,12 @@ function HeroDashboardFrame() {
         position: "relative",
         overflow: "hidden",
         margin: "0 -32px",
-        padding: "64px 32px 0",
+        // Symmetric top + bottom padding so the dashboard sits
+        // vertically centered within the blurred mountain backdrop.
+        // Kept at 32 px (not 64) to keep the hero section compact
+        // without clipping the image — the dashboard still breathes
+        // against the blurred backdrop on both sides.
+        padding: "32px 32px",
       }}
     >
       {/* Blurred mountain backdrop. Kept on its own absolute layer
@@ -2800,38 +2805,33 @@ function HeroDashboardFrame() {
           pointerEvents: "none",
         }}
       />
-      {/* securewarpdash2.png: 1920×1440 with dashboard content at
-          1844×977 — ~2% L/R transparent padding, ~16% T/B. Same
-          crop trick as before (aspect-ratio matches content,
-          transform:scale eats the L/R strip that object-fit cover
-          leaves behind). Corner radius is tighter than v1 (~25px
-          in source → ~16px at wrapper width), so the wrapper's
-          top-corner radius drops back down to match. */}
+      {/* securewarpdark.png: 1462×818 — full glass-rim crop from
+          the source asset. Wrapper aspect matches the image 1:1 so
+          the dashboard renders at its native proportions, fully
+          visible, with the blurred mountain backdrop symmetric
+          above and below. */}
       <div
         style={{
           // position: relative so the dashboard paints above the
           // absolute blur backdrop in its stacking context.
           position: "relative",
           width: "100%",
-          aspectRatio: "1844 / 977",
+          aspectRatio: "1462 / 818",
           overflow: "hidden",
           // Round all four corners — the PNG's dashboard has rounded
           // corners on every side, so leaving the wrapper's bottom
           // two corners sharp exposed cream crescents there.
           borderRadius: 18,
-          // Layered shadows: first a crisp 1px dark hairline (the
-          // "glassy border") — on a cream bg a white rim blends
-          // into the page, a 10% black rim reads as a faint edge
-          // around the dark image. Then the soft drop-shadow for
-          // elevation. Using box-shadow instead of `border` keeps
-          // the rim outside the overflow-hidden clip so it doesn't
-          // eat into the image.
-          boxShadow:
-            "0 0 0 1px rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.12) 0px 20px 40px",
+          // Soft drop shadow only — the image carries its own glass
+          // rim (baked alpha taper from the bezel out), so any extra
+          // outer hairline doubles up on it and reads as a dark
+          // border against cream. Drop shadow alone gives elevation
+          // without competing with the asset's edge.
+          boxShadow: "0 20px 40px rgba(0, 0, 0, 0.12)",
         }}
       >
         <img
-          src="/screens/securewarpdash2.png"
+          src="/screens/securewarpdark.png?v=6"
           alt="SecureWarp dashboard showing an encrypted file list"
           style={{
             display: "block",
@@ -2839,7 +2839,7 @@ function HeroDashboardFrame() {
             height: "100%",
             objectFit: "cover",
             objectPosition: "center",
-            transform: "scale(1.045)",
+            transform: "scale(1)",
           }}
         />
       </div>
