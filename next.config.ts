@@ -15,7 +15,23 @@ import { join } from "node:path";
 // never reaches the browser. Read wrangler.jsonc here, extract every
 // `NEXT_PUBLIC_*` entry from `vars`, and inject into Next's `env` block
 // so the single source of truth is this file — no dashboard duplication.
+// Required NEXT_PUBLIC_* vars the app cannot boot without. Missing any
+// of these in a production build is a loud failure, not a silent ship:
+// - STRIPE_PUBLISHABLE_KEY: empty → loadStripe(undefined) → useStripe()
+//   null forever → Subscribe button permanently disabled (caught this
+//   exact regression twice on the Cloudflare Workers Builds CI before
+//   the assertion went in).
+// - PDF_VIEWER_ORIGIN: empty → main app falls back to the inline blob
+//   iframe path. Not broken, but silently loses the security isolation
+//   the subdomain provides. Fail loudly so a botched deploy never quietly
+//   drops defense-in-depth.
+const REQUIRED_PUBLIC_VARS = [
+  "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
+  "NEXT_PUBLIC_PDF_VIEWER_ORIGIN",
+];
+
 function readWranglerPublicVars(): Record<string, string> {
+  let out: Record<string, string> = {};
   try {
     const raw = readFileSync(join(process.cwd(), "wrangler.jsonc"), "utf8");
     // Strip // and /* */ comments and trailing commas so JSON.parse
@@ -27,14 +43,39 @@ function readWranglerPublicVars(): Record<string, string> {
       .replace(/,(\s*[}\]])/g, "$1");
     const parsed = JSON.parse(stripped) as { vars?: Record<string, unknown> };
     const vars = parsed.vars ?? {};
-    const out: Record<string, string> = {};
+    out = {};
     for (const [k, v] of Object.entries(vars)) {
       if (k.startsWith("NEXT_PUBLIC_") && typeof v === "string") out[k] = v;
     }
-    return out;
   } catch {
-    return {};
+    out = {};
   }
+
+  // Fold in any NEXT_PUBLIC_* that are set directly on process.env so
+  // `next dev` + Cloudflare Builds dashboard vars still work. Existing
+  // wrangler.jsonc entries win on conflict — the file is the source of
+  // truth.
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith("NEXT_PUBLIC_") && typeof v === "string" && !(k in out)) {
+      out[k] = v;
+    }
+  }
+
+  // Production build gate. Empty values at build time = broken client
+  // bundle at runtime. Fail the CI build loudly instead of shipping a
+  // silently-broken deploy.
+  if (process.env.NODE_ENV === "production") {
+    const missing = REQUIRED_PUBLIC_VARS.filter((k) => !out[k] || out[k].length === 0);
+    if (missing.length > 0) {
+      throw new Error(
+        `next.config.ts: required NEXT_PUBLIC_* vars are empty at build time: ${missing.join(", ")}. ` +
+        `Set them in wrangler.jsonc \`vars\` (preferred) or as Cloudflare Builds env vars. ` +
+        `Without these, the client bundle ships broken — see the "Stripe.js empty key" incident.`
+      );
+    }
+  }
+
+  return out;
 }
 
 // ──────────────────────────────────────────────────────────────────────
