@@ -14,6 +14,26 @@ import HardDriveIcon from "@hugeicons/core-free-icons/HardDriveIcon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import CreditCardIcon from "@hugeicons/core-free-icons/CreditCardIcon";
 import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
+// File-type glyphs for the product-showcase Files mockup. Colors
+// follow src/components/file-icon.tsx so the mock matches what the
+// real file-browser renders.
+import Pdf01Icon from "@hugeicons/core-free-icons/Pdf01Icon";
+import Table01Icon from "@hugeicons/core-free-icons/Table01Icon";
+import Image01Icon from "@hugeicons/core-free-icons/Image01Icon";
+import File01Icon from "@hugeicons/core-free-icons/File01Icon";
+import Video01Icon from "@hugeicons/core-free-icons/Video01Icon";
+import StarIcon from "@hugeicons/core-free-icons/StarIcon";
+// Share modal glyphs — match src/components/share-modal.tsx so the
+// mockup tracks what the real dialog renders.
+import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
+import Link04Icon from "@hugeicons/core-free-icons/Link04Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+// Workspace switcher glyphs — match src/components/workspace-switcher.tsx
+// so the mock tracks what the real dropdown renders.
+import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
+import Setting07Icon from "@hugeicons/core-free-icons/Setting07Icon";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
 
 /**
  * Mockup landing — mirroring Gately's frame.
@@ -1620,193 +1640,874 @@ function BrowserChrome({ url }: { url: string }) {
   );
 }
 
+/**
+ * Mini file-browser mockup. Pulls every layout detail from the real
+ * src/components/file-browser.tsx list-view rendering so what a
+ * visitor sees on the landing page matches what a real user sees
+ * on /drive:
+ *   - rows are rounded bordered pills (not a table with bottom
+ *     separators) with 6 px vertical gap between them
+ *   - 32x32 cream icon tile per row (`bg-bg-side` equivalent)
+ *   - name column is flex-1, metadata columns are fixed-width and
+ *     right-aligned with a 46 px gap
+ *   - type shown as a tiny `bg-bg-field` pill, shared column
+ *     renders an avatar stack or "Private" label
+ * Inline colors (not CSS vars) because the marketing page lives
+ * outside the app's theme token system.
+ */
 function FilesPanel() {
-  const rows = [
-    { name: "Budget 2026.xlsx", kind: "Personal" },
-    { name: "Contract draft.docx", kind: "Shared · 2" },
-    { name: "Family photos", kind: "Folder" },
-    { name: "API keys.env", kind: "Private" },
-  ];
-  return (
-    <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: TEXT, fontFamily: BRAND_SANS }}>My Drive</span>
-        <Pill>24 FILES</Pill>
-      </div>
-      {rows.map((r) => (
-        <div
-          key={r.name}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "10px 0",
-            borderBottom: `1px solid ${BORDER}`,
-            fontFamily: BRAND_SANS,
-          }}
-        >
-          <IconSquare icon={LockIcon} />
-          <span style={{ fontSize: 12, flex: 1, color: TEXT }}>{r.name}</span>
-          <span style={{ fontSize: 11, color: TEXT_MUTED }}>{r.kind}</span>
-          <Pill>ENCRYPTED</Pill>
-        </div>
-      ))}
-    </>
-  );
-}
+  // Matches the palette in src/components/file-icon.tsx.
+  const kindColor = {
+    folder: "rgb(100,170,220)",       // accent-blue
+    document: "rgb(120,150,220)",     // accent-dark-blue
+    image: "rgb(200,140,175)",        // accent-pink
+    spreadsheet: "rgb(210,180,80)",   // accent-yellow
+    video: "rgb(220,120,120)",        // accent-red
+    pdf: "rgb(220,120,120)",          // accent-red
+  } as const;
 
-function SharingPanel() {
+  type Row = {
+    name: string;
+    kind: keyof typeof kindColor;
+    icon: Parameters<typeof HugeiconsIcon>[0]["icon"];
+    type?: string;
+    size?: string;
+    shared?: "private" | "team" | "new";
+    starred?: boolean;
+    modified: string;
+  };
+
+  const rows: Row[] = [
+    { name: "Last Week Docs", kind: "folder", icon: Folder01Icon, shared: "team", starred: true, modified: "Apr 11, 2026" },
+    { name: "Road Trip", kind: "folder", icon: Folder01Icon, shared: "private", modified: "Apr 17, 2026" },
+    { name: "Calendar 2026 Expense.xlsx", kind: "spreadsheet", icon: Table01Icon, type: "XLSX", size: "142 KB", shared: "private", modified: "Apr 14, 2026" },
+    { name: "Invoice Feb 2026.pdf", kind: "pdf", icon: Pdf01Icon, type: "PDF", size: "66 KB", shared: "private", modified: "Apr 12, 2026" },
+    { name: "Interview John Smith.mp4", kind: "video", icon: Video01Icon, type: "MP4", size: "87 MB", shared: "new", modified: "Apr 12, 2026" },
+    { name: "My dogs and I.svg", kind: "image", icon: Image01Icon, type: "SVG", size: "3.9 KB", shared: "private", modified: "Apr 12, 2026" },
+  ];
+
+  const headerLabel = {
+    fontSize: 10,
+    color: TEXT_MUTED,
+    opacity: 0.6,
+    fontFamily: BRAND_MONO,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    lineHeight: 1,
+  } as const;
+
+  const TYPE_W = 56;
+  const SIZE_W = 62;
+  const SHARED_W = 70;
+  const MOD_W = 92;
+  const METADATA_GAP = 28;
+
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: TEXT, fontFamily: BRAND_SANS }}>
-          Share &ldquo;Contract draft.docx&rdquo;
-        </span>
-        <Pill>LINK ACTIVE</Pill>
+      {/* Breadcrumb + file count, mirrors the real dashboard's
+          header row (sans search / upload buttons). */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <HugeiconsIcon icon={HardDriveIcon} size={14} color={TEXT_MUTED} strokeWidth={1.6} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: TEXT, fontFamily: BRAND_SANS }}>My Drive</span>
+        </div>
+        <Pill>24 FILES · 270 MB</Pill>
       </div>
+
+      {/* Column header row — matches the real app: a "Name" tag
+          on the left, then Type / Size / Shared / Modified pushed
+          to the right with ml-auto + 46 px gaps between them. */}
       <div
         style={{
-          padding: "10px 12px",
-          borderRadius: 8,
-          border: `1px solid ${BORDER}`,
-          background: "#fff",
-          fontFamily: BRAND_MONO,
-          fontSize: 11,
-          color: TEXT_MUTED,
-          marginBottom: 14,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
+          display: "flex",
+          alignItems: "center",
+          height: 28,
+          padding: "0 10px",
+          marginBottom: 4,
         }}
       >
-        https://securewarp.com/share/f3a9c820
-        <span style={{ color: GREEN }}>#key=kN3p9Tx+Rz8qLmVsA6</span>
+        <span style={headerLabel}>Name</span>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: METADATA_GAP }}>
+          <span style={{ ...headerLabel, width: TYPE_W, textAlign: "right" }}>Type</span>
+          <span style={{ ...headerLabel, width: SIZE_W, textAlign: "right" }}>Size</span>
+          <span style={{ ...headerLabel, width: SHARED_W, textAlign: "right" }}>Shared</span>
+          <span style={{ ...headerLabel, width: MOD_W, textAlign: "right" }}>Modified</span>
+        </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontFamily: BRAND_SANS }}>
-        {[
-          { label: "Expires in", value: "7 days" },
-          { label: "Password", value: "Required" },
-          { label: "Views", value: "3 / unlimited" },
-          { label: "Server sees key", value: "Never" },
-        ].map((r) => (
+
+      {/* Rows rendered as rounded bordered pills (not table rows)
+          with vertical breathing room between them. Matches
+          file-browser.tsx: `rounded-xl border border-border-tertiary
+          mb-1.5` plus a hover-like subtle bg on alternating rows
+          elided for simplicity here. */}
+      {rows.map((r) => {
+        const color = kindColor[r.kind];
+        return (
           <div
-            key={r.label}
+            key={r.name}
             style={{
-              padding: "8px 10px",
-              borderRadius: 6,
-              border: `1px solid ${BORDER}`,
-              background: "#fff",
               display: "flex",
-              flexDirection: "column",
-              gap: 2,
+              alignItems: "center",
+              height: 48,
+              padding: "0 10px",
+              marginBottom: 6,
+              border: `1px solid ${BORDER}`,
+              borderRadius: 10,
+              background: "#ffffff",
+              fontFamily: BRAND_SANS,
             }}
           >
-            <span style={{ fontSize: 10, color: TEXT_MUTED, fontFamily: BRAND_MONO, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              {r.label}
-            </span>
-            <span style={{ fontSize: 12, color: TEXT }}>{r.value}</span>
+            {/* Icon + name + status badges */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 6,
+                  background: BG, // cream, matches --bg-sidepanel
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <HugeiconsIcon icon={r.icon} size={15} color={color} strokeWidth={1.8} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                <span
+                  style={{
+                    fontSize: 12.5,
+                    color: TEXT,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {r.name}
+                </span>
+                {r.shared === "new" && (
+                  <span
+                    style={{
+                      fontSize: 8.5,
+                      fontFamily: BRAND_MONO,
+                      fontWeight: 600,
+                      letterSpacing: "0.12em",
+                      color: GREEN,
+                      background: "rgba(239,90,60,0.12)",
+                      border: "1px solid rgba(239,90,60,0.25)",
+                      padding: "2px 5px",
+                      borderRadius: 3,
+                      lineHeight: 1,
+                      flexShrink: 0,
+                    }}
+                  >
+                    NEW
+                  </span>
+                )}
+                {r.starred && (
+                  <HugeiconsIcon
+                    icon={StarIcon}
+                    size={11}
+                    color="rgb(210,180,80)"
+                    strokeWidth={2}
+                  />
+                )}
+              </div>
+            </div>
+            {/* Metadata columns, pushed to the right with the same
+                46 px rhythm the real app uses (scaled to 28 px here
+                for the narrower mockup panel). */}
+            <div style={{ display: "flex", alignItems: "center", gap: METADATA_GAP, flexShrink: 0 }}>
+              <div style={{ width: TYPE_W, display: "flex", justifyContent: "flex-end" }}>
+                {r.type ? (
+                  <span
+                    style={{
+                      fontSize: 9.5,
+                      fontFamily: BRAND_MONO,
+                      letterSpacing: "0.08em",
+                      color: TEXT_MUTED,
+                      background: "rgba(0,0,0,0.045)",
+                      padding: "2px 6px",
+                      borderRadius: 3,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {r.type}
+                  </span>
+                ) : null}
+              </div>
+              <span style={{ width: SIZE_W, textAlign: "right", fontSize: 11, color: TEXT_MUTED, fontFamily: BRAND_SANS }}>
+                {r.size ?? ""}
+              </span>
+              {/* Shared — avatar stack or Private label. */}
+              <div style={{ width: SHARED_W, display: "flex", justifyContent: "flex-end" }}>
+                {r.shared === "team" ? (
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <span
+                      style={{
+                        width: 20, height: 20, borderRadius: 10,
+                        background: GREEN, color: "#fff",
+                        fontSize: 8.5, fontWeight: 700,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        border: "1.5px solid #fff",
+                        boxShadow: "0 0 0 1px rgba(0,0,0,0.04)",
+                      }}
+                    >EV</span>
+                    <span
+                      style={{
+                        width: 20, height: 20, borderRadius: 10,
+                        background: "rgb(210,180,80)", color: "#fff",
+                        fontSize: 8.5, fontWeight: 700,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        border: "1.5px solid #fff",
+                        boxShadow: "0 0 0 1px rgba(0,0,0,0.04)",
+                        marginLeft: -6,
+                      }}
+                    >JO</span>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: 11, color: TEXT_MUTED, fontFamily: BRAND_SANS }}>Private</span>
+                )}
+              </div>
+              <span style={{ width: MOD_W, textAlign: "right", fontSize: 11, color: TEXT_MUTED, fontFamily: BRAND_SANS }}>
+                {r.modified}
+              </span>
+            </div>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </>
   );
 }
 
-function WorkspacesPanel() {
-  const ws = [
-    { label: "Personal", initial: "P", members: 1, active: true },
-    { label: "Acme Corp", initial: "A", members: 8, active: false },
-    { label: "Client · Nova", initial: "N", members: 3, active: false },
-  ];
+/**
+ * Mini share-modal mockup. Mirrors src/components/share-modal.tsx
+ * section by section: cream header band (eyebrow + icon tile +
+ * filename + subtitle), email-invite row, collaborator list with
+ * avatar + role pill + revoke link, and a public-link section
+ * with the expiry/password controls. Compressed to fit the
+ * showcase panel, but every structural element tracks the real
+ * dialog.
+ */
+function SharingPanel() {
+  const eyebrow = {
+    fontSize: 9.5,
+    fontFamily: BRAND_MONO,
+    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+    color: TEXT_MUTED,
+    opacity: 0.7,
+    lineHeight: 1,
+  } as const;
+
+  // Slim modal-ish card shell (border + cream header band + white
+  // body). `margin: -20` undoes the browser-chrome card's inner
+  // padding so the header band can reach the full panel width.
   return (
-    <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: TEXT, fontFamily: BRAND_SANS }}>Workspaces</span>
-        <Pill>3 ACTIVE</Pill>
-      </div>
-      {ws.map((w) => (
-        <div
-          key={w.label}
+    <div
+      style={{
+        margin: -20,
+        borderRadius: 10,
+        overflow: "hidden",
+        border: `1px solid ${BORDER}`,
+        background: "#ffffff",
+        fontFamily: BRAND_SANS,
+      }}
+    >
+      {/* Cream header band */}
+      <div
+        style={{
+          position: "relative",
+          background: BG,
+          padding: "14px 16px 16px",
+          borderBottom: `1px solid ${BORDER}`,
+        }}
+      >
+        <span
           style={{
+            position: "absolute",
+            top: 12,
+            right: 12,
+            width: 22,
+            height: 22,
             display: "flex",
             alignItems: "center",
-            gap: 12,
-            padding: "10px 0",
-            borderBottom: `1px solid ${BORDER}`,
-            fontFamily: BRAND_SANS,
+            justifyContent: "center",
+            color: TEXT_MUTED,
+            opacity: 0.6,
           }}
+          aria-hidden
         >
+          <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={1.8} />
+        </span>
+        <div style={{ ...eyebrow, marginBottom: 10 }}>Share file</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, paddingRight: 24 }}>
           <div
             style={{
-              width: 28,
-              height: 28,
-              borderRadius: 6,
-              background: "rgba(239,90,60,0.1)",
-              color: GREEN,
-              fontSize: 12,
-              fontWeight: 600,
+              width: 34,
+              height: 34,
+              borderRadius: 8,
+              background: "#ffffff",
+              border: `1px solid ${BORDER}`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               flexShrink: 0,
-              fontFamily: BRAND_MONO,
             }}
           >
-            {w.initial}
+            <HugeiconsIcon icon={UserAdd01Icon} size={16} color={GREEN} strokeWidth={1.8} />
           </div>
-          <span style={{ fontSize: 12, flex: 1, color: TEXT }}>{w.label}</span>
-          <span style={{ fontSize: 11, color: TEXT_MUTED }}>
-            {w.members} {w.members === 1 ? "member" : "members"}
-          </span>
-          {w.active ? (
-            <Pill>CURRENT</Pill>
-          ) : (
-            <span style={{ fontSize: 11, color: TEXT_MUTED, fontFamily: BRAND_MONO, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              Switch
-            </span>
-          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, lineHeight: 1.2 }}>
+              Contract draft.docx
+            </div>
+            <div style={{ fontSize: 10.5, color: TEXT_MUTED, marginTop: 3, lineHeight: 1 }}>
+              Encrypted end to end in your browser
+            </div>
+          </div>
         </div>
-      ))}
-    </>
+      </div>
+
+      {/* Body */}
+      <div style={{ padding: 14 }}>
+        {/* Recipient email + Share button. Input has the orange
+            focus ring visible in the real app when focused — here
+            we render it "as focused" to advertise the interaction. */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          <div
+            style={{
+              flex: 1,
+              height: 32,
+              padding: "0 12px",
+              borderRadius: 8,
+              background: "rgba(0,0,0,0.04)",
+              border: "1px solid rgba(239,90,60,0.4)",
+              boxShadow: "0 0 0 2px rgba(239,90,60,0.2)",
+              fontSize: 11.5,
+              color: TEXT,
+              display: "flex",
+              alignItems: "center",
+              minWidth: 0,
+            }}
+          >
+            jane@acme.co
+          </div>
+          <button
+            type="button"
+            style={{
+              height: 32,
+              padding: "0 14px",
+              borderRadius: 8,
+              background: TEXT,
+              color: "#ffffff",
+              fontSize: 11.5,
+              fontWeight: 500,
+              border: "none",
+              cursor: "pointer",
+              fontFamily: BRAND_SANS,
+            }}
+          >
+            Share
+          </button>
+        </div>
+
+        {/* Collaborator list — rounded bordered container, each row
+            is an avatar + label + role badge + revoke link. */}
+        <div style={{ borderRadius: 8, border: `1px solid ${BORDER}`, overflow: "hidden", marginBottom: 14 }}>
+          {[
+            { initials: "JS", color: GREEN, name: "John Smith", email: "you@securewarp.com", role: "Owner", isOwner: true },
+            { initials: "JA", color: "rgb(100,170,220)", name: "Jane Acme", email: "jane@acme.co", role: "Can edit", isOwner: false },
+            { initials: "DR", color: "rgb(210,180,80)", name: "Dan Rivera", email: "dan@studio.io", role: "Can view", isOwner: false },
+          ].map((c, i) => (
+            <div
+              key={c.email}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "7px 10px",
+                borderTop: i === 0 ? "none" : `1px solid ${BORDER}`,
+              }}
+            >
+              <div
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 5,
+                  background: c.color,
+                  color: "#fff",
+                  fontSize: 9,
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {c.initials}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, color: TEXT, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {c.name}
+                </div>
+                <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {c.email} · {c.role}
+                </div>
+              </div>
+              {c.isOwner ? (
+                <span style={{ fontSize: 10, color: TEXT_MUTED, fontFamily: BRAND_SANS, opacity: 0.7 }}>
+                  Owner
+                </span>
+              ) : (
+                <>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      padding: "3px 8px",
+                      borderRadius: 5,
+                      border: `1px solid ${BORDER}`,
+                      background: "#fff",
+                      color: TEXT,
+                    }}
+                  >
+                    {c.role === "Can edit" ? "Editor" : "Viewer"}
+                  </span>
+                  <span style={{ fontSize: 10, color: "rgb(200,80,80)", fontFamily: BRAND_SANS, opacity: 0.75 }}>
+                    Revoke
+                  </span>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Public link section header — Link icon + label, then
+            expiry dropdown + password toggle + "Create link" on
+            the right. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 8,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <HugeiconsIcon icon={Link04Icon} size={12} color={TEXT_MUTED} strokeWidth={1.8} />
+            <span style={{ fontSize: 11.5, fontWeight: 500, color: TEXT }}>Public link</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span
+              style={{
+                fontSize: 10.5,
+                color: TEXT_MUTED,
+                background: "rgba(0,0,0,0.04)",
+                padding: "3px 8px",
+                borderRadius: 5,
+                border: `1px solid ${BORDER}`,
+              }}
+            >
+              7 days
+            </span>
+            <span style={{ fontSize: 10.5, color: TEXT_MUTED, opacity: 0.8 }}>
+              Password
+            </span>
+            <span style={{ fontSize: 10.5, color: GREEN, fontWeight: 500 }}>
+              Create link
+            </span>
+          </div>
+        </div>
+
+        {/* Freshly-created link URL, matches the "this URL cannot be
+            retrieved later" banner in share-modal.tsx. The #key=
+            fragment is highlighted in brand orange — teaches visitors
+            at a glance where the decryption key actually lives. */}
+        <div
+          style={{
+            padding: "8px 10px",
+            borderRadius: 8,
+            border: `1px solid ${BORDER}`,
+            background: "rgba(0,0,0,0.025)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontFamily: BRAND_MONO,
+                fontSize: 10.5,
+                color: TEXT,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              securewarp.com/share/f3a9c820
+              <span style={{ color: GREEN }}>#key=kN3p9Tx+Rz8qLmVsA6</span>
+            </span>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "3px 8px",
+                borderRadius: 5,
+                background: "#ffffff",
+                border: `1px solid ${BORDER}`,
+                fontSize: 10,
+                color: TEXT_MUTED,
+              }}
+            >
+              <HugeiconsIcon icon={Copy01Icon} size={11} color={TEXT_MUTED} strokeWidth={1.8} />
+              Copy
+            </span>
+          </div>
+          <p style={{ margin: "6px 0 0", fontSize: 9.5, color: TEXT_MUTED, opacity: 0.85 }}>
+            The key after <span style={{ fontFamily: BRAND_MONO }}>#</span> stays in the browser. The server never sees it.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
+/**
+ * Mini workspace-switcher mockup. Mirrors the dropdown rendered
+ * by src/components/workspace-switcher.tsx: each workspace is a
+ * row with a 7x7 colored avatar tile (initial in white), a name
+ * line, and a role / description below. The active workspace
+ * shows a ✓ in brand orange. Actions (settings + create) sit in
+ * a bordered section at the bottom.
+ *
+ * Colors per workspace match src/lib/avatar.ts's deterministic
+ * palette so a name always renders with the same tile color.
+ */
+function WorkspacesPanel() {
+  const ws: Array<{
+    name: string;
+    description: string;
+    initial: string;
+    color: string;
+    active?: boolean;
+  }> = [
+    { name: "Personal", description: "My Drive", initial: "P", color: GREEN, active: true },
+    { name: "Acme Corp", description: "Admin · 8 members", initial: "A", color: "rgb(100,170,220)" },
+    { name: "Client · Nova", description: "Editor · 3 members", initial: "N", color: "rgb(210,180,80)" },
+    { name: "Studio", description: "Viewer · 5 members", initial: "S", color: "rgb(200,140,175)" },
+  ];
+
+  return (
+    <div
+      style={{
+        margin: -20,
+        borderRadius: 10,
+        overflow: "hidden",
+        border: `1px solid ${BORDER}`,
+        background: "#ffffff",
+        fontFamily: BRAND_SANS,
+      }}
+    >
+      {/* Eyebrow header — optional in the real dropdown but useful
+          here to frame the panel as "the workspace switcher". */}
+      <div
+        style={{
+          padding: "10px 12px",
+          background: BG,
+          borderBottom: `1px solid ${BORDER}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 9.5,
+            fontFamily: BRAND_MONO,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            color: TEXT_MUTED,
+            opacity: 0.7,
+            lineHeight: 1,
+          }}
+        >
+          Switch workspace
+        </span>
+        <Pill>4 AVAILABLE</Pill>
+      </div>
+
+      {/* Workspace rows — colored avatar tile + name + role line
+          + ✓ if active. */}
+      <div style={{ padding: "6px 0" }}>
+        {ws.map((w) => (
+          <div
+            key={w.name}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "8px 12px",
+              background: w.active ? "rgba(0,0,0,0.03)" : "transparent",
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                background: w.color,
+                color: "#ffffff",
+                fontSize: 11,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              {w.initial}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: TEXT,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  lineHeight: 1.2,
+                }}
+              >
+                {w.name}
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: TEXT_MUTED,
+                  opacity: 0.8,
+                  marginTop: 2,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  lineHeight: 1,
+                }}
+              >
+                {w.description}
+              </div>
+            </div>
+            {w.active && (
+              <HugeiconsIcon icon={Tick01Icon} size={13} color={GREEN} strokeWidth={2.2} />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Action footer — matches the bordered bottom section of the
+          real dropdown with Workspace settings + Create workspace. */}
+      <div style={{ borderTop: `1px solid ${BORDER}`, padding: "6px 0" }}>
+        {[
+          { label: "Workspace settings", icon: Setting07Icon },
+          { label: "Create workspace", icon: Add01Icon },
+        ].map((a) => (
+          <div
+            key={a.label}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "8px 14px",
+              fontSize: 11.5,
+              color: TEXT_MUTED,
+            }}
+          >
+            <HugeiconsIcon icon={a.icon} size={13} color={TEXT_MUTED} strokeWidth={1.8} />
+            {a.label}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Mini plan-billing mockup. Mirrors src/components/plan-billing-panel.tsx:
+ * a soft-tinted "current plan" card with a title + subtitle + Upgrade
+ * CTA, three stat tiles for Storage / Team seats / Workspaces with
+ * progress bars, then a compact 3-up tier-picker strip showing Free /
+ * Plus / Pro side-by-side with the current tier highlighted.
+ */
 function BillingPanel() {
+  const metrics = [
+    { label: "Storage", value: "48.2 GB", cap: "200 GB", pct: 24 },
+    { label: "Team seats", value: "3", cap: "5", pct: 60 },
+    { label: "Workspaces", value: "2", cap: "3", pct: 66 },
+  ];
+
   const tiers = [
     { name: "Free", price: "$0", storage: "20 GB", active: false },
     { name: "Plus", price: "$4.99", storage: "200 GB", active: true },
     { name: "Pro", price: "$9.99", storage: "2 TB", active: false },
   ];
+
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: TEXT, fontFamily: BRAND_SANS }}>Plan and billing</span>
-        <Pill>STRIPE</Pill>
+      {/* Current plan card — matches plan-billing-panel.tsx:298. */}
+      <div
+        style={{
+          padding: 14,
+          borderRadius: 10,
+          background: "rgba(0,0,0,0.035)",
+          marginBottom: 12,
+          fontFamily: BRAND_SANS,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: TEXT, lineHeight: 1.2 }}>
+              SecureWarp Plus
+            </p>
+            <p style={{ margin: "3px 0 0", fontSize: 11, color: TEXT_MUTED, opacity: 0.9, lineHeight: 1.3 }}>
+              $4.99/mo. 200 GB storage, 5 seats, 3 workspaces.
+            </p>
+          </div>
+          <button
+            type="button"
+            style={{
+              height: 28,
+              padding: "0 12px",
+              borderRadius: 6,
+              background: "#ffffff",
+              border: `1px solid ${BORDER}`,
+              fontSize: 11,
+              fontWeight: 500,
+              color: TEXT,
+              cursor: "pointer",
+              fontFamily: BRAND_SANS,
+            }}
+          >
+            Change plan
+          </button>
+        </div>
+
+        {/* 3-up metric tiles with progress bars. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          {metrics.map((m) => (
+            <div
+              key={m.label}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 8,
+                background: "#ffffff",
+                border: `1px solid ${BORDER}`,
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 9,
+                  fontFamily: BRAND_MONO,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: TEXT_MUTED,
+                  opacity: 0.7,
+                  lineHeight: 1,
+                }}
+              >
+                {m.label}
+              </p>
+              <p style={{ margin: "4px 0 1px", fontSize: 12.5, fontWeight: 500, color: TEXT, lineHeight: 1.1 }}>
+                {m.value}
+              </p>
+              <p style={{ margin: 0, fontSize: 10, color: TEXT_MUTED, opacity: 0.75, lineHeight: 1 }}>
+                of {m.cap}
+              </p>
+              <div
+                style={{
+                  marginTop: 6,
+                  height: 3,
+                  borderRadius: 2,
+                  background: "rgba(0,0,0,0.06)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${m.pct}%`,
+                    background: m.pct > 90 ? "rgb(220,120,120)" : GREEN,
+                    borderRadius: 2,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+      {/* Tier picker strip — mirrors the "Change plan" expanded row
+          layout from plan-billing-panel.tsx. Three equal cards,
+          current tier outlined in orange. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         {tiers.map((t) => (
           <div
             key={t.name}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "12px 14px",
+              padding: "10px 12px",
               borderRadius: 8,
-              border: t.active ? `1px solid ${GREEN}` : `1px solid ${BORDER}`,
-              background: "#fff",
+              border: t.active
+                ? `1px solid rgba(239,90,60,0.5)`
+                : `1px solid ${BORDER}`,
+              background: t.active ? "rgba(239,90,60,0.04)" : "#ffffff",
               fontFamily: BRAND_SANS,
+              position: "relative",
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 600, flex: 1, color: TEXT }}>{t.name}</span>
-            <span style={{ fontSize: 11, color: TEXT_MUTED, fontFamily: BRAND_MONO, letterSpacing: "0.08em" }}>
-              {t.storage}
-            </span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: t.active ? GREEN : TEXT }}>
+            {t.active && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: 8,
+                  right: 8,
+                  fontSize: 8.5,
+                  fontFamily: BRAND_MONO,
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  color: GREEN,
+                  lineHeight: 1,
+                }}
+              >
+                Current
+              </span>
+            )}
+            <p style={{ margin: 0, fontSize: 11, fontWeight: 600, color: TEXT, lineHeight: 1 }}>
+              {t.name}
+            </p>
+            <p
+              style={{
+                margin: "6px 0 2px",
+                fontSize: 15,
+                fontWeight: 600,
+                color: TEXT,
+                lineHeight: 1,
+                letterSpacing: -0.2,
+              }}
+            >
               {t.price}
-              <span style={{ fontSize: 10, color: TEXT_MUTED, marginLeft: 2 }}>/mo</span>
-            </span>
-            {t.active && <Pill>CURRENT</Pill>}
+              <span style={{ fontSize: 9, fontWeight: 400, color: TEXT_MUTED, marginLeft: 2 }}>/mo</span>
+            </p>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 10,
+                fontFamily: BRAND_MONO,
+                letterSpacing: "0.08em",
+                color: TEXT_MUTED,
+                opacity: 0.8,
+                lineHeight: 1,
+              }}
+            >
+              {t.storage}
+            </p>
           </div>
         ))}
       </div>
@@ -1814,37 +2515,151 @@ function BillingPanel() {
   );
 }
 
+/**
+ * Mini security-settings mockup. Mirrors the Security tab in
+ * src/components/settings-modal.tsx: a stack of SettingRows with
+ * label + description on the left and a control (button, toggle,
+ * status badge) on the right, separated by a 1 px border.
+ */
 function SecurityPanel() {
-  const rows = [
-    { label: "Two factor auth", meta: "TOTP via authenticator app", status: "enabled" },
-    { label: "Recovery phrase", meta: "Last revealed 2 months ago", status: "saved" },
-    { label: "Active sessions", meta: "macOS, iOS", status: "2 devices" },
-    { label: "Login alerts", meta: "Email on new device", status: "on" },
+  type Row = {
+    label: string;
+    description: string;
+    control: "badge" | "toggle-on" | "button-view" | "button-review";
+    badgeLabel?: string;
+    buttonLabel?: string;
+  };
+  const rows: Row[] = [
+    {
+      label: "Recovery phrase",
+      description: "24 words shown once at signup. We never see it.",
+      control: "badge",
+      badgeLabel: "Saved",
+    },
+    {
+      label: "Two factor authentication",
+      description: "TOTP is active. Required every unlock.",
+      control: "toggle-on",
+    },
+    {
+      label: "Encryption keys",
+      description: "Your public keys for collaborator verification.",
+      control: "button-view",
+      buttonLabel: "View keys",
+    },
+    {
+      label: "Active sessions",
+      description: "This Mac + iPhone 15. Sign-out on lost device.",
+      control: "button-review",
+      buttonLabel: "2 devices",
+    },
   ];
+
+  const label = {
+    fontSize: 12.5,
+    color: TEXT,
+    fontFamily: BRAND_SANS,
+    lineHeight: 1.2,
+  } as const;
+
+  const description = {
+    fontSize: 11,
+    color: TEXT_MUTED,
+    opacity: 0.85,
+    fontFamily: BRAND_SANS,
+    marginTop: 3,
+    lineHeight: 1.3,
+  } as const;
+
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: TEXT, fontFamily: BRAND_SANS }}>Security</span>
-        <Pill>SRP + TOTP</Pill>
-      </div>
-      {rows.map((r) => (
+      {rows.map((r, i) => (
         <div
           key={r.label}
           style={{
             display: "flex",
             alignItems: "center",
             gap: 12,
-            padding: "10px 0",
-            borderBottom: `1px solid ${BORDER}`,
-            fontFamily: BRAND_SANS,
+            padding: "12px 0",
+            borderBottom: i === rows.length - 1 ? "none" : `1px solid ${BORDER}`,
           }}
         >
-          <IconSquare icon={Shield01Icon} />
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-            <span style={{ fontSize: 12, color: TEXT }}>{r.label}</span>
-            <span style={{ fontSize: 11, color: TEXT_MUTED }}>{r.meta}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={label}>{r.label}</div>
+            <div style={description}>{r.description}</div>
           </div>
-          <Pill>{r.status.toUpperCase()}</Pill>
+
+          {r.control === "badge" && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                fontSize: 10.5,
+                padding: "3px 8px",
+                borderRadius: 999,
+                background: "rgba(239,90,60,0.1)",
+                border: "1px solid rgba(239,90,60,0.25)",
+                color: GREEN,
+                fontFamily: BRAND_MONO,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                lineHeight: 1,
+              }}
+            >
+              <HugeiconsIcon icon={Shield01Icon} size={10} color={GREEN} strokeWidth={2} />
+              {r.badgeLabel}
+            </span>
+          )}
+
+          {r.control === "toggle-on" && (
+            /* Settings-modal Toggle at "on" — same shape as the real
+               one: 36x20 pill with 16x16 knob shifted right 16. */
+            <span
+              aria-hidden
+              style={{
+                display: "inline-flex",
+                width: 34,
+                height: 20,
+                borderRadius: 999,
+                background: GREEN,
+                padding: 2,
+                alignItems: "center",
+                justifyContent: "flex-end",
+              }}
+            >
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 999,
+                  background: "#ffffff",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                }}
+              />
+            </span>
+          )}
+
+          {(r.control === "button-view" || r.control === "button-review") && (
+            <button
+              type="button"
+              style={{
+                height: 26,
+                padding: "0 10px",
+                borderRadius: 6,
+                background: "#ffffff",
+                border: `1px solid ${BORDER}`,
+                fontSize: 10.5,
+                fontWeight: 500,
+                color: TEXT,
+                cursor: "pointer",
+                fontFamily: BRAND_SANS,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {r.buttonLabel}
+            </button>
+          )}
         </div>
       ))}
     </>
