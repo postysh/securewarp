@@ -118,7 +118,7 @@ export async function POST(request: Request) {
     await deleteSrpSession(srpSessionId);
 
     // Create JWT session
-    await createSession({ userId: user.id, email: user.email });
+    await createSession({ userId: user.id, email: user.email }, request);
     auditEvent({ event: "auth.login.success", actorUserId: user.id });
 
     // Await instead of fire-and-forget — on Cloudflare Workers,

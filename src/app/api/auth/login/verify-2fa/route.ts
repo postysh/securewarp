@@ -127,7 +127,7 @@ export async function POST(request: Request) {
 
     // 2FA passed. Clean up, create session, the works.
     await deleteSrpSession(srpSessionId);
-    await createSession({ userId: user.id, email: user.email });
+    await createSession({ userId: user.id, email: user.email }, request);
     auditEvent({ event: "auth.login.success", actorUserId: user.id, detail: "2fa" });
 
     await sb.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", user.id);

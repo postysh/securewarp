@@ -8,7 +8,7 @@ import { logError } from "@/lib/log";
  * Issues a fresh session for the current device so the caller
  * stays logged in.
  */
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) {
@@ -16,7 +16,7 @@ export async function POST() {
     }
 
     await revokeAllSessions(session.userId);
-    await createSession({ userId: session.userId, email: session.email });
+    await createSession({ userId: session.userId, email: session.email }, request);
 
     auditEvent({ event: "auth.revoke_all", actorUserId: session.userId });
     return NextResponse.json({ success: true });

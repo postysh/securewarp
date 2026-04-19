@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     // Revoke all existing sessions (forces re-login on other devices)
     // then issue a fresh session for this device.
     await revokeAllSessions(session.userId);
-    await createSession({ userId: session.userId, email: session.email });
+    await createSession({ userId: session.userId, email: session.email }, request);
 
     auditEvent({ event: "auth.password_change", actorUserId: session.userId });
     return NextResponse.json({ success: true });

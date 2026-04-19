@@ -87,7 +87,7 @@ export async function POST(request: Request) {
     });
 
     // Create session
-    await createSession({ userId: user.id, email: user.email });
+    await createSession({ userId: user.id, email: user.email }, request);
     auditEvent({ event: "auth.register", actorUserId: user.id });
 
     // Welcome email. We await it (rather than fire-and-forget) because

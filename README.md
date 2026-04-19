@@ -578,6 +578,33 @@ ALTER TABLE billing_subscriptions  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE billing_usage_events   ENABLE ROW LEVEL SECURITY;
 ```
 
+#### Active sessions UI metadata
+
+```sql
+-- Metadata columns on the JWT sessions table so the Settings →
+-- Security → Active sessions UI can distinguish one device from
+-- another without re-querying the identity on every request.
+--   * last_seen_at — bumped at most once per minute from getSession;
+--                    "Last active N ago" in the UI
+--   * user_agent   — raw UA string from the login request. Parsed
+--                    client-side into "Chrome on macOS"-style labels.
+--                    Already visible to Cloudflare + Supabase logs;
+--                    storing it here is net-zero new PII exposure.
+--   * country      — ISO-3166-1 alpha-2 from the Cloudflare
+--                    CF-IPCountry header at mint time. NOT updated on
+--                    subsequent requests so we capture "where signed
+--                    in from", not "where they are now".
+-- created_at already existed on the table from the initial session
+-- schema, so it's not re-added here.
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS last_seen_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS user_agent text,
+  ADD COLUMN IF NOT EXISTS country text;
+
+CREATE INDEX IF NOT EXISTS sessions_user_id_last_seen_idx
+  ON sessions (user_id, last_seen_at DESC);
+```
+
 You should run a periodic job (e.g. `pg_cron`) to prune expired rows from
 `rate_limits` and `used_recovery_tokens`:
 

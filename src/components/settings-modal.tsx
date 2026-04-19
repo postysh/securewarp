@@ -24,6 +24,7 @@ import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { RecoveryKeyModal } from "./recovery-key-modal";
 import { ConfirmDialog } from "./confirm-dialog";
 import { PlanBillingPanel } from "./plan-billing-panel";
+import { ActiveSessions } from "./active-sessions";
 import { clearLockCache } from "@/lib/auth/lock-cache";
 
 interface SettingsModalProps {
@@ -554,6 +555,11 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                 <span className="flex items-center gap-1 text-[11px] text-accent-green"><HugeiconsIcon icon={Shield01Icon} size={12} /> Active</span>
               </div>
             </SettingRow>
+
+            {/* Active sessions — lists signed-in devices with UA +
+                country + timestamps; per-row Revoke + "Sign out
+                others" shortcut. Data from /api/auth/sessions. */}
+            <ActiveSessions />
           </div>
         );
       case "appearance":

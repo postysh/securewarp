@@ -168,7 +168,7 @@ export async function POST(request: Request) {
       });
 
       // Create session
-      await createSession({ userId, email });
+      await createSession({ userId, email }, request);
       auditEvent({ event: "auth.recovery.update", actorUserId: userId });
 
       // Successful recovery — clear the bucket so the user can

@@ -19,6 +19,8 @@ export type AuditEventType =
   | "auth.recovery.update"
   | "auth.delete_account"
   | "auth.revoke_all"
+  | "auth.sessions.revoke"
+  | "auth.sessions.revoke_others"
   | "files.share"
   | "files.unshare"
   | "files.leave"
