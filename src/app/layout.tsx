@@ -28,7 +28,7 @@ const chillax = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "SecureWarp - E2E Encrypted Drive",
+  title: "Securewarp | Cloud storage, not cloud surveillance",
   description: "Zero-knowledge encrypted cloud storage",
 };
 
