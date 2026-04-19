@@ -74,6 +74,57 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+/**
+ * Build version + connectivity indicator pinned to the bottom of the
+ * settings sidebar. Version is baked at build time via next.config.ts
+ * (see getBuildVersion → NEXT_PUBLIC_BUILD_VERSION). Status follows
+ * navigator.onLine — a cheap browser-side signal; we don't ping the
+ * backend because the modal shouldn't hold open a health-check loop.
+ *
+ * Hidden on mobile where the sidebar is a horizontal strip at the top.
+ */
+function SidebarFooter() {
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    const update = () => setOnline(typeof navigator !== "undefined" ? navigator.onLine : true);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+  const version = process.env.NEXT_PUBLIC_BUILD_VERSION || "dev";
+  return (
+    <div className="hidden md:block px-3 py-3 border-t border-border-tertiary">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span
+          className="relative flex h-[6px] w-[6px]"
+          aria-hidden="true"
+        >
+          {online && (
+            <span
+              className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
+              style={{ background: "var(--accent-green-primary)" }}
+            />
+          )}
+          <span
+            className="relative inline-flex h-[6px] w-[6px] rounded-full"
+            style={{ background: online ? "var(--accent-green-primary)" : "var(--accent-red-primary)" }}
+          />
+        </span>
+        <span className="text-[10px] font-mono uppercase tracking-wider text-text-tertiary">
+          {online ? "Online" : "Offline"}
+        </span>
+      </div>
+      <div className="text-[10px] font-mono text-text-disabled truncate" title={version}>
+        {version}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>("account");
   const { theme, toggle: toggleTheme } = useTheme();
@@ -796,6 +847,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
               </div>
             ))}
           </div>
+          <SidebarFooter />
         </div>
 
         {/* Content */}
