@@ -1,5 +1,35 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { execSync } from "node:child_process";
+
+// ──────────────────────────────────────────────────────────────────────
+// Build version string — exposed to the client as
+// `process.env.NEXT_PUBLIC_BUILD_VERSION`. Rendered in the footer as
+// `YYYY.MM.DD · <short-sha>` so every deploy is visually traceable.
+// Git is resolved at build time (this file runs in Node); if the git
+// command fails (shallow clone, git missing, CI image without .git)
+// we fall back to a dev / unknown marker instead of breaking the
+// build.
+// ──────────────────────────────────────────────────────────────────────
+function getBuildVersion(): string {
+  const dateLabel = new Date()
+    .toISOString()
+    .slice(0, 10)
+    .replace(/-/g, ".");
+  try {
+    const sha = execSync("git rev-parse --short HEAD", {
+      stdio: ["pipe", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    if (!sha) throw new Error("empty sha");
+    return `${dateLabel} · ${sha}`;
+  } catch {
+    return process.env.NODE_ENV === "production"
+      ? `${dateLabel} · unknown`
+      : `${dateLabel} · dev`;
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // HTTP security headers
@@ -233,6 +263,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Inlined into the client bundle so the footer build tag updates
+  // automatically per deploy (see getBuildVersion above).
+  env: {
+    NEXT_PUBLIC_BUILD_VERSION: getBuildVersion(),
+  },
   async headers() {
     // Local dev runs over http://localhost:3000 and the security
     // headers above would break it:

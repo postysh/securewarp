@@ -540,17 +540,41 @@ export function MockupFooter() {
         >
           © {new Date().getFullYear()} SecureWarp. All rights reserved.
         </p>
+        {/* Build / status tag. `NEXT_PUBLIC_BUILD_VERSION` is
+            injected by next.config.ts at build time (date · short
+            git sha), so every deploy automatically shows a unique
+            version. Status pill stays "Beta" until the product
+            leaves beta. */}
         <p
           style={{
             fontSize: 12,
-            color: TEXT,
-            opacity: 0.5,
             margin: 0,
             fontFamily: BRAND_MONO,
             letterSpacing: "0.08em",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
           }}
         >
-          XSalsa20-Poly1305 · Argon2id · SRP-6a · BIP39
+          <span style={{ color: TEXT, opacity: 0.5 }}>
+            {process.env.NEXT_PUBLIC_BUILD_VERSION ?? "dev"}
+          </span>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: GREEN,
+              background: "rgba(239,90,60,0.1)",
+              border: "1px solid rgba(239,90,60,0.25)",
+              padding: "2px 7px",
+              borderRadius: 4,
+              lineHeight: 1,
+            }}
+          >
+            Beta
+          </span>
         </p>
       </div>
       <style jsx>{`
