@@ -17,8 +17,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
  * until the 24h window closes — acceptable for an MVP; promote to
  * a server per-user seen_at column later if users complain.
  *
- * Garbage collection: on hook init we drop any tracked IDs older
- * than NEW_WINDOW_MS so localStorage doesn't grow unboundedly.
+ * Concurrency model: every write reads the current localStorage
+ * before saving and keeps the EARLIER of the two timestamps per id.
+ * This means a second tab, a remounted hook (post-deploy HMR, React
+ * StrictMode), or any other concurrent writer cannot clobber
+ * dismiss-marks written elsewhere. We also subscribe to the browser
+ * `storage` event so cross-tab markSeen calls sync into React state
+ * without requiring a refresh — the previous behaviour silently
+ * dropped writes when two tabs raced.
+ *
+ * Garbage collection: on hook init (and on storage events) we drop
+ * any tracked IDs older than NEW_WINDOW_MS * 2 so localStorage
+ * doesn't grow unboundedly.
  */
 
 const STORAGE_KEY = "securewarp_seen_files_v1";
@@ -26,33 +36,58 @@ const NEW_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h
 
 type SeenMap = Record<string, number>; // fileId -> epoch ms when marked seen
 
-function loadSeen(): SeenMap {
+function readRaw(): SeenMap {
   if (typeof window === "undefined") return {};
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as SeenMap;
-    // Garbage collect entries older than the window — they don't
-    // need to be tracked anymore because the file wouldn't be new
-    // anyway.
-    const now = Date.now();
-    const cleaned: SeenMap = {};
-    for (const [id, ts] of Object.entries(parsed)) {
-      if (typeof ts === "number" && now - ts < NEW_WINDOW_MS * 2) {
-        cleaned[id] = ts;
-      }
-    }
-    return cleaned;
-  } catch {
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    // Parse errors = corrupted blob. Log once so we notice if it
+    // happens in the wild; return empty so the badge UI still
+    // functions (just shows NEW on files that should already be
+    // dismissed, which is cosmetic).
+    if (typeof console !== "undefined") console.warn("useNewFiles: loadSeen failed", err);
     return {};
   }
 }
 
-function saveSeen(seen: SeenMap) {
-  if (typeof window === "undefined") return;
+function loadSeen(): SeenMap {
+  const raw = readRaw();
+  // Garbage collect entries older than 2× the NEW window — anything
+  // older can't affect isNew() and just eats storage.
+  const now = Date.now();
+  const cleaned: SeenMap = {};
+  for (const [id, ts] of Object.entries(raw)) {
+    if (typeof ts === "number" && now - ts < NEW_WINDOW_MS * 2) {
+      cleaned[id] = ts;
+    }
+  }
+  return cleaned;
+}
+
+function persistMerge(updates: SeenMap): SeenMap {
+  // Read the current disk state BEFORE writing and merge. Keeps the
+  // EARLIER timestamp per id so later writers never rewind a dismiss.
+  // This is the critical fix for the post-deploy / multi-tab bug:
+  // without the re-read, a remounted hook with fresh `{}` state
+  // would stomp entries that were written before the remount.
+  if (typeof window === "undefined") return updates;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(seen));
-  } catch { /* quota; silently drop */ }
+    const current = readRaw();
+    const merged: SeenMap = { ...current };
+    for (const [id, ts] of Object.entries(updates)) {
+      const existing = merged[id];
+      merged[id] = existing ? Math.min(existing, ts) : ts;
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    return merged;
+  } catch (err) {
+    // Quota exceeded or storage disabled. Log once so we notice.
+    if (typeof console !== "undefined") console.warn("useNewFiles: saveSeen failed", err);
+    return updates;
+  }
 }
 
 export function useNewFiles() {
@@ -68,9 +103,8 @@ export function useNewFiles() {
   const markSeen = useCallback((fileId: string) => {
     setSeen((prev) => {
       if (prev[fileId]) return prev;
-      const next = { ...prev, [fileId]: Date.now() };
-      saveSeen(next);
-      return next;
+      const persisted = persistMerge({ ...prev, [fileId]: Date.now() });
+      return persisted;
     });
   }, []);
 
@@ -86,8 +120,7 @@ export function useNewFiles() {
         }
       }
       if (!changed) return prev;
-      saveSeen(next);
-      return next;
+      return persistMerge(next);
     });
   }, []);
 
@@ -105,6 +138,20 @@ export function useNewFiles() {
     window.addEventListener("securewarp-file-opened", onOpened);
     return () => window.removeEventListener("securewarp-file-opened", onOpened);
   }, [markSeen]);
+
+  // Cross-tab sync. If another tab marked a file seen, pull its
+  // write into our state so the badge disappears here too. Without
+  // this, two tabs each hold stale React state and writes clobber
+  // each other on disk (the merge on save prevents the clobber;
+  // this listener is what makes the UI reflect the merged truth).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY) return;
+      setSeen(loadSeen());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   const isNew = useCallback(
     (fileId: string, createdAtIso: string | null | undefined): boolean => {
