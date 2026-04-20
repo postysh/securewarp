@@ -3797,7 +3797,7 @@ function HeroDashboardFrame() {
         }}
       >
         <img
-          src="/screens/securewarpdarkdash.png?v=4"
+          src="/screens/securewarpdarkdash.png?v=5"
           alt="SecureWarp dashboard showing an encrypted file list"
           style={{
             display: "block",
@@ -3805,7 +3805,7 @@ function HeroDashboardFrame() {
             height: "100%",
             objectFit: "cover",
             objectPosition: "center",
-            transform: "scale(1.3)",
+            transform: "scale(1.02)",
           }}
         />
       </div>
