@@ -366,6 +366,7 @@ export function MockupFooter() {
       links: [
         { label: "About", href: "/about" },
         { label: "Support", href: "/support" },
+        { label: "X", href: "https://x.com/Securewarp" },
       ],
     },
     {
@@ -494,28 +495,33 @@ export function MockupFooter() {
                 gap: 10,
               }}
             >
-              {col.links.map((l) => (
-                <li
-                  key={l.label}
-                  style={{ display: "flex", alignItems: "center", gap: 8 }}
-                >
-                  <Link
-                    href={l.href}
-                    style={{
-                      fontSize: 13,
-                      color: TEXT,
-                      opacity: l.soon ? 0.4 : 0.6,
-                      textDecoration: "none",
-                      fontFamily: BRAND_SANS,
-                      cursor: l.soon ? "default" : "pointer",
-                    }}
-                    onClick={l.soon ? (e) => e.preventDefault() : undefined}
+              {col.links.map((l) => {
+                const external = /^https?:\/\//.test(l.href);
+                return (
+                  <li
+                    key={l.label}
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
                   >
-                    {l.label}
-                  </Link>
-                  {l.soon && <SoonPill />}
-                </li>
-              ))}
+                    <Link
+                      href={l.href}
+                      target={external ? "_blank" : undefined}
+                      rel={external ? "noopener noreferrer" : undefined}
+                      style={{
+                        fontSize: 13,
+                        color: TEXT,
+                        opacity: l.soon ? 0.4 : 0.6,
+                        textDecoration: "none",
+                        fontFamily: BRAND_SANS,
+                        cursor: l.soon ? "default" : "pointer",
+                      }}
+                      onClick={l.soon ? (e) => e.preventDefault() : undefined}
+                    >
+                      {l.label}
+                    </Link>
+                    {l.soon && <SoonPill />}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}

@@ -581,6 +581,7 @@ function MockupFooter() {
       links: [
         { label: "About", href: "/about" },
         { label: "Support", href: "/support" },
+        { label: "X", href: "https://x.com/Securewarp" },
       ],
     },
     {
@@ -698,13 +699,17 @@ function MockupFooter() {
                 gap: 10,
               }}
             >
-              {col.links.map((l) => (
+              {col.links.map((l) => {
+                const external = /^https?:\/\//.test(l.href);
+                return (
                 <li
                   key={l.label}
                   style={{ display: "flex", alignItems: "center", gap: 8 }}
                 >
                   <Link
                     href={l.href}
+                    target={external ? "_blank" : undefined}
+                    rel={external ? "noopener noreferrer" : undefined}
                     style={{
                       fontSize: 13,
                       color: TEXT,
@@ -737,7 +742,8 @@ function MockupFooter() {
                     </span>
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         ))}
