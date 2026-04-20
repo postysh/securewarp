@@ -201,7 +201,7 @@ const csp = [
   `default-src 'self'`,
   `script-src ${scriptSources.join(" ")}`,
   `style-src 'self' 'unsafe-inline'`,
-  `img-src 'self' data: blob:`,
+  `img-src 'self' data: blob: https://cdn.securewarp.com`,
   `media-src 'self' blob:`,
   `font-src 'self' data:`,
   `connect-src ${connectSources.join(" ")}`,

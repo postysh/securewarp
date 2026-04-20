@@ -3734,9 +3734,10 @@ function HeroDashboardFrame() {
           paint before the JPG decodes. */}
       <link
         rel="preload"
-        href="/screens/darkmountain.jpg"
+        href="https://cdn.securewarp.com/darkmountain.jpg"
         as="image"
         fetchPriority="high"
+        referrerPolicy="no-referrer"
       />
       <div
         className="mockup-hero-dashframe"
@@ -3773,14 +3774,32 @@ function HeroDashboardFrame() {
           position: "absolute",
           inset: 0,
           backgroundColor: "#444d52",
-          backgroundImage: "url('/screens/darkmountain.jpg')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          filter: "blur(7px)",
-          transform: "scale(1.1)",
+          overflow: "hidden",
           pointerEvents: "none",
         }}
-      />
+      >
+        {/* Switched from CSS background-image to <img> so we can set
+            referrerPolicy="no-referrer". Cloudflare Hotlink Protection
+            on the zone otherwise 403s CDN fetches that carry a
+            localhost Referer. Inline styles replicate what cover/
+            center + blur + scale(1.1) did on the old div. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="https://cdn.securewarp.com/darkmountain.jpg"
+          alt=""
+          referrerPolicy="no-referrer"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center",
+            filter: "blur(7px)",
+            transform: "scale(1.1)",
+          }}
+        />
+      </div>
       {/* securewarpdarkdash.png: 1920×1440 — raw export with
           baked-in glass rim + padding. Wrapper aspect matches the
           file 1:1 so nothing crops; the dashboard renders at its
@@ -3797,8 +3816,9 @@ function HeroDashboardFrame() {
         }}
       >
         <img
-          src="/screens/securewarpdarkdash.png?v=5"
+          src="https://cdn.securewarp.com/securewarpdarkdash.png"
           alt="SecureWarp dashboard showing an encrypted file list"
+          referrerPolicy="no-referrer"
           style={{
             display: "block",
             width: "100%",
