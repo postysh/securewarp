@@ -1,7 +1,7 @@
 import "server-only";
 import { supabase } from "@/lib/db/supabase";
 import { stripe } from "./stripe";
-import { tierFromPriceId, type Tier } from "./config";
+import { tierFromPriceId, TIER_LIMITS, type Tier } from "./config";
 
 /**
  * Stripe customer + subscription lookups against our local DB mirror.
@@ -111,6 +111,88 @@ export async function hasActiveSubscription(userId: string): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+/**
+ * Effective limits + labels for a user, after layering per-user
+ * overrides on top of their Stripe-assigned tier. Overrides live in
+ * `user_entitlement_overrides` and are set by admins for custom deals
+ * (enterprise quotes, goodwill storage bumps, bespoke seat counts,
+ * etc.) — see README "Entitlement overrides" for the workflow.
+ *
+ * Precedence: override value → tier default. Only non-null override
+ * columns win; everything else inherits the tier. That means you can
+ * bump storage to 5 TB while seats/workspaces keep the Pro defaults.
+ *
+ * `isCustom` is true when ANY override column is non-null, so UI can
+ * show a "Custom plan" chip or the override's label instead of the
+ * stock tier name.
+ *
+ * Every entitlement check in the app (quota, seats, workspaces, the
+ * status endpoint) must go through this function rather than reading
+ * `TIER_LIMITS[tier]` directly, or overrides won't be enforced.
+ */
+export interface Entitlements {
+  tier: Tier;
+  tierLabel: string;
+  priceCents: number;
+  storageGB: number;
+  seats: number;
+  workspaces: number;
+  isCustom: boolean;
+}
+
+export async function getEntitlements(userId: string): Promise<Entitlements> {
+  const tier = await getTier(userId);
+  const base = TIER_LIMITS[tier];
+  const { data: ov } = await supabase
+    .from("user_entitlement_overrides")
+    .select("tier_label_override, storage_gb_override, seats_override, workspaces_override, price_cents_override")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!ov) {
+    return {
+      tier,
+      tierLabel: base.label,
+      priceCents: base.priceCents,
+      storageGB: base.storageGB,
+      seats: base.seats,
+      workspaces: base.workspaces,
+      isCustom: false,
+    };
+  }
+  // Tier-gated: the override only applies while the user is on a
+  // paid Stripe tier. If they cancel down to Free, overrides go
+  // dormant — Free defaults apply. The row stays in place so a
+  // resubscribe auto-reactivates the override without admin
+  // re-configuring it. Prevents the "canceled enterprise user keeps
+  // 5 TB for free" drift scenario.
+  if (tier === "free") {
+    return {
+      tier,
+      tierLabel: base.label,
+      priceCents: base.priceCents,
+      storageGB: base.storageGB,
+      seats: base.seats,
+      workspaces: base.workspaces,
+      isCustom: false,
+    };
+  }
+  const hasAnyOverride =
+    ov.tier_label_override !== null ||
+    ov.storage_gb_override !== null ||
+    ov.seats_override !== null ||
+    ov.workspaces_override !== null ||
+    ov.price_cents_override !== null;
+  return {
+    tier,
+    tierLabel: (ov.tier_label_override as string | null) ?? base.label,
+    priceCents: (ov.price_cents_override as number | null) ?? base.priceCents,
+    storageGB: (ov.storage_gb_override as number | null) ?? base.storageGB,
+    seats: (ov.seats_override as number | null) ?? base.seats,
+    workspaces: (ov.workspaces_override as number | null) ?? base.workspaces,
+    isCustom: hasAnyOverride,
+  };
 }
 
 export async function getTier(userId: string): Promise<Tier> {

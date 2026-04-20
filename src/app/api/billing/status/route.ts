@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { getLatestSubscription, getTier } from "@/lib/billing/customers";
+import { getEntitlements, getLatestSubscription } from "@/lib/billing/customers";
 import { syncLatestSubscriptionFor } from "@/lib/billing/sync";
 import { supabase } from "@/lib/db/supabase";
-import { TIER_LIMITS, limitsForTier, type Tier } from "@/lib/billing/config";
+import { TIER_LIMITS, type Tier } from "@/lib/billing/config";
 import { logError } from "@/lib/log";
 
 const BYTES_PER_GB = 1024 * 1024 * 1024;
@@ -25,17 +25,22 @@ export async function GET() {
     try { await syncLatestSubscriptionFor(session.userId); }
     catch (e) { logError("billing.status.sync", e); }
 
-    const [tier, subscription, storageBytes, seats, workspaces] = await Promise.all([
-      getTier(session.userId),
+    const [ent, subscription, storageBytes, seats, workspaces] = await Promise.all([
+      getEntitlements(session.userId),
       getLatestSubscription(session.userId),
       getStorageBytes(session.userId),
       getSeatCount(session.userId),
       getWorkspaceCount(session.userId),
     ]);
-    const limits = limitsForTier(tier);
 
     return NextResponse.json({
-      tier,
+      tier: ent.tier,
+      // True when an admin has stamped a per-user override onto this
+      // account — the UI uses it to surface a "Custom plan" chip
+      // instead of the stock tier label + to block the normal
+      // upgrade/downgrade buttons (custom deals go through support,
+      // not self-serve).
+      isCustom: ent.isCustom,
       subscription: subscription
         ? { status: subscription.status, currentPeriodEnd: subscription.currentPeriodEnd }
         : null,
@@ -46,11 +51,11 @@ export async function GET() {
         workspaces,
       },
       limits: {
-        storageGB: limits.storageGB,
-        seats: limits.seats === Infinity ? null : limits.seats,
-        workspaces: limits.workspaces === Infinity ? null : limits.workspaces,
-        priceCents: limits.priceCents,
-        label: limits.label,
+        storageGB: ent.storageGB,
+        seats: ent.seats === Infinity ? null : ent.seats,
+        workspaces: ent.workspaces === Infinity ? null : ent.workspaces,
+        priceCents: ent.priceCents,
+        label: ent.tierLabel,
       },
       tiers: Object.entries(TIER_LIMITS).map(([id, l]) => ({
         id: id as Tier,

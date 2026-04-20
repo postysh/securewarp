@@ -6,8 +6,7 @@ import { getUserByEmail } from "@/lib/db/users";
 import { grantFileAccess } from "@/lib/db/files";
 import { normalizeEmail } from "@/lib/auth/email";
 import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
-import { getTier } from "@/lib/billing/customers";
-import { limitsForTier } from "@/lib/billing/config";
+import { getEntitlements } from "@/lib/billing/customers";
 import { auditEvent } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
@@ -66,12 +65,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "You are already a member" }, { status: 400 });
     }
 
-    // Seat cap is enforced against the workspace OWNER's tier, since
-    // the owner bears the cost of every member across their
-    // workspaces. Free=1, Plus=3, Pro=10. Owner counts as 1.
+    // Seat cap is enforced against the workspace OWNER's effective
+    // entitlements, since the owner bears the cost of every member
+    // across their workspaces. Free=1, Plus=3, Pro=10, with per-user
+    // overrides layered on top (getEntitlements).
     const ownerId = ws.owner_id as string;
-    const ownerTier = await getTier(ownerId);
-    const cap = limitsForTier(ownerTier).seats;
+    const ownerEnt = await getEntitlements(ownerId);
+    const cap = ownerEnt.seats;
     const { data: ownerWs } = await supabase
       .from("workspaces")
       .select("id")
@@ -92,9 +92,9 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            ownerTier === "free"
+            ownerEnt.tier === "free"
               ? "Free tier is one user. The workspace owner must upgrade to invite members."
-              : `Seat limit reached for the ${ownerTier} plan. Upgrade for more.`,
+              : `Seat limit reached for the ${ownerEnt.tier} plan. Upgrade for more.`,
           code: "seat_limit",
         },
         { status: 402 },

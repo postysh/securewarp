@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
-import { getTier } from "@/lib/billing/customers";
-import { limitsForTier } from "@/lib/billing/config";
+import { getEntitlements } from "@/lib/billing/customers";
 import { logError } from "@/lib/log";
 
 const CreateSchema = z.object({
@@ -89,16 +88,19 @@ export async function POST(request: Request) {
     const parsed = CreateSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: "Invalid data" }, { status: 400 });
 
-    // Enforce the caller's tier cap on workspace count. Free allows
-    // 1, Plus/Pro are unlimited (TIER_LIMITS uses Infinity).
-    const [{ count: existingCount }, tier] = await Promise.all([
+    // Enforce the caller's effective cap on workspace count. Free
+    // allows 1, Plus/Pro are unlimited (TIER_LIMITS uses Infinity),
+    // and admin-set per-user overrides layer on top via
+    // getEntitlements.
+    const [{ count: existingCount }, ent] = await Promise.all([
       supabase
         .from("workspaces")
         .select("id", { count: "exact", head: true })
         .eq("owner_id", session.userId),
-      getTier(session.userId),
+      getEntitlements(session.userId),
     ]);
-    const cap = limitsForTier(tier).workspaces;
+    const tier = ent.tier;
+    const cap = ent.workspaces;
     if ((existingCount ?? 0) >= cap) {
       return NextResponse.json(
         {

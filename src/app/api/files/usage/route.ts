@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
-import { getTier } from "@/lib/billing/customers";
-import { limitsForTier } from "@/lib/billing/config";
+import { getEntitlements } from "@/lib/billing/customers";
 import { syncLatestSubscriptionFor } from "@/lib/billing/sync";
 import { logError } from "@/lib/log";
 
@@ -62,8 +61,8 @@ export async function GET() {
     // /api/billing/status.
     try { await syncLatestSubscriptionFor(session.userId); }
     catch (e) { logError("files.usage.sync", e); }
-    const tier = await getTier(session.userId);
-    const maxBytes = limitsForTier(tier).storageGB * 1024 * 1024 * 1024;
+    const ent = await getEntitlements(session.userId);
+    const maxBytes = ent.storageGB * 1024 * 1024 * 1024;
 
     return NextResponse.json({
       usedBytes,

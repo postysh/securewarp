@@ -42,7 +42,8 @@ export type AuditEventType =
   | "workspace.remove"
   | "workspace.role_change"
   | "workspace.leave"
-  | "feedback.submitted";
+  | "feedback.submitted"
+  | "billing.override.dormant";
 
 export interface AuditInput {
   event: AuditEventType;

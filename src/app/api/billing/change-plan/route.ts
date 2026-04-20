@@ -56,9 +56,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Subscription missing an item" }, { status: 500 });
     }
 
+    // Clear cancel_at_period_end along with the tier swap. Without
+    // this, a user who switched to "cancelling" and then clicked
+    // Upgrade would be prorated + charged for the new tier and STILL
+    // lose access at period end. "I paid for the upgrade" implies
+    // resuming the sub, and Stripe's own behavior for this combo
+    // requires the explicit flag. Regression caught on prod when a
+    // cancelling Plus user upgraded to Pro and the cancellation
+    // stayed scheduled.
     const updated = await stripe().subscriptions.update(current.stripeSubscriptionId, {
       items: [{ id: itemId, price: newPriceId }],
       proration_behavior: "always_invoice",
+      cancel_at_period_end: false,
       metadata: { userId: session.userId, tier: parsed.data.tier },
     });
 

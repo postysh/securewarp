@@ -1,7 +1,6 @@
 import "server-only";
 import { supabase } from "./supabase";
-import { getTier } from "@/lib/billing/customers";
-import { limitsForTier } from "@/lib/billing/config";
+import { getEntitlements } from "@/lib/billing/customers";
 
 export const MAX_FILE_COUNT = 10_000; // per user — abuse guard, not a billing knob
 /** Exported for UI helpers that need the free-tier default. */
@@ -31,14 +30,15 @@ export async function getFileCount(userId: string): Promise<number> {
 
 export async function assertWithinQuota(userId: string, incomingBytes: number): Promise<void> {
   // Each tier has a hard storage cap (see TIER_LIMITS). Free = 20 GB,
-  // Plus = 500 GB, Pro = 2 TB. The 10k-file abuse guard applies
-  // across every tier regardless of plan.
-  const [used, count, tier] = await Promise.all([
+  // Plus = 500 GB, Pro = 2 TB. Admins can override the cap per-user
+  // for custom deals — see `getEntitlements`. The 10k-file abuse guard
+  // applies across every tier regardless of plan.
+  const [used, count, ent] = await Promise.all([
     getUsedBytes(userId),
     getFileCount(userId),
-    getTier(userId),
+    getEntitlements(userId),
   ]);
-  const capBytes = limitsForTier(tier).storageGB * 1024 * 1024 * 1024;
+  const capBytes = ent.storageGB * 1024 * 1024 * 1024;
   if (used + incomingBytes > capBytes) {
     const err = new Error("Storage quota exceeded") as Error & { status?: number };
     err.status = 413;

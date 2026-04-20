@@ -73,7 +73,6 @@ export function PlanBillingPanel() {
   const [status, setStatus] = useState<Status | null>(null);
   const [detail, setDetail] = useState<SubscriptionDetail | null>(null);
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [pendingTier, setPendingTier] = useState<"plus" | "pro" | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   // When a paid subscriber picks a different tier we need to show
@@ -220,7 +219,6 @@ export function PlanBillingPanel() {
 
   const startCheckout = async (tier: "plus" | "pro") => {
     setError(null);
-    setPickerOpen(false);
 
     // Already on a paid plan? Ask the user to confirm before
     // touching their payment method. /change-plan would otherwise
@@ -289,6 +287,14 @@ export function PlanBillingPanel() {
   const limits = status.limits;
   const tiersList = status.tiers;
   const fmtLimit = (n: number | null) => (n === null ? "unlimited" : `${n}`);
+  // Storage cap crosses the TB threshold at 1024 GB — shown as
+  // "2.0 TB" instead of "2048 GB" / "2048.00 GB". TB tier keeps one
+  // decimal consistently (2.0, 1.5); GB tier keeps two for fractional
+  // usage values (0.47 GB) and drops decimals on whole-number caps.
+  const formatStorageGB = (gb: number): string => {
+    if (gb >= 1024) return `${(gb / 1024).toFixed(1)} TB`;
+    return Number.isInteger(gb) ? `${gb} GB` : `${gb.toFixed(2)} GB`;
+  };
   const pct = (cur: number, cap: number | null) =>
     cap === null || cap === 0 ? 0 : Math.min((cur / cap) * 100, 100);
 
@@ -296,52 +302,135 @@ export function PlanBillingPanel() {
     <div>
       {/* Current plan card */}
       <div className="p-4 rounded-[10px] bg-bg-overlay-tertiary mb-5">
-        <div className="flex items-center justify-between mb-4">
-          <div>
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div className="min-w-0">
             <p className="text-[14px] text-text-primary font-semibold">
               SecureWarp {limits.label}
             </p>
-            <p className="text-[11px] text-text-disabled mt-0.5">
-              {isPaid
-                ? `$${(limits.priceCents / 100).toFixed(2)}/mo. ${limits.storageGB} GB storage, ${fmtLimit(limits.seats)} seats, ${fmtLimit(limits.workspaces)} workspaces.`
-                : `${limits.storageGB} GB storage, ${fmtLimit(limits.seats)} user, ${fmtLimit(limits.workspaces)} workspace.`}
-            </p>
+            {isPaid && detail && (() => {
+              // Map Stripe's raw subscription status (+ the
+              // cancel-at-period-end flag) onto a small colored pill
+              // so states like "past_due" surface visually instead of
+              // being buried one layer deeper. Keeps the user oriented
+              // when a charge fails or a cancel is scheduled.
+              const s = detail.status;
+              // Append the relevant date to the pill — cancel deadline
+              // if scheduled to end, renewal date otherwise. Keeps the
+              // user oriented without the separate "Renews X" line.
+              const periodDate = detail.currentPeriodEnd
+                ? new Date(detail.currentPeriodEnd).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+                : null;
+              // Per-state label with date suffix. Each state gets the
+              // contextual prefix that matches what the date means:
+              // Renews for active, Ends for trial, Retries for failed
+              // payment states.
+              const withDate = (base: string, prefix: string) =>
+                periodDate ? `${base} · ${prefix} ${periodDate}` : base;
+              const { label, color, bg } = detail.cancelAtPeriodEnd
+                ? { label: periodDate ? `Cancelling · ${periodDate}` : "Cancelling", color: "var(--accent-yellow-primary)", bg: "var(--accent-yellow-bg)" }
+                : s === "active"
+                  ? { label: withDate("Active", "Renews"), color: "var(--accent-green-primary)", bg: "color-mix(in srgb, var(--accent-green-primary) 10%, transparent)" }
+                  : s === "trialing"
+                    ? { label: withDate("Trial", "Ends"), color: "var(--accent-yellow-primary)", bg: "var(--accent-yellow-bg)" }
+                    : s === "past_due"
+                      ? { label: withDate("Past due", "Retries"), color: "var(--accent-red-primary)", bg: "color-mix(in srgb, var(--accent-red-primary) 10%, transparent)" }
+                      : s === "unpaid"
+                        ? { label: withDate("Unpaid", "Retries"), color: "var(--accent-red-primary)", bg: "color-mix(in srgb, var(--accent-red-primary) 10%, transparent)" }
+                        : { label: periodDate ? `${s} · ${periodDate}` : s, color: "var(--text-disabled)", bg: "var(--bg-field)" };
+              return (
+                <span
+                  className="inline-flex items-center gap-1.5 mt-1.5 px-1.5 h-[18px] rounded-full text-[10px] font-mono uppercase tracking-wider"
+                  style={{ color, background: bg }}
+                >
+                  <span className="w-[6px] h-[6px] rounded-full" style={{ background: color }} />
+                  {label}
+                </span>
+              );
+            })()}
           </div>
-          {!clientSecret && (
-            <button
-              onClick={() => setPickerOpen((v) => !v)}
-              className={`h-[28px] px-3 rounded-[6px] text-[11px] font-medium transition-colors cursor-pointer ${
-                isPaid
-                  ? "text-text-secondary hover:bg-bg-cell-hover border border-border-secondary"
-                  : "text-text-inverse bg-cta-primary hover:opacity-90"
-              }`}
-            >
-              {isPaid ? (tier === "pro" ? "Change plan" : "Upgrade to Pro") : "Upgrade"}
-            </button>
+          {/* Subscription management — inline on the right of the
+              current-plan card so the card is self-contained (status +
+              actions) and the panel body is purely tier comparison +
+              invoices. Only renders on paid tiers and only when a
+              checkout isn't in progress. */}
+          {isPaid && detail && !pendingTier && (
+            <div className="flex flex-col items-end gap-1.5 shrink-0">
+              {/* Action row: Update payment method | Cancel or Resume.
+                  The `|` is a visual divider between two peer actions
+                  rendered as text-buttons (no button borders) to keep
+                  the header compact. Renewal date now lives in the
+                  status pill on the left, so no redundant label here. */}
+              <div className="flex items-center gap-2 text-[11px]">
+                <button
+                  onClick={async () => {
+                    if (openingPortal) return;
+                    setOpeningPortal(true);
+                    try {
+                      const res = await fetch("/api/billing/portal", { method: "POST" });
+                      const data = await res.json();
+                      if (res.ok && data.url) { window.location.href = data.url; return; }
+                    } finally { setOpeningPortal(false); }
+                  }}
+                  disabled={openingPortal}
+                  className="font-medium text-text-secondary hover:text-text-primary transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {openingPortal ? "Opening…" : "Update payment method"}
+                </button>
+                <span className="text-text-disabled">|</span>
+                {detail.cancelAtPeriodEnd ? (
+                  <button
+                    onClick={async () => {
+                      setCancelBusy(true);
+                      try {
+                        const res = await fetch("/api/billing/cancel", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ cancelAtPeriodEnd: false }),
+                        });
+                        if (res.ok) { setDetail(null); setStatus(null); fetchStatus(); fetchDetail(); }
+                      } finally { setCancelBusy(false); }
+                    }}
+                    disabled={cancelBusy}
+                    className="font-medium text-text-secondary hover:text-text-primary transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {cancelBusy ? "…" : "Resume"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setCancelConfirm(true)}
+                    className="font-medium text-accent-red hover:opacity-80 transition-opacity cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
           )}
         </div>
 
         {status && (
           <div className="grid grid-cols-3 gap-3 mb-2">
             {[
-              { label: "Storage", value: `${usage.storageGB.toFixed(2)} GB`, cap: limits.storageGB as number | null, capDisplay: `${limits.storageGB} GB` },
-              { label: "Team seats", value: `${usage.seats}`, cap: limits.seats, capDisplay: fmtLimit(limits.seats) },
-              { label: "Workspaces", value: `${usage.workspaces}`, cap: limits.workspaces, capDisplay: fmtLimit(limits.workspaces) },
+              { label: "Storage", display: formatStorageGB(usage.storageGB), capDisplay: formatStorageGB(limits.storageGB), used: usage.storageGB, cap: limits.storageGB as number | null },
+              { label: "Team seats", display: `${usage.seats}`, capDisplay: fmtLimit(limits.seats), used: usage.seats, cap: limits.seats },
+              { label: "Workspaces", display: `${usage.workspaces}`, capDisplay: fmtLimit(limits.workspaces), used: usage.workspaces, cap: limits.workspaces },
             ].map((m) => {
-              const curNum = parseFloat(m.value);
-              const used = pct(curNum, m.cap);
+              // Percent math runs on raw numeric used/cap — never on
+              // the display string. Parsing "2 TB" would yield 2 and
+              // break the bar when storage switches units.
+              const usedPct = pct(m.used, m.cap);
               return (
                 <div key={m.label} className="p-2.5 rounded-[8px] bg-bg-l2 border border-border-tertiary">
                   <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider">{m.label}</p>
-                  <p className="text-[13px] text-text-primary font-medium mt-0.5">{m.value}</p>
+                  <p className="text-[13px] text-text-primary font-medium mt-0.5">{m.display}</p>
                   <p className="text-[10px] text-text-disabled mt-0.5">of {m.capDisplay}</p>
                   {m.cap !== null && (
                     <div className="mt-1.5 h-[3px] rounded-full bg-bg-field overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all"
                         style={{
-                          width: `${used}%`,
-                          background: used > 90 ? "var(--accent-red-primary)" : "var(--accent-green-primary)",
+                          width: `${usedPct}%`,
+                          background: usedPct > 90 ? "var(--accent-red-primary)" : "var(--accent-green-primary)",
                         }}
                       />
                     </div>
@@ -353,36 +442,75 @@ export function PlanBillingPanel() {
         )}
       </div>
 
-      {/* Tier picker (expanded in-place) */}
-      {pickerOpen && !clientSecret && (
-        <div className="mb-5 rounded-[10px] border border-border-tertiary overflow-hidden animate-fade-in">
-          <div className="px-4 py-3 border-b border-border-tertiary">
-            <p className="text-[13px] text-text-primary font-semibold">Choose a plan</p>
-          </div>
-          <div className="p-3 flex flex-col gap-2">
-            {tiersList.filter((t) => t.id !== "free" && t.id !== tier).map((t) => (
-              <button
+      {/* All tiers visible inline. Each card has a context-aware CTA:
+          - Current tier: disabled "Current plan" chip.
+          - Higher tier than current: "Upgrade to <label>" → opens
+            checkout (from free) or confirm-change (from paid).
+          - Lower tier than current: "Downgrade to <label>" → opens
+            cancel confirm (→ Free) or confirm-change (Pro → Plus).
+          Hidden while the Stripe Elements checkout is expanded so the
+          panel focuses on the active purchase flow. */}
+      {!clientSecret && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+          {tiersList.map((t) => {
+            const isCurrent = t.id === tier;
+            const rank = (x: Tier) => (x === "free" ? 0 : x === "plus" ? 1 : 2);
+            const direction: "up" | "down" | "current" =
+              isCurrent ? "current" : rank(t.id) > rank(tier) ? "up" : "down";
+            const storageLabel = t.storageGB >= 1024 ? `${Math.round(t.storageGB / 1024)} TB` : `${t.storageGB} GB`;
+            const handleClick = () => {
+              if (isCurrent) return;
+              // Free → paid: checkout. Plus ↔ Pro: confirm-change
+              // (proration). Paid → Free: cancel-at-period-end confirm.
+              if (t.id === "free") {
+                setCancelConfirm(true);
+              } else if (tier === "free") {
+                void startCheckout(t.id as "plus" | "pro");
+              } else {
+                setChangeConfirmTier(t.id as "plus" | "pro");
+              }
+            };
+            return (
+              <div
                 key={t.id}
-                onClick={() => startCheckout(t.id as "plus" | "pro")}
-                className="text-left rounded-[8px] border border-border-tertiary hover:border-accent-green-primary hover:bg-bg-cell-hover p-3 cursor-pointer transition-colors"
+                className={`rounded-[10px] border p-3 flex flex-col gap-2 transition-colors ${
+                  isCurrent
+                    ? "border-accent-green-primary bg-accent-green/5"
+                    : "border-border-tertiary bg-bg-l2"
+                }`}
               >
-                <div className="flex items-baseline justify-between mb-1">
-                  <span className="text-[13px] font-semibold text-text-primary">
-                    SecureWarp {t.label}
-                  </span>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[13px] font-semibold text-text-primary">{t.label}</span>
                   <span className="text-[13px] text-text-primary font-mono">
                     ${(t.priceCents / 100).toFixed(2)}
                     <span className="text-[10px] text-text-disabled">/mo</span>
                   </span>
                 </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-text-secondary">
-                  <span>{t.storageGB >= 1024 ? `${Math.round(t.storageGB / 1024)} TB` : `${t.storageGB} GB`} storage</span>
-                  <span>{t.seats === null ? "Unlimited" : t.seats} seats</span>
-                  <span>{t.workspaces === null ? "Unlimited" : t.workspaces} workspaces</span>
-                </div>
-              </button>
-            ))}
-          </div>
+                <ul className="flex flex-col gap-1 text-[11px] text-text-secondary min-h-[58px]">
+                  <li>{storageLabel} storage</li>
+                  <li>{t.seats === null ? "Unlimited seats" : `${t.seats} ${t.seats === 1 ? "user" : "seats"}`}</li>
+                  <li>{t.workspaces === null ? "Unlimited workspaces" : `${t.workspaces} ${t.workspaces === 1 ? "workspace" : "workspaces"}`}</li>
+                </ul>
+                {isCurrent ? (
+                  <div className="h-[32px] rounded-[8px] border border-accent-green/30 bg-accent-green/10 text-accent-green-primary text-[11px] font-medium flex items-center justify-center gap-1.5">
+                    <HugeiconsIcon icon={Tick01Icon} size={12} />
+                    Current plan
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleClick}
+                    className={`h-[32px] rounded-[8px] text-[11px] font-medium transition-colors cursor-pointer ${
+                      direction === "up"
+                        ? "bg-cta-primary text-text-inverse hover:opacity-90"
+                        : "text-text-secondary border border-border-secondary hover:bg-bg-cell-hover"
+                    }`}
+                  >
+                    {direction === "up" ? `Upgrade to ${t.label}` : `Downgrade to ${t.label}`}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -427,65 +555,6 @@ export function PlanBillingPanel() {
       {error && (
         <div className="mb-5 p-3 rounded-[8px] border border-accent-red/40 bg-accent-red/10 text-[12px] text-accent-red">
           {error}
-        </div>
-      )}
-
-      {/* Subscription management (paid tier only) */}
-      {isPaid && detail && !pendingTier && (
-        <div className="p-3 rounded-[8px] bg-bg-l2 border border-border-tertiary mb-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[12px] text-text-primary font-medium">
-                {detail.cancelAtPeriodEnd ? "Cancellation scheduled" : "Active subscription"}
-              </p>
-              <p className="text-[11px] text-text-disabled mt-0.5">
-                {detail.cancelAtPeriodEnd
-                  ? `Ends ${detail.currentPeriodEnd ? new Date(detail.currentPeriodEnd).toLocaleDateString() : "at period end"}. You can keep using ${limits.label} until then.`
-                  : `Next charge ${detail.currentPeriodEnd ? new Date(detail.currentPeriodEnd).toLocaleDateString() : "on renewal"}.`}
-              </p>
-            </div>
-            {detail.cancelAtPeriodEnd ? (
-              <button
-                onClick={async () => {
-                  setCancelBusy(true);
-                  try {
-                    const res = await fetch("/api/billing/cancel", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ cancelAtPeriodEnd: false }),
-                    });
-                    if (res.ok) { setDetail(null); setStatus(null); fetchStatus(); fetchDetail(); }
-                  } finally { setCancelBusy(false); }
-                }}
-                disabled={cancelBusy}
-                className="h-[26px] px-2.5 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {cancelBusy ? "…" : "Resume"}
-              </button>
-            ) : (
-              <button
-                onClick={() => setCancelConfirm(true)}
-                className="h-[26px] px-2.5 rounded-[6px] text-[11px] font-medium text-accent-red hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-          <button
-            onClick={async () => {
-              if (openingPortal) return;
-              setOpeningPortal(true);
-              try {
-                const res = await fetch("/api/billing/portal", { method: "POST" });
-                const data = await res.json();
-                if (res.ok && data.url) { window.location.href = data.url; return; }
-              } finally { setOpeningPortal(false); }
-            }}
-            disabled={openingPortal}
-            className="mt-3 text-[11px] text-text-tertiary hover:text-text-primary transition-colors cursor-pointer underline underline-offset-2 disabled:opacity-50"
-          >
-            {openingPortal ? "Opening…" : "Update payment method"}
-          </button>
         </div>
       )}
 
@@ -549,6 +618,11 @@ export function PlanBillingPanel() {
                 {changeConfirmTier === "pro"
                   ? "Takes effect immediately. Your card on file is charged for the prorated difference between your current plan and Pro."
                   : "Takes effect immediately. You'll receive a prorated credit for the unused portion of your current plan, applied to your next invoice."}
+                {detail?.cancelAtPeriodEnd && (
+                  <>
+                    {" "}Your scheduled cancellation will also be removed so the subscription continues on the new tier.
+                  </>
+                )}
               </p>
             </div>
             <div className="px-6 pb-6 flex gap-3 justify-end">

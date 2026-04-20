@@ -3,7 +3,9 @@ import type Stripe from "stripe";
 import { stripe, stripeCryptoProvider } from "@/lib/billing/stripe";
 import { stripeConfig } from "@/lib/billing/config";
 import { upsertSubscriptionRow } from "@/lib/billing/sync";
+import { supabase } from "@/lib/db/supabase";
 import { logError } from "@/lib/log";
+import { auditEvent } from "@/lib/audit";
 
 /**
  * Stripe webhook. HMAC-SHA256 signature verification via
@@ -50,6 +52,40 @@ export async function POST(request: Request) {
       case "customer.subscription.paused":
       case "customer.subscription.resumed":
         await upsertSubscriptionRow(event.data.object as Stripe.Subscription);
+        // On a delete/cancel, flag any existing override as now
+        // dormant for audit visibility. We don't delete the row — the
+        // override can reactivate automatically if the user
+        // resubscribes (see getEntitlements tier-gating). This
+        // breadcrumb lets admins see "X's custom plan stopped
+        // enforcing on date Y" in the audit stream.
+        if (event.type === "customer.subscription.deleted") {
+          try {
+            const sub = event.data.object as Stripe.Subscription;
+            const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+            const { data: bc } = await supabase
+              .from("billing_customers")
+              .select("user_id")
+              .eq("stripe_customer_id", customerId)
+              .maybeSingle();
+            if (bc?.user_id) {
+              const { data: ov } = await supabase
+                .from("user_entitlement_overrides")
+                .select("user_id")
+                .eq("user_id", bc.user_id)
+                .maybeSingle();
+              if (ov) {
+                auditEvent({
+                  event: "billing.override.dormant",
+                  actorUserId: null,
+                  targetUserId: bc.user_id as string,
+                  detail: `Stripe subscription ${sub.id} deleted; override now dormant until resubscribe`,
+                });
+              }
+            }
+          } catch (e) {
+            logError("billing.webhook.override_audit", e);
+          }
+        }
         break;
       default:
         // checkout.session.completed and invoice.paid are useful
