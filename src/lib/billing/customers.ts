@@ -139,6 +139,7 @@ export interface Entitlements {
   storageGB: number;
   seats: number;
   workspaces: number;
+  maxFileSizeBytes: number;
   isCustom: boolean;
 }
 
@@ -147,7 +148,7 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
   const base = TIER_LIMITS[tier];
   const { data: ov } = await supabase
     .from("user_entitlement_overrides")
-    .select("tier_label_override, storage_gb_override, seats_override, workspaces_override, price_cents_override")
+    .select("tier_label_override, storage_gb_override, seats_override, workspaces_override, price_cents_override, max_file_size_bytes_override")
     .eq("user_id", userId)
     .maybeSingle();
   if (!ov) {
@@ -158,6 +159,7 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
       storageGB: base.storageGB,
       seats: base.seats,
       workspaces: base.workspaces,
+      maxFileSizeBytes: base.maxFileSizeBytes,
       isCustom: false,
     };
   }
@@ -175,6 +177,7 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
       storageGB: base.storageGB,
       seats: base.seats,
       workspaces: base.workspaces,
+      maxFileSizeBytes: base.maxFileSizeBytes,
       isCustom: false,
     };
   }
@@ -183,7 +186,8 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
     ov.storage_gb_override !== null ||
     ov.seats_override !== null ||
     ov.workspaces_override !== null ||
-    ov.price_cents_override !== null;
+    ov.price_cents_override !== null ||
+    ov.max_file_size_bytes_override !== null;
   return {
     tier,
     tierLabel: (ov.tier_label_override as string | null) ?? base.label,
@@ -191,6 +195,7 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
     storageGB: (ov.storage_gb_override as number | null) ?? base.storageGB,
     seats: (ov.seats_override as number | null) ?? base.seats,
     workspaces: (ov.workspaces_override as number | null) ?? base.workspaces,
+    maxFileSizeBytes: (ov.max_file_size_bytes_override as number | null) ?? base.maxFileSizeBytes,
     isCustom: hasAnyOverride,
   };
 }

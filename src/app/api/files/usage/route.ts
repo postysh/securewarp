@@ -67,6 +67,8 @@ export async function GET() {
     return NextResponse.json({
       usedBytes,
       maxBytes,
+      maxFileSizeBytes: ent.maxFileSizeBytes,
+      tierLabel: ent.tierLabel,
       filesBytes,
       filesCount,
       trashBytes,

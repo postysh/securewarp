@@ -23,7 +23,6 @@ import {
   decryptChunk,
   getChunkCount,
   CHUNK_SIZE,
-  MAX_FILE_SIZE_FREE,
   CONCURRENT_CHUNK_UPLOADS,
 } from "@/lib/crypto/chunked-encryption";
 import { decryptFileContent } from "@/lib/crypto/file-crypto";
@@ -265,6 +264,43 @@ export function useFiles(keys: {
   // `${mode}:${parentId}`. Shows cached data instantly on navigation,
   // refreshes in background. Cleared on key change (login swap).
   const fileListCache = useRef<Map<string, DecryptedFile[]>>(new Map());
+
+  // Per-file upload cap for the current plan. Lazy-fetched on the first
+  // upload so the dashboard render path doesn't pay a round-trip. The
+  // server enforces authoritatively — this is a UX nicety so the user
+  // gets an instant plan-aware error instead of waiting for the init
+  // round-trip to fail with 413. Invalidated when billing changes.
+  const planCapsRef = useRef<{ maxFileSizeBytes: number; tierLabel: string } | null>(null);
+  useEffect(() => {
+    const clear = () => { planCapsRef.current = null; };
+    window.addEventListener("securewarp-billing-refresh", clear);
+    return () => window.removeEventListener("securewarp-billing-refresh", clear);
+  }, []);
+  const getPlanCaps = async (): Promise<{ maxFileSizeBytes: number; tierLabel: string } | null> => {
+    if (planCapsRef.current) return planCapsRef.current;
+    try {
+      const res = await fetch("/api/files/usage");
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (typeof data.maxFileSizeBytes !== "number") return null;
+      planCapsRef.current = {
+        maxFileSizeBytes: data.maxFileSizeBytes,
+        tierLabel: data.tierLabel ?? "your",
+      };
+      return planCapsRef.current;
+    } catch {
+      return null;
+    }
+  };
+  const formatCap = (bytes: number): string => {
+    const GB = 1024 * 1024 * 1024;
+    const MB = 1024 * 1024;
+    if (bytes >= GB) {
+      const val = bytes / GB;
+      return `${Number.isInteger(val) ? val : val.toFixed(1)} GB`;
+    }
+    return `${Math.round(bytes / MB)} MB`;
+  };
 
   // In-memory mirror of the decrypted search-cache entries. Populated
   // once after the IndexedDB cache is built or rehydrated; kept in
@@ -686,9 +722,12 @@ export function useFiles(keys: {
   const uploadFile = useCallback(async (file: File, parentId: string | null = null) => {
     if (!keys) return;
 
-    // Check file size limit
-    if (file.size > MAX_FILE_SIZE_FREE) {
-      setState((s) => ({ ...s, error: `File too large. Maximum is ${MAX_FILE_SIZE_FREE / 1024 / 1024} MB on the free plan.` }));
+    const caps = await getPlanCaps();
+    if (caps && file.size > caps.maxFileSizeBytes) {
+      setState((s) => ({
+        ...s,
+        error: `File too large. ${caps.tierLabel} plan allows up to ${formatCap(caps.maxFileSizeBytes)} per file.`,
+      }));
       return;
     }
 
@@ -1018,10 +1057,12 @@ export function useFiles(keys: {
   const replaceFile = useCallback(
     async (existingFileId: string, newFile: File) => {
       if (!keys) return;
-      if (newFile.size > MAX_FILE_SIZE_FREE) {
+
+      const caps = await getPlanCaps();
+      if (caps && newFile.size > caps.maxFileSizeBytes) {
         setState((s) => ({
           ...s,
-          error: `File too large. Maximum is ${MAX_FILE_SIZE_FREE / 1024 / 1024} MB on the free plan.`,
+          error: `File too large. ${caps.tierLabel} plan allows up to ${formatCap(caps.maxFileSizeBytes)} per file.`,
         }));
         return;
       }

@@ -26,6 +26,10 @@ const UpsertSchema = z.object({
   seatsOverride: z.number().int().positive().max(10_000).nullable().optional(),
   workspacesOverride: z.number().int().positive().max(10_000).nullable().optional(),
   priceCentsOverride: z.number().int().min(0).max(10_000_000).nullable().optional(),
+  // 1 TB hard ceiling. Per-file caps above this aren't realistic for
+  // a browser-side chunked upload, and the higher bound also keeps
+  // the admin UI's numeric input in a sane range.
+  maxFileSizeBytesOverride: z.number().int().positive().max(1024 * 1024 * 1024 * 1024).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
 });
 
@@ -90,6 +94,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       seats_override: parsed.data.seatsOverride ?? null,
       workspaces_override: parsed.data.workspacesOverride ?? null,
       price_cents_override: parsed.data.priceCentsOverride ?? null,
+      max_file_size_bytes_override: parsed.data.maxFileSizeBytesOverride ?? null,
       notes: parsed.data.notes ?? null,
       created_by_user_id: ctx.userId,
       updated_at: new Date().toISOString(),
@@ -113,6 +118,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         seats: payload.seats_override,
         workspaces: payload.workspaces_override,
         priceCents: payload.price_cents_override,
+        maxFileSizeBytes: payload.max_file_size_bytes_override,
       }),
     });
 

@@ -38,6 +38,13 @@ export async function assertWithinQuota(userId: string, incomingBytes: number): 
     getFileCount(userId),
     getEntitlements(userId),
   ]);
+  if (incomingBytes > ent.maxFileSizeBytes) {
+    const err = new Error(
+      `File too large. ${ent.tierLabel} plan allows up to ${formatBytes(ent.maxFileSizeBytes)} per file.`,
+    ) as Error & { status?: number };
+    err.status = 413;
+    throw err;
+  }
   const capBytes = ent.storageGB * 1024 * 1024 * 1024;
   if (used + incomingBytes > capBytes) {
     const err = new Error("Storage quota exceeded") as Error & { status?: number };
@@ -49,4 +56,14 @@ export async function assertWithinQuota(userId: string, incomingBytes: number): 
     err.status = 413;
     throw err;
   }
+}
+
+function formatBytes(bytes: number): string {
+  const GB = 1024 * 1024 * 1024;
+  const MB = 1024 * 1024;
+  if (bytes >= GB) {
+    const val = bytes / GB;
+    return `${Number.isInteger(val) ? val : val.toFixed(1)} GB`;
+  }
+  return `${Math.round(bytes / MB)} MB`;
 }

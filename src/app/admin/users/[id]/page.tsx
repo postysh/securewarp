@@ -140,6 +140,7 @@ export default function AdminUserDetailPage() {
     seats_override: number | null;
     workspaces_override: number | null;
     price_cents_override: number | null;
+    max_file_size_bytes_override: number | null;
     notes: string | null;
   } | null>(null);
   // Tier-gating: an override on a Free-tier user is stored but
@@ -229,6 +230,7 @@ export default function AdminUserDetailPage() {
     seatsOverride: number | null;
     workspacesOverride: number | null;
     priceCentsOverride: number | null;
+    maxFileSizeBytesOverride: number | null;
     notes: string | null;
   }) => {
     setOverrideBusy(true);
@@ -687,6 +689,7 @@ export default function AdminUserDetailPage() {
                           { label: "Seats", value: override.seats_override !== null ? override.seats_override.toLocaleString() : "—" },
                           { label: "Workspaces", value: override.workspaces_override !== null ? override.workspaces_override.toLocaleString() : "—" },
                           { label: "Price", value: override.price_cents_override !== null ? `$${(override.price_cents_override / 100).toFixed(2)}/mo` : "—" },
+                          { label: "Max file size", value: override.max_file_size_bytes_override !== null ? formatBytes(override.max_file_size_bytes_override) : "—" },
                         ].map((r) => (
                           <div key={r.label} className="flex items-center justify-between px-3 py-2.5 border-b border-border-tertiary">
                             <span className="text-[12px] text-text-secondary">{r.label}</span>
@@ -1188,6 +1191,7 @@ function OverrideModal({
     seats_override: number | null;
     workspaces_override: number | null;
     price_cents_override: number | null;
+    max_file_size_bytes_override: number | null;
     notes: string | null;
   } | null;
   busy: boolean;
@@ -1198,6 +1202,7 @@ function OverrideModal({
     seatsOverride: number | null;
     workspacesOverride: number | null;
     priceCentsOverride: number | null;
+    maxFileSizeBytesOverride: number | null;
     notes: string | null;
   }) => void;
 }) {
@@ -1209,6 +1214,12 @@ function OverrideModal({
   const [seats, setSeats] = useState(initial?.seats_override != null ? String(initial.seats_override) : "");
   const [workspaces, setWorkspaces] = useState(initial?.workspaces_override != null ? String(initial.workspaces_override) : "");
   const [price, setPrice] = useState(initial?.price_cents_override != null ? (initial.price_cents_override / 100).toFixed(2) : "");
+  // Per-file size in GB for admin ergonomics — converted to bytes on submit.
+  const [maxFileGB, setMaxFileGB] = useState(
+    initial?.max_file_size_bytes_override != null
+      ? (initial.max_file_size_bytes_override / (1024 * 1024 * 1024)).toString()
+      : "",
+  );
   const [notes, setNotes] = useState(initial?.notes ?? "");
 
   const toIntOrNull = (s: string): number | null => {
@@ -1223,6 +1234,13 @@ function OverrideModal({
     const n = Number.parseFloat(t);
     if (!Number.isFinite(n) || n < 0) return null;
     return Math.round(n * 100);
+  };
+  const toBytesFromGbOrNull = (s: string): number | null => {
+    const t = s.trim();
+    if (!t) return null;
+    const n = Number.parseFloat(t);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.round(n * 1024 * 1024 * 1024);
   };
 
   return (
@@ -1287,6 +1305,18 @@ function OverrideModal({
             className="w-full h-[34px] px-3 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none"
           />
         </div>
+        <div>
+          <label className="block text-[11px] font-mono uppercase tracking-wider text-text-disabled mb-1">Max file size (GB)</label>
+          <input
+            type="number"
+            step="0.1"
+            min="0.1"
+            value={maxFileGB}
+            onChange={(e) => setMaxFileGB(e.target.value)}
+            placeholder="inherit"
+            className="w-full h-[34px] px-3 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none"
+          />
+        </div>
       </div>
       <label className="block text-[11px] font-mono uppercase tracking-wider text-text-disabled mb-1">Notes</label>
       <textarea
@@ -1307,6 +1337,7 @@ function OverrideModal({
             seatsOverride: toIntOrNull(seats),
             workspacesOverride: toIntOrNull(workspaces),
             priceCentsOverride: toPriceCentsOrNull(price),
+            maxFileSizeBytesOverride: toBytesFromGbOrNull(maxFileGB),
             notes: notes.trim() || null,
           })
         }

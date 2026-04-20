@@ -1002,6 +1002,7 @@ function PricingSection() {
       blurb: "Zero knowledge, zero cost.",
       features: [
         "20 GB encrypted storage",
+        "100 MB max file size",
         "1 user, 1 workspace",
         "Client side encryption",
         "File sharing with public links",
@@ -1017,6 +1018,7 @@ function PricingSection() {
       blurb: "For individuals who need more room.",
       features: [
         "500 GB encrypted storage",
+        "5 GB max file size",
         "Up to 3 team seats",
         "Unlimited workspaces",
         "Everything in Free",
@@ -1032,6 +1034,7 @@ function PricingSection() {
       blurb: "For small teams handling sensitive work.",
       features: [
         "2 TB encrypted storage",
+        "25 GB max file size",
         "Up to 10 team seats",
         "Unlimited workspaces",
         "Everything in Plus",
@@ -1047,6 +1050,7 @@ function PricingSection() {
     values: Array<string | "check" | "dash">;
   }> = [
     { label: "Storage", values: ["20 GB", "500 GB", "2 TB"] },
+    { label: "Max file size", values: ["100 MB", "5 GB", "25 GB"] },
     { label: "Team seats", values: ["1", "3", "10"] },
     { label: "Workspaces", values: ["1", "Unlimited", "Unlimited"] },
     { label: "End to end encryption", values: ["check", "check", "check"] },

@@ -17,7 +17,14 @@ export interface TierLimits {
   seats: number;
   /** Owned workspaces. Infinity for unlimited. */
   workspaces: number;
+  /** Hard per-file upload cap. Separate from storageGB so a tier
+   *  with plenty of total storage can still gate huge single files
+   *  that would tie up R2 slots during long uploads. */
+  maxFileSizeBytes: number;
 }
+
+const MB = 1024 * 1024;
+const GB = 1024 * MB;
 
 export const TIER_LIMITS: Record<Tier, TierLimits> = {
   free: {
@@ -26,6 +33,7 @@ export const TIER_LIMITS: Record<Tier, TierLimits> = {
     storageGB: 20,
     seats: 1,
     workspaces: 1,
+    maxFileSizeBytes: 100 * MB,
   },
   plus: {
     label: "Plus",
@@ -33,6 +41,7 @@ export const TIER_LIMITS: Record<Tier, TierLimits> = {
     storageGB: 500,
     seats: 3,
     workspaces: Infinity,
+    maxFileSizeBytes: 5 * GB,
   },
   pro: {
     label: "Pro",
@@ -40,6 +49,7 @@ export const TIER_LIMITS: Record<Tier, TierLimits> = {
     storageGB: 2048,
     seats: 10,
     workspaces: Infinity,
+    maxFileSizeBytes: 25 * GB,
   },
 };
 
