@@ -531,51 +531,50 @@ ALTER TABLE users ADD COLUMN totp_secret text;
 
 ```sql
 -- One row per SecureWarp user that has ever interacted with billing
--- (checkout, subscription, portal). polar_customer_id is Polar's
--- identifier for the customer record on their side.
+-- (checkout, subscription, portal). stripe_customer_id holds Stripe's
+-- cus_... id.
 CREATE TABLE billing_customers (
-  user_id            uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  polar_customer_id  text NOT NULL UNIQUE,
-  created_at         timestamptz NOT NULL DEFAULT now()
+  user_id             uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  stripe_customer_id  text NOT NULL UNIQUE,
+  created_at          timestamptz NOT NULL DEFAULT now()
 );
 
 -- Active + historical subscriptions. Entitlement checks read the
 -- most recent row per user and branch on status. `raw` keeps the
--- full Polar payload for debugging without re-fetching.
+-- full Stripe Subscription payload for debugging without re-fetching.
 CREATE TABLE billing_subscriptions (
-  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id               uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  polar_subscription_id text NOT NULL UNIQUE,
-  status                text NOT NULL, -- active | canceled | past_due | incomplete | trialing
-  current_period_end    timestamptz,
-  product_id            text NOT NULL,
-  raw                   jsonb,
-  created_at            timestamptz NOT NULL DEFAULT now(),
-  updated_at            timestamptz NOT NULL DEFAULT now()
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  stripe_subscription_id text NOT NULL UNIQUE,
+  status                 text NOT NULL, -- active | canceled | past_due | incomplete | trialing
+  current_period_end     timestamptz,
+  stripe_price_id        text NOT NULL,
+  raw                    jsonb,
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  updated_at             timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX billing_subscriptions_user_idx ON billing_subscriptions (user_id, created_at DESC);
-
--- Audit trail of usage events we've shipped to Polar. The unique
--- (user_id, meter_name, event_date) tuple makes the nightly cron
--- idempotent — re-running the same day safely upserts instead of
--- double-billing.
-CREATE TABLE billing_usage_events (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  meter_name      text NOT NULL, -- storage_gb_month | seat_month | workspace_month
-  quantity        numeric NOT NULL,
-  event_date      date NOT NULL,
-  polar_event_id  text,
-  created_at      timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (user_id, meter_name, event_date)
-);
-CREATE INDEX billing_usage_events_user_date_idx
-  ON billing_usage_events (user_id, event_date DESC);
 
 -- RLS belt-and-braces (API uses service role, but kills anon-key access).
 ALTER TABLE billing_customers      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE billing_subscriptions  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE billing_usage_events   ENABLE ROW LEVEL SECURITY;
+```
+
+**Migration from previous Polar-era column names** (run once against existing DBs before deploying the Stripe-only code):
+
+```sql
+ALTER TABLE billing_customers
+  RENAME COLUMN polar_customer_id TO stripe_customer_id;
+
+ALTER TABLE billing_subscriptions
+  RENAME COLUMN polar_subscription_id TO stripe_subscription_id;
+
+ALTER TABLE billing_subscriptions
+  RENAME COLUMN product_id TO stripe_price_id;
+
+-- billing_usage_events is no longer written by any code path. Drop it
+-- if it exists on your DB (safe: no code reads it):
+DROP TABLE IF EXISTS billing_usage_events;
 ```
 
 #### Workspace security policy

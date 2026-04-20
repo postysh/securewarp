@@ -73,7 +73,7 @@ export async function POST(request: Request) {
           : stale.latest_invoice?.id;
         if (invId) await stripe().invoices.voidInvoice(invId);
         await stripe().subscriptions.cancel(stale.id);
-        await supabase.from("billing_subscriptions").delete().eq("polar_subscription_id", stale.id);
+        await supabase.from("billing_subscriptions").delete().eq("stripe_subscription_id", stale.id);
       } catch (e) {
         logError("billing.checkout.void_stale", e);
       }

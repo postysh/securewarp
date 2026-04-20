@@ -22,7 +22,7 @@ export async function GET() {
     let currentPeriodEnd: string | null = latest.currentPeriodEnd;
     let currentPeriodStart: string | null = null;
     try {
-      const sub = await stripe().subscriptions.retrieve(latest.externalSubscriptionId);
+      const sub = await stripe().subscriptions.retrieve(latest.stripeSubscriptionId);
       cancelAtPeriodEnd = sub.cancel_at_period_end;
       // current_period_{start,end} live on the subscription item in
       // newer Stripe API versions, not on the Subscription itself.
@@ -43,7 +43,7 @@ export async function GET() {
 
     return NextResponse.json({
       subscription: {
-        id: latest.externalSubscriptionId,
+        id: latest.stripeSubscriptionId,
         status: latest.status,
         priceId: latest.priceId,
         currentPeriodStart,

@@ -36,17 +36,17 @@ export async function POST(request: Request) {
 
     const { data: customer } = await supabase
       .from("billing_customers")
-      .select("polar_customer_id")
+      .select("stripe_customer_id")
       .eq("user_id", session.userId)
       .maybeSingle();
-    if (!customer?.polar_customer_id) {
+    if (!customer?.stripe_customer_id) {
       return NextResponse.json({ ok: true }); // nothing to clean up
     }
 
     // Verify ownership + status.
     const sub = await stripe().subscriptions.retrieve(parsed.data.subscriptionId);
     const subCustomerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
-    if (subCustomerId !== customer.polar_customer_id) {
+    if (subCustomerId !== customer.stripe_customer_id) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
     if (sub.status !== "incomplete") {
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
     await supabase
       .from("billing_subscriptions")
       .delete()
-      .eq("polar_subscription_id", sub.id);
+      .eq("stripe_subscription_id", sub.id);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

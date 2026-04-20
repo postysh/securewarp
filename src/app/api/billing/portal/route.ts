@@ -16,16 +16,16 @@ export async function POST(request: Request) {
 
     const { data: row } = await supabase
       .from("billing_customers")
-      .select("polar_customer_id")
+      .select("stripe_customer_id")
       .eq("user_id", session.userId)
       .maybeSingle();
-    if (!row?.polar_customer_id) {
+    if (!row?.stripe_customer_id) {
       return NextResponse.json({ error: "No billing account" }, { status: 404 });
     }
 
     const origin = new URL(request.url).origin;
     const portal = await stripe().billingPortal.sessions.create({
-      customer: row.polar_customer_id as string,
+      customer: row.stripe_customer_id as string,
       return_url: `${origin}/drive`,
     });
 

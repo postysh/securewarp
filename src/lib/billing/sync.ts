@@ -20,7 +20,7 @@ export async function upsertSubscriptionRow(sub: Stripe.Subscription): Promise<v
   const { data: bc } = await supabase
     .from("billing_customers")
     .select("user_id")
-    .eq("polar_customer_id", customerId)
+    .eq("stripe_customer_id", customerId)
     .maybeSingle();
   if (!bc?.user_id) return;
 
@@ -29,14 +29,14 @@ export async function upsertSubscriptionRow(sub: Stripe.Subscription): Promise<v
     .upsert(
       {
         user_id: bc.user_id,
-        polar_subscription_id: sub.id,
+        stripe_subscription_id: sub.id,
         status: sub.status,
-        product_id: priceId,
+        stripe_price_id: priceId,
         current_period_end: currentPeriodEnd,
         raw: sub as unknown as Record<string, unknown>,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "polar_subscription_id" },
+      { onConflict: "stripe_subscription_id" },
     );
 }
 
@@ -49,17 +49,17 @@ export async function upsertSubscriptionRow(sub: Stripe.Subscription): Promise<v
 export async function syncLatestSubscriptionFor(userId: string): Promise<void> {
   const { data: row } = await supabase
     .from("billing_customers")
-    .select("polar_customer_id")
+    .select("stripe_customer_id")
     .eq("user_id", userId)
     .maybeSingle();
-  if (!row?.polar_customer_id) return;
+  if (!row?.stripe_customer_id) return;
 
   // Pull the last several subscriptions — not just the most recent
   // created one. A user with an active plan who starts a new
   // checkout has at least two subscriptions in Stripe; we need both
   // rows in our DB so getLatestSubscription can pick the paid one.
   const list = await stripe().subscriptions.list({
-    customer: row.polar_customer_id as string,
+    customer: row.stripe_customer_id as string,
     limit: 10,
     status: "all",
   });

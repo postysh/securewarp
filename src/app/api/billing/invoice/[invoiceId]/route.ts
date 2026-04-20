@@ -23,16 +23,16 @@ export async function GET(
 
     const { data: customer } = await supabase
       .from("billing_customers")
-      .select("polar_customer_id")
+      .select("stripe_customer_id")
       .eq("user_id", session.userId)
       .maybeSingle();
-    if (!customer?.polar_customer_id) {
+    if (!customer?.stripe_customer_id) {
       return NextResponse.json({ error: "No billing account" }, { status: 404 });
     }
 
     const invoice = await stripe().invoices.retrieve(invoiceId);
     const invoiceCustomerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id;
-    if (invoiceCustomerId !== customer.polar_customer_id) {
+    if (invoiceCustomerId !== customer.stripe_customer_id) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 

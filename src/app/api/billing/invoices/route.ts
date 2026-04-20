@@ -18,10 +18,10 @@ export async function GET() {
 
     const { data: row } = await supabase
       .from("billing_customers")
-      .select("polar_customer_id")
+      .select("stripe_customer_id")
       .eq("user_id", session.userId)
       .maybeSingle();
-    if (!row?.polar_customer_id) return NextResponse.json({ invoices: [] });
+    if (!row?.stripe_customer_id) return NextResponse.json({ invoices: [] });
 
     // Only return invoices we'd want a customer to see — a paid
     // charge or line item that was actually billed. Filtering out:
@@ -31,11 +31,29 @@ export async function GET() {
     //     but filter anyway as a backstop)
     //   - `void` (explicitly voided, includes abandoned checkouts)
     //   - `uncollectible` (rare, internal state)
-    const list = await stripe().invoices.list({
-      customer: row.polar_customer_id as string,
-      status: "paid",
-      limit: 50,
-    });
+    // Stripe throws `StripeInvalidRequestError` with statusCode 404
+    // when the customer id no longer resolves (deleted, test/live
+    // mismatch, etc). Treat that as "no invoices" rather than 500 —
+    // the settings panel already copes with an empty list, and the
+    // next checkout will re-mint a fresh customer via
+    // getOrCreateStripeCustomer's guard. Any other Stripe error
+    // (auth, network, rate limit) still surfaces as a 500 so we
+    // don't silently swallow a real outage.
+    let list;
+    try {
+      list = await stripe().invoices.list({
+        customer: row.stripe_customer_id as string,
+        status: "paid",
+        limit: 50,
+      });
+    } catch (err) {
+      const code = (err as { statusCode?: number })?.statusCode;
+      if (code === 404) {
+        logError("billing.invoices.stale_customer", { userId: session.userId });
+        return NextResponse.json({ invoices: [] });
+      }
+      throw err;
+    }
 
     const invoices = list.data.map((inv) => ({
       id: inv.id,

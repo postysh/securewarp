@@ -71,7 +71,13 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
   const [signupsEnabled, setSignupsEnabled] = useState<boolean | null>(null);
   useEffect(() => {
     if (mode !== "signup") { setSignupsEnabled(true); return; }
-    fetch("/api/config")
+    // 3s timeout — if the flag read hangs (cold Worker, slow Supabase),
+    // we fall open and show the form anyway. The blank-panel loading
+    // state was the root cause of "sign-up link doesn't work" reports:
+    // fetch with no timeout would leave `signupsEnabled === null`
+    // forever and the signup form would never render. Matches the
+    // route handler's fail-open policy for the same reason.
+    fetch("/api/config", { signal: AbortSignal.timeout(3000) })
       .then((r) => (r.ok ? r.json() : { signupsEnabled: true }))
       .then((d) => setSignupsEnabled(Boolean(d.signupsEnabled)))
       .catch(() => setSignupsEnabled(true));

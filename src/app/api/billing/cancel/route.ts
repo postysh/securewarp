@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const sub = await getLatestSubscription(session.userId);
     if (!sub) return NextResponse.json({ error: "No subscription" }, { status: 404 });
 
-    await stripe().subscriptions.update(sub.externalSubscriptionId, {
+    await stripe().subscriptions.update(sub.stripeSubscriptionId, {
       cancel_at_period_end: parsed.data.cancelAtPeriodEnd,
     });
 

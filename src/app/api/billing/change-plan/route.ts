@@ -50,13 +50,13 @@ export async function POST(request: Request) {
     // Pull the live subscription to get the item id we need to
     // replace. Expanding `items.data` isn't needed — items.data[0]
     // is always present on retrieve.
-    const sub = await stripe().subscriptions.retrieve(current.externalSubscriptionId);
+    const sub = await stripe().subscriptions.retrieve(current.stripeSubscriptionId);
     const itemId = sub.items.data[0]?.id;
     if (!itemId) {
       return NextResponse.json({ error: "Subscription missing an item" }, { status: 500 });
     }
 
-    const updated = await stripe().subscriptions.update(current.externalSubscriptionId, {
+    const updated = await stripe().subscriptions.update(current.stripeSubscriptionId, {
       items: [{ id: itemId, price: newPriceId }],
       proration_behavior: "always_invoice",
       metadata: { userId: session.userId, tier: parsed.data.tier },

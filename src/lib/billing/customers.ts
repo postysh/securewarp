@@ -4,12 +4,7 @@ import { stripe } from "./stripe";
 import { tierFromPriceId, type Tier } from "./config";
 
 /**
- * Vendor-neutral subscription lookups. Reads `billing_subscriptions`
- * rows written by the Stripe webhook handler. The column names
- * (`polar_subscription_id`, `product_id`) are historical from the
- * first billing attempt — they now hold Stripe subscription ids and
- * Stripe price ids respectively. A later migration renames them to
- * `external_subscription_id` / `stripe_price_id` for clarity.
+ * Stripe customer + subscription lookups against our local DB mirror.
  */
 
 /**
@@ -26,15 +21,15 @@ export async function getOrCreateStripeCustomer(
 ): Promise<string> {
   const { data: existing } = await supabase
     .from("billing_customers")
-    .select("polar_customer_id")
+    .select("stripe_customer_id")
     .eq("user_id", userId)
     .maybeSingle();
 
   // Stripe customer ids always start with `cus_`. Anything else is
-  // a stale row from the Polar era (which used raw UUIDs). Don't
-  // reuse it — create a fresh Stripe customer and upsert the row so
-  // we overwrite the legacy value rather than error on insert.
-  const stored = existing?.polar_customer_id as string | undefined;
+  // a stale row and shouldn't be reused — create a fresh Stripe
+  // customer and upsert the row so we overwrite the bad value rather
+  // than error on insert.
+  const stored = existing?.stripe_customer_id as string | undefined;
   if (stored && stored.startsWith("cus_")) {
     // Also guard against customers that were deleted out-of-band
     // (e.g. via the Stripe dashboard). A deleted customer returns
@@ -61,7 +56,7 @@ export async function getOrCreateStripeCustomer(
   await supabase
     .from("billing_customers")
     .upsert(
-      { user_id: userId, polar_customer_id: customer.id },
+      { user_id: userId, stripe_customer_id: customer.id },
       { onConflict: "user_id" },
     );
 
@@ -69,9 +64,9 @@ export async function getOrCreateStripeCustomer(
 }
 
 export interface SubscriptionSummary {
-  externalSubscriptionId: string;
+  stripeSubscriptionId: string;
   status: string;
-  priceId: string; // product_id column repurposed for Stripe price id
+  priceId: string;
   currentPeriodEnd: string | null;
 }
 
@@ -85,7 +80,7 @@ export async function getLatestSubscription(
   // else. Within the same status class, newer wins.
   const { data } = await supabase
     .from("billing_subscriptions")
-    .select("polar_subscription_id, status, product_id, current_period_end")
+    .select("stripe_subscription_id, status, stripe_price_id, current_period_end")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (!data || data.length === 0) return null;
@@ -101,9 +96,9 @@ export async function getLatestSubscription(
   };
   const best = data.slice().sort((a, b) => rank(a.status as string) - rank(b.status as string))[0];
   return {
-    externalSubscriptionId: best.polar_subscription_id as string,
+    stripeSubscriptionId: best.stripe_subscription_id as string,
     status: best.status as string,
-    priceId: best.product_id as string,
+    priceId: best.stripe_price_id as string,
     currentPeriodEnd: (best.current_period_end as string | null) ?? null,
   };
 }
