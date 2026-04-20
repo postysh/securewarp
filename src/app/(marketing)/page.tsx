@@ -3781,11 +3781,10 @@ function HeroDashboardFrame() {
           pointerEvents: "none",
         }}
       />
-      {/* securewarpdark.png: 1462×818 — full glass-rim crop from
-          the source asset. Wrapper aspect matches the image 1:1 so
-          the dashboard renders at its native proportions, fully
-          visible, with the blurred mountain backdrop symmetric
-          above and below. */}
+      {/* securewarpdarkdash.png: 1920×1440 — raw export with
+          baked-in glass rim + padding. Wrapper aspect matches the
+          file 1:1 so nothing crops; the dashboard renders at its
+          native proportions inside the file's own padding. */}
       <div
         style={{
           // position: relative so the dashboard paints above the
@@ -3793,21 +3792,12 @@ function HeroDashboardFrame() {
           position: "relative",
           width: "100%",
           aspectRatio: "1462 / 818",
-          overflow: "hidden",
-          // Round all four corners — the PNG's dashboard has rounded
-          // corners on every side, so leaving the wrapper's bottom
-          // two corners sharp exposed cream crescents there.
           borderRadius: 18,
-          // Soft drop shadow only — the image carries its own glass
-          // rim (baked alpha taper from the bezel out), so any extra
-          // outer hairline doubles up on it and reads as a dark
-          // border against cream. Drop shadow alone gives elevation
-          // without competing with the asset's edge.
           boxShadow: "0 20px 40px rgba(0, 0, 0, 0.12)",
         }}
       >
         <img
-          src="/screens/securewarpdark.png?v=6"
+          src="/screens/securewarpdarkdash.png?v=4"
           alt="SecureWarp dashboard showing an encrypted file list"
           style={{
             display: "block",
@@ -3815,7 +3805,7 @@ function HeroDashboardFrame() {
             height: "100%",
             objectFit: "cover",
             objectPosition: "center",
-            transform: "scale(1)",
+            transform: "scale(1.3)",
           }}
         />
       </div>
