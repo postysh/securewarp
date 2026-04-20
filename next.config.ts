@@ -31,32 +31,43 @@ const REQUIRED_PUBLIC_VARS = [
 ];
 
 function readWranglerPublicVars(): Record<string, string> {
-  let out: Record<string, string> = {};
-  try {
-    const raw = readFileSync(join(process.cwd(), "wrangler.jsonc"), "utf8");
-    // Strip // and /* */ comments and trailing commas so JSON.parse
-    // accepts JSONC. Crude but sufficient for our config file — no
-    // strings contain `//` today.
-    const stripped = raw
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/(^|[^:"'])\/\/.*$/gm, "$1")
-      .replace(/,(\s*[}\]])/g, "$1");
-    const parsed = JSON.parse(stripped) as { vars?: Record<string, unknown> };
-    const vars = parsed.vars ?? {};
-    out = {};
-    for (const [k, v] of Object.entries(vars)) {
-      if (k.startsWith("NEXT_PUBLIC_") && typeof v === "string") out[k] = v;
+  // In development (`next dev`), skip wrangler.jsonc entirely — that file
+  // holds PRODUCTION values (pk_live_*, prod PDF viewer origin, etc.) and
+  // leaking them into the dev build causes mode mismatches against
+  // .env.local's test keys. Real incident 2026-04-19: dev bundle baked
+  // pk_live_ while .env.local had sk_test_, so Stripe 400'd every Payment
+  // Element init with a "mode mismatch" on https://api.stripe.com/v1/elements/sessions.
+  const isProduction = process.env.NODE_ENV === "production";
+
+  let wranglerVars: Record<string, string> = {};
+  if (isProduction) {
+    try {
+      const raw = readFileSync(join(process.cwd(), "wrangler.jsonc"), "utf8");
+      // Strip // and /* */ comments and trailing commas so JSON.parse
+      // accepts JSONC. Crude but sufficient for our config file — no
+      // strings contain `//` today.
+      const stripped = raw
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:"'])\/\/.*$/gm, "$1")
+        .replace(/,(\s*[}\]])/g, "$1");
+      const parsed = JSON.parse(stripped) as { vars?: Record<string, unknown> };
+      const vars = parsed.vars ?? {};
+      for (const [k, v] of Object.entries(vars)) {
+        if (k.startsWith("NEXT_PUBLIC_") && typeof v === "string") wranglerVars[k] = v;
+      }
+    } catch {
+      wranglerVars = {};
     }
-  } catch {
-    out = {};
   }
 
-  // Fold in any NEXT_PUBLIC_* that are set directly on process.env so
-  // `next dev` + Cloudflare Builds dashboard vars still work. Existing
-  // wrangler.jsonc entries win on conflict — the file is the source of
-  // truth.
+  // process.env (fed by .env.local during dev, Cloudflare Builds
+  // dashboard vars during prod build) wins over wrangler.jsonc when
+  // both define the same key. In dev this means .env.local is the
+  // source of truth; in prod it lets a dashboard-level override still
+  // work if someone needs to flip a value without editing wrangler.jsonc.
+  const out: Record<string, string> = { ...wranglerVars };
   for (const [k, v] of Object.entries(process.env)) {
-    if (k.startsWith("NEXT_PUBLIC_") && typeof v === "string" && !(k in out)) {
+    if (k.startsWith("NEXT_PUBLIC_") && typeof v === "string" && v.length > 0) {
       out[k] = v;
     }
   }

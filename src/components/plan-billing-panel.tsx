@@ -635,10 +635,18 @@ function CheckoutForm({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // PaymentElement is an async-mounted iframe. `useElements()` returns
+  // a valid Elements instance before the iframe has fully rendered,
+  // which is why gating only on `!!elements` wasn't enough — clicking
+  // Subscribe early threw
+  // "elements should have a mounted Payment Element" from
+  // stripe.confirmPayment. `onReady` fires when the iframe is actually
+  // interactive; we keep the button disabled until then.
+  const [elementReady, setElementReady] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!stripe || !elements || busy) return;
+    if (!stripe || !elements || !elementReady || busy) return;
     setBusy(true);
     setErr(null);
 
@@ -672,16 +680,16 @@ function CheckoutForm({
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
-      <PaymentElement />
+      <PaymentElement onReady={() => setElementReady(true)} />
       {err && (
         <p className="text-[12px] text-accent-red">{err}</p>
       )}
       <button
         type="submit"
-        disabled={!stripe || busy}
+        disabled={!stripe || !elementReady || busy}
         className="h-[36px] rounded-[8px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {busy ? "Processing…" : `Subscribe to ${tier === "pro" ? "Pro" : "Plus"}`}
+        {busy ? "Processing…" : !elementReady ? "Loading…" : `Subscribe to ${tier === "pro" ? "Pro" : "Plus"}`}
       </button>
       <p className="text-[10px] text-text-disabled text-center">
         Powered by Stripe. Cancel any time from this page.
