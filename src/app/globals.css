@@ -171,6 +171,25 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Marketing header responsive rules.
+   Lives here — not in the header's styled-jsx block — because any
+   @media rule colocated with dynamic `${...}` interpolations gets
+   injected post-hydration by styled-jsx. On mobile that produced a
+   visible flash of the desktop nav on every refresh before the
+   media query kicked in. Putting them in the Tailwind-imported
+   globals guarantees they're part of the initial paint. */
+@media (max-width: 720px) {
+  .header-nav-desktop {
+    display: none !important;
+  }
+  .header-login {
+    display: none !important;
+  }
+  .header-burger {
+    display: inline-flex !important;
+  }
+}
+
 /* Landing page animations */
 @keyframes float-up {
   from { opacity: 0; transform: translateY(40px); }

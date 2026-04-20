@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import Menu01Icon from "@hugeicons/core-free-icons/Menu01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import { BrandMark } from "./brand-mark";
 
 /**
@@ -175,6 +178,25 @@ function LogoReveal({ text }: { text: string }) {
 }
 
 export function HeaderBar() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pathname = usePathname();
+
+  // Auto-close the mobile menu on route change so tapping a link
+  // doesn't leave the panel hanging on top of the destination page.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  // Close on Escape for keyboard users.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
   const linkStyle: React.CSSProperties = {
     padding: "8px 16px",
     fontSize: 11,
@@ -192,6 +214,19 @@ export function HeaderBar() {
     // the inline `border-color: transparent`.
     border: "1px solid transparent",
     transition: "border-color 160ms ease, background-color 160ms ease",
+  };
+
+  const drawerLinkStyle: React.CSSProperties = {
+    display: "block",
+    padding: "14px 24px",
+    fontSize: 13,
+    color: TEXT,
+    textDecoration: "none",
+    fontWeight: 500,
+    fontFamily: BRAND_MONO,
+    textTransform: "uppercase",
+    letterSpacing: "0.1em",
+    borderBottom: `1px solid ${BORDER}`,
   };
 
   return (
@@ -216,6 +251,7 @@ export function HeaderBar() {
         }}
       >
         <div
+          className="header-brand"
           style={{
             display: "flex",
             alignItems: "center",
@@ -227,6 +263,7 @@ export function HeaderBar() {
             letterSpacing: "0.1em",
             textTransform: "uppercase",
             fontFamily: BRAND_MONO,
+            minWidth: 0,
           }}
         >
           <BrandMark size={72} />
@@ -250,7 +287,7 @@ export function HeaderBar() {
           </span>
         </div>
         <nav
-          className="nav-bar"
+          className="nav-bar header-nav-desktop"
           style={{ display: "flex", alignItems: "center", gap: 0 }}
         >
           <Link href="/about" className="nav-link" style={linkStyle}>
@@ -266,16 +303,8 @@ export function HeaderBar() {
             Support
           </Link>
         </nav>
-        <style jsx global>{`
-          .nav-bar .nav-link:hover {
-            border-color: ${BORDER} !important;
-          }
-          .nav-bar .nav-link:active {
-            border-color: rgba(0, 0, 0, 0.14) !important;
-            background-color: rgba(0, 0, 0, 0.02);
-          }
-        `}</style>
         <div
+          className="header-ctas"
           style={{
             display: "flex",
             alignItems: "center",
@@ -286,6 +315,7 @@ export function HeaderBar() {
         >
           <Link
             href="/login"
+            className="header-login"
             style={{
               fontSize: 11,
               fontWeight: 500,
@@ -318,8 +348,67 @@ export function HeaderBar() {
           >
             Get Started
           </Link>
+          <button
+            type="button"
+            className="header-burger"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            aria-controls="marketing-mobile-nav"
+            onClick={() => setMenuOpen((v) => !v)}
+            style={{
+              display: "none",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 36,
+              height: 36,
+              padding: 0,
+              background: "transparent",
+              border: `1px solid ${BORDER}`,
+              borderRadius: 8,
+              color: TEXT,
+              cursor: "pointer",
+            }}
+          >
+            <HugeiconsIcon
+              icon={menuOpen ? Cancel01Icon : Menu01Icon}
+              size={16}
+              strokeWidth={1.5}
+            />
+          </button>
         </div>
       </div>
+      {menuOpen && (
+        <div
+          id="marketing-mobile-nav"
+          className="header-mobile-drawer"
+          style={{
+            borderTop: `1px solid ${BORDER}`,
+            background: "rgba(255,255,255,0.95)",
+            backdropFilter: "blur(28px) saturate(180%)",
+            WebkitBackdropFilter: "blur(28px) saturate(180%)",
+          }}
+        >
+          <Link href="/about" style={drawerLinkStyle}>About</Link>
+          <Link href="/features" style={drawerLinkStyle}>Features</Link>
+          <Link href="/pricing" style={drawerLinkStyle}>Pricing</Link>
+          <Link href="/support" style={drawerLinkStyle}>Support</Link>
+          <Link href="/login" style={{ ...drawerLinkStyle, borderBottom: "none" }}>
+            Log in
+          </Link>
+        </div>
+      )}
+      <style jsx global>{`
+        .nav-bar .nav-link:hover {
+          border-color: ${BORDER} !important;
+        }
+        .nav-bar .nav-link:active {
+          border-color: rgba(0, 0, 0, 0.14) !important;
+          background-color: rgba(0, 0, 0, 0.02);
+        }
+        .header-mobile-drawer a:active {
+          background-color: rgba(0, 0, 0, 0.03);
+        }
+      `}</style>
     </header>
   );
 }
