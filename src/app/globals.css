@@ -190,6 +190,17 @@ body {
   }
 }
 
+/* Landing features-intro heading. Desktop pins it to one line with
+   whiteSpace: nowrap (see inline style). Below 640px the heading no
+   longer fits on one line inside the body column — unset nowrap so
+   it wraps gracefully instead of clipping past the right edge. */
+@media (max-width: 640px) {
+  .landing-intro-heading {
+    white-space: normal !important;
+    text-wrap: balance;
+  }
+}
+
 /* Landing page animations */
 @keyframes float-up {
   from { opacity: 0; transform: translateY(40px); }

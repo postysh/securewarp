@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, usePathname } from "next/navigation";
+import { MarketingShell, DotDivider } from "@/components/marketing-shell";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
@@ -28,14 +28,12 @@ import StarIcon from "@hugeicons/core-free-icons/StarIcon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import Link04Icon from "@hugeicons/core-free-icons/Link04Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
-import Menu01Icon from "@hugeicons/core-free-icons/Menu01Icon";
 import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
 // Workspace switcher glyphs — match src/components/workspace-switcher.tsx
 // so the mock tracks what the real dropdown renders.
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import Setting07Icon from "@hugeicons/core-free-icons/Setting07Icon";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
-import { BrandMark } from "@/components/brand-mark";
 
 /**
  * Mockup landing — mirroring Gately's frame.
@@ -68,53 +66,23 @@ const GREEN = "rgb(239,90,60)";
 
 export default function MockupLanding() {
   return (
-    <main
-      style={{
-        background: BG,
-        minHeight: "100vh",
-        color: TEXT,
-      }}
-    >
-      {/* Body column — 1200px max, centred, border-x draws the two
-          vertical rules running down the page. The header lives
-          INSIDE this column and uses `position: sticky` so it shares
-          the exact same left/right edges as the body rules. A fixed
-          header would be centred on the viewport instead, which
-          misaligns by ~half a scrollbar whenever the page scrolls. */}
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 1200,
-          margin: "0 auto",
-          borderLeft: `1px solid ${BORDER}`,
-          borderRight: `1px solid ${BORDER}`,
-          minHeight: "100vh",
-          // White body column over the cream `<main>` — matches the
-          // `MarketingShell` wrapper used by the legal pages so gutters
-          // stay cream but the centred content reads pure white.
-          background: "#ffffff",
-        }}
-      >
-        <HeaderBar />
-        <HeroSection />
-        <StandardsSection />
-        <DotDivider />
-        <FeaturesIntroSection />
-        <FeaturesGridSection />
-        <DotDivider />
-        <HighlightsSection />
-        <DotDivider />
-        <ProductShowcaseSection />
-        <DotDivider />
-        <HowItWorksSection />
-        <DotDivider />
-        <PricingSection />
-        <DotDivider />
-        <FaqSection />
-        <DotDivider />
-        <MockupFooter />
-      </div>
-    </main>
+    <MarketingShell>
+      <HeroSection />
+      <StandardsSection />
+      <DotDivider />
+      <FeaturesIntroSection />
+      <FeaturesGridSection />
+      <DotDivider />
+      <HighlightsSection />
+      <DotDivider />
+      <ProductShowcaseSection />
+      <DotDivider />
+      <HowItWorksSection />
+      <DotDivider />
+      <PricingSection />
+      <DotDivider />
+      <FaqSection />
+    </MarketingShell>
   );
 }
 
@@ -556,279 +524,6 @@ function ProductShowcaseSection() {
         }
       `}</style>
     </section>
-  );
-}
-
-/**
- * Footer — Gately's pattern (brand col + 3 link cols, bottom ©
- * strip), populated with the content from SecureWarp's existing
- * MarketingFooter so both surfaces stay in lockstep. The crypto
- * primitives strip in the bottom bar is SecureWarp's signature
- * element — kept in place of Gately's X / LinkedIn social links.
- */
-function MockupFooter() {
-  const cols: Array<{ heading: string; links: Array<{ label: string; href: string; soon?: boolean }> }> = [
-    {
-      heading: "Product",
-      links: [
-        { label: "Features", href: "/features" },
-        { label: "Pricing", href: "/pricing" },
-        { label: "Changelog", href: "#", soon: true },
-        { label: "Roadmap", href: "#", soon: true },
-      ],
-    },
-    {
-      heading: "Company",
-      links: [
-        { label: "About", href: "/about" },
-        { label: "Support", href: "/support" },
-        { label: "X", href: "https://x.com/Securewarp" },
-      ],
-    },
-    {
-      heading: "Legal",
-      links: [
-        { label: "Privacy", href: "/privacy" },
-        { label: "Terms", href: "/terms" },
-        { label: "Refunds", href: "/refund" },
-      ],
-    },
-  ];
-
-  return (
-    <footer style={{ padding: "48px 32px" }}>
-      <div
-        className="mockup-footer-grid"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-          gap: 40,
-        }}
-      >
-        {/* Brand col */}
-        <div className="mockup-footer-brand">
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <BrandMark size={52} />
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: TEXT,
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                fontFamily: BRAND_MONO,
-              }}
-            >
-              Securewarp
-            </span>
-            <span
-              style={{
-                fontSize: 9,
-                fontFamily: BRAND_MONO,
-                fontWeight: 600,
-                letterSpacing: "0.1em",
-                color: GREEN,
-                background: "rgba(239,90,60,0.1)",
-                border: "1px solid rgba(239,90,60,0.25)",
-                padding: "2px 6px",
-                borderRadius: 4,
-                lineHeight: 1,
-              }}
-            >
-              BETA
-            </span>
-          </div>
-          <p
-            style={{
-              fontSize: 13,
-              lineHeight: 1.6,
-              color: TEXT_MUTED,
-              margin: 0,
-              maxWidth: 240,
-              fontFamily: BRAND_SANS,
-            }}
-          >
-            The cloud drive that can&apos;t read your files. End to end
-            encrypted. Zero knowledge by design.
-          </p>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 18 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                background: GREEN,
-                boxShadow: "0 0 8px rgba(239,90,60,0.5)",
-              }}
-            />
-            <span
-              style={{
-                fontSize: 11,
-                fontFamily: BRAND_MONO,
-                color: TEXT_MUTED,
-                letterSpacing: "0.04em",
-              }}
-            >
-              All systems operational
-            </span>
-          </div>
-        </div>
-
-        {/* Link columns */}
-        {cols.map((col) => (
-          <div key={col.heading}>
-            <p
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: TEXT,
-                margin: "0 0 16px",
-                fontFamily: BRAND_SANS,
-              }}
-            >
-              {col.heading}
-            </p>
-            <ul
-              style={{
-                listStyle: "none",
-                padding: 0,
-                margin: 0,
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-              }}
-            >
-              {col.links.map((l) => {
-                const external = /^https?:\/\//.test(l.href);
-                return (
-                <li
-                  key={l.label}
-                  style={{ display: "flex", alignItems: "center", gap: 8 }}
-                >
-                  <Link
-                    href={l.href}
-                    target={external ? "_blank" : undefined}
-                    rel={external ? "noopener noreferrer" : undefined}
-                    style={{
-                      fontSize: 13,
-                      color: TEXT,
-                      opacity: l.soon ? 0.4 : 0.6,
-                      textDecoration: "none",
-                      fontFamily: BRAND_SANS,
-                      cursor: l.soon ? "default" : "pointer",
-                    }}
-                    onClick={l.soon ? (e) => e.preventDefault() : undefined}
-                  >
-                    {l.label}
-                  </Link>
-                  {l.soon && (
-                    <span
-                      style={{
-                        fontSize: 9,
-                        fontFamily: BRAND_MONO,
-                        fontWeight: 600,
-                        letterSpacing: "0.1em",
-                        textTransform: "uppercase",
-                        color: TEXT_MUTED,
-                        background: "rgba(0,0,0,0.04)",
-                        border: `1px solid ${BORDER}`,
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                        lineHeight: 1,
-                      }}
-                    >
-                      Soon
-                    </span>
-                  )}
-                </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </div>
-
-      {/* Bottom bar */}
-      <div
-        style={{
-          marginTop: 48,
-          paddingTop: 24,
-          borderTop: `1px solid ${BORDER}`,
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <p
-          style={{
-            fontSize: 12,
-            color: TEXT,
-            opacity: 0.5,
-            margin: 0,
-            fontFamily: BRAND_MONO,
-          }}
-        >
-          © {new Date().getFullYear()} SecureWarp. All rights reserved.
-        </p>
-        {/* Build / status tag. `NEXT_PUBLIC_BUILD_VERSION` is
-            injected by next.config.ts at build time, so every
-            deploy automatically shows a unique version. */}
-        <p
-          style={{
-            fontSize: 12,
-            margin: 0,
-            fontFamily: BRAND_MONO,
-            letterSpacing: "0.08em",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <span style={{ color: TEXT, opacity: 0.5 }}>
-            {process.env.NEXT_PUBLIC_BUILD_VERSION ?? "dev"}
-          </span>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              color: GREEN,
-              background: "rgba(239,90,60,0.1)",
-              border: "1px solid rgba(239,90,60,0.25)",
-              padding: "2px 7px",
-              borderRadius: 4,
-              lineHeight: 1,
-            }}
-          >
-            Beta
-          </span>
-        </p>
-      </div>
-
-      <style jsx>{`
-        @media (max-width: 900px) {
-          .mockup-footer-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-          .mockup-footer-brand {
-            grid-column: span 2;
-          }
-        }
-        @media (max-width: 480px) {
-          .mockup-footer-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .mockup-footer-brand {
-            grid-column: auto;
-          }
-        }
-      `}</style>
-    </footer>
   );
 }
 
@@ -3236,17 +2931,21 @@ function FeaturesIntroSection() {
           Features
         </span>
         <h2
+          className="landing-intro-heading"
           style={{
-            fontSize: "2rem",
-            lineHeight: 1.1,
-            // No max-width and whiteSpace: nowrap lock the heading
-            // to a single line regardless of the inner column width.
+            fontSize: "clamp(1.5rem, 5.5vw, 2rem)",
+            lineHeight: 1.15,
+            // whiteSpace: nowrap locks the heading to one line at
+            // desktop widths where it fits. On narrow viewports
+            // globals.css unsets it so the line can wrap instead of
+            // overflowing past the body column.
             whiteSpace: "nowrap",
             color: TEXT,
             fontFamily: BRAND_SERIF,
             fontWeight: 400,
             letterSpacing: -0.5,
             margin: 0,
+            paddingInline: 16,
           }}
         >
           Cloud storage,{" "}
@@ -3267,31 +2966,6 @@ function FeaturesIntroSection() {
         </p>
       </div>
     </section>
-  );
-}
-
-/**
- * Dot-grid strip used as a section divider. Renders the same 24×24
- * dot pattern as before, but confined to a fixed-height band between
- * sections instead of tiling behind the whole page. 72px shows ~3
- * rows of dots.
- */
-function DotDivider({ height = 72 }: { height?: number }) {
-  return (
-    <div
-      aria-hidden
-      style={{
-        height,
-        // Subtle hairlines above and below the dot band — same
-        // BORDER token as the vertical rules so the whole grid reads
-        // as one system.
-        borderTop: `1px solid ${BORDER}`,
-        borderBottom: `1px solid ${BORDER}`,
-        backgroundImage:
-          "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='12' cy='12' r='1' fill='%23000' fill-opacity='0.14'/></svg>\")",
-        backgroundSize: "24px 24px",
-      }}
-    />
   );
 }
 
@@ -3845,100 +3519,6 @@ function HeroDashboardFrame() {
   );
 }
 
-/**
- * Decrypt-style reveal of the SECUREWARP wordmark. Lifted from the
- * landing's marketing-nav so the mockup's logo is visually identical.
- * Each slot cycles through random glyphs, then locks in
- * left-to-right. After the reveal finishes, clicking scrolls to top
- * (or navigates home if on a different route).
- */
-function LogoReveal({ text }: { text: string }) {
-  const [display, setDisplay] = useState<string[]>(() => text.split("").map(() => "*"));
-  const [revealed, setRevealed] = useState(false);
-  const router = useRouter();
-  const pathname = usePathname();
-
-  useEffect(() => {
-    const FRAME_MS = 40;
-    const REVEAL_DELAY = 110;
-    const CYCLES_PER_SLOT = 5;
-    const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ*/#@!$%&+<>?";
-
-    let cancelled = false;
-    const slots = text.split("");
-    const locked = slots.map(() => false);
-    const current = slots.map(() => "*");
-    let tick = 0;
-    const timer = setInterval(() => {
-      if (cancelled) return;
-      tick++;
-      for (let i = 0; i < slots.length; i++) {
-        if (locked[i]) continue;
-        const startTick = Math.floor((i * REVEAL_DELAY) / FRAME_MS);
-        if (tick < startTick) continue;
-        const elapsed = tick - startTick;
-        if (elapsed >= CYCLES_PER_SLOT) {
-          current[i] = slots[i];
-          locked[i] = true;
-        } else {
-          current[i] = GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
-        }
-      }
-      setDisplay([...current]);
-      if (locked.every(Boolean)) {
-        clearInterval(timer);
-        setRevealed(true);
-      }
-    }, FRAME_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [text]);
-
-  const handleClick = () => {
-    if (typeof window === "undefined") return;
-    if (pathname !== "/") {
-      router.push("/");
-      return;
-    }
-    if (window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-    }
-    try {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch {
-      window.scrollTo(0, 0);
-    }
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={!revealed}
-      aria-label={revealed ? `${text}. Scroll to top` : text}
-      style={{
-        background: "transparent",
-        border: "none",
-        padding: 0,
-        margin: 0,
-        color: "inherit",
-        font: "inherit",
-        cursor: revealed ? "pointer" : "default",
-        // Nav wordmark on Gately is Geist Mono — matching.
-        fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-        fontVariantNumeric: "tabular-nums",
-        letterSpacing: 1,
-      }}
-    >
-      {display.join("")}
-    </button>
-  );
-}
-
 // Chillax for everything on the landing (brand sans). Geist Mono
 // stays on eyebrows/small UI labels. SERIF aliases SANS so any
 // display element that asked for a serif during earlier
@@ -3948,249 +3528,3 @@ const CHILLAX_STACK =
 const BRAND_SANS = CHILLAX_STACK;
 const BRAND_MONO = "var(--font-geist-mono), ui-monospace, monospace";
 const BRAND_SERIF = CHILLAX_STACK;
-
-function HeaderBar() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const pathname = usePathname();
-  useEffect(() => { setMenuOpen(false); }, [pathname]);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuOpen(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [menuOpen]);
-
-  const linkStyle: React.CSSProperties = {
-    padding: "8px 16px",
-    fontSize: 11,
-    color: TEXT,
-    textDecoration: "none",
-    fontWeight: 400,
-    fontFamily: BRAND_MONO,
-    textTransform: "uppercase",
-    letterSpacing: "0.1em",
-    borderRadius: 8,
-    // Base border + transition inline so the SSR'd HTML already
-    // has them — otherwise styled-jsx injects mid-hydration and
-    // the transition flashes a border on first paint. Hover /
-    // active CSS below uses `!important` to beat inline specificity.
-    border: "1px solid transparent",
-    transition: "border-color 160ms ease, background-color 160ms ease",
-  };
-
-  const drawerLinkStyle: React.CSSProperties = {
-    display: "block",
-    padding: "14px 24px",
-    fontSize: 13,
-    color: TEXT,
-    textDecoration: "none",
-    fontWeight: 500,
-    fontFamily: BRAND_MONO,
-    textTransform: "uppercase",
-    letterSpacing: "0.1em",
-    borderBottom: `1px solid ${BORDER}`,
-  };
-
-  return (
-    <header
-      style={{
-        // Sticky inside the body column so the header's left/right
-        // edges are the body column's left/right edges — one shared
-        // width, guaranteed alignment with the vertical rules.
-        position: "sticky",
-        top: 0,
-        zIndex: 50,
-        // No side borders — the parent column already draws those
-        // and the sticky header sits flush inside them. Only a
-        // bottom rule to separate it from the hero.
-        borderBottom: `1px solid ${BORDER}`,
-        // Frosted-glass on the cream bg: low-opacity white lets the
-        // cream show through, blur + saturate keeps scrolled content
-        // legible under it.
-        background: "rgba(255,255,255,0.55)",
-        backdropFilter: "blur(28px) saturate(180%)",
-        WebkitBackdropFilter: "blur(28px) saturate(180%)",
-      }}
-    >
-      <div
-        style={{
-          padding: "0 24px",
-          height: 56,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        {/* Logo — flex:1 matches the CTA cluster on the right so the
-            nav stays optically centred */}
-        <div
-          className="header-brand"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            flex: 1,
-            fontSize: 13,
-            fontWeight: 600,
-            color: TEXT,
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-            fontFamily: BRAND_MONO,
-            minWidth: 0,
-          }}
-        >
-          <BrandMark size={72} />
-          <LogoReveal text="SECUREWARP" />
-          <span
-            style={{
-              fontSize: 9,
-              fontFamily: BRAND_MONO,
-              fontWeight: 600,
-              letterSpacing: "0.1em",
-              // On light bg the pastel green tint vanishes — use the
-              // solid brand green for text and a 10%-alpha green
-              // background so the pill still reads.
-              color: GREEN,
-              background: "rgba(239,90,60,0.1)",
-              border: "1px solid rgba(239,90,60,0.25)",
-              padding: "2px 6px",
-              borderRadius: 4,
-              lineHeight: 1,
-            }}
-            aria-label="Beta product"
-          >
-            BETA
-          </span>
-        </div>
-
-        {/* Center nav — same labels + styling as the marketing shell's
-            nav. Hover/active styling lives in the styled-jsx block
-            below (see `.nav-bar .nav-link`). */}
-        <nav
-          className="nav-bar header-nav-desktop"
-          style={{ display: "flex", alignItems: "center", gap: 0 }}
-        >
-          <Link href="/about" className="nav-link" style={linkStyle}>
-            About
-          </Link>
-          <Link href="/features" className="nav-link" style={linkStyle}>
-            Features
-          </Link>
-          <Link href="/pricing" className="nav-link" style={linkStyle}>
-            Pricing
-          </Link>
-          <Link href="/support" className="nav-link" style={linkStyle}>
-            Support
-          </Link>
-        </nav>
-
-        {/* Right CTAs */}
-        <div
-          className="header-ctas"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            flex: 1,
-            justifyContent: "flex-end",
-          }}
-        >
-          <Link
-            href="/login"
-            className="header-login"
-            style={{
-              fontSize: 11,
-              fontWeight: 400,
-              padding: "6px 14px",
-              color: TEXT,
-              textDecoration: "none",
-              fontFamily: BRAND_MONO,
-              textTransform: "uppercase",
-              letterSpacing: "0.1em",
-              border: `1px solid ${BORDER}`,
-              borderRadius: 8,
-            }}
-          >
-            Log in
-          </Link>
-          <Link
-            href="/signup"
-            style={{
-              fontSize: 11,
-              fontWeight: 400,
-              padding: "6px 14px",
-              borderRadius: 8,
-              background: BTN_PRIMARY_BG,
-              color: BTN_PRIMARY_FG,
-              textDecoration: "none",
-              fontFamily: BRAND_MONO,
-              textTransform: "uppercase",
-              letterSpacing: "0.1em",
-            }}
-          >
-            Get Started
-          </Link>
-          <button
-            type="button"
-            className="header-burger"
-            aria-label={menuOpen ? "Close menu" : "Open menu"}
-            aria-expanded={menuOpen}
-            aria-controls="landing-mobile-nav"
-            onClick={() => setMenuOpen((v) => !v)}
-            style={{
-              display: "none",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              padding: 0,
-              background: "transparent",
-              border: `1px solid ${BORDER}`,
-              borderRadius: 8,
-              color: TEXT,
-              cursor: "pointer",
-            }}
-          >
-            <HugeiconsIcon
-              icon={menuOpen ? Cancel01Icon : Menu01Icon}
-              size={16}
-              strokeWidth={1.5}
-            />
-          </button>
-        </div>
-      </div>
-      {menuOpen && (
-        <div
-          id="landing-mobile-nav"
-          className="header-mobile-drawer"
-          style={{
-            borderTop: `1px solid ${BORDER}`,
-            background: "rgba(255,255,255,0.95)",
-            backdropFilter: "blur(28px) saturate(180%)",
-            WebkitBackdropFilter: "blur(28px) saturate(180%)",
-          }}
-        >
-          <Link href="/about" style={drawerLinkStyle}>About</Link>
-          <Link href="/features" style={drawerLinkStyle}>Features</Link>
-          <Link href="/pricing" style={drawerLinkStyle}>Pricing</Link>
-          <Link href="/support" style={drawerLinkStyle}>Support</Link>
-          <Link href="/login" style={{ ...drawerLinkStyle, borderBottom: "none" }}>
-            Log in
-          </Link>
-        </div>
-      )}
-      <style jsx global>{`
-        .nav-bar .nav-link:hover {
-          border-color: ${BORDER} !important;
-        }
-        .nav-bar .nav-link:active {
-          border-color: rgba(0, 0, 0, 0.14) !important;
-          background-color: rgba(0, 0, 0, 0.02);
-        }
-        .header-mobile-drawer a:active {
-          background-color: rgba(0, 0, 0, 0.03);
-        }
-      `}</style>
-    </header>
-  );
-}
