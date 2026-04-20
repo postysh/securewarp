@@ -350,6 +350,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // The @securewarp/sdk workspace package ships TypeScript source, so
+  // Next.js needs to transpile it like first-party code. Without this,
+  // `node_modules/@securewarp/sdk/src/**/*.ts` is treated as a raw
+  // node_modules dep and the bundler bails on the .ts extension.
+  transpilePackages: ["@securewarp/sdk"],
   // Inlined into the client bundle. Next.js only reads `process.env`
   // and `.env*` files at build time, so anything living in
   // wrangler.jsonc `vars` (runtime-only) has to be forwarded here to

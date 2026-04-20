@@ -1,0 +1,29 @@
+{
+  "name": "@securewarp/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Client-side crypto primitives shared across SecureWarp apps (web, desktop, mobile, CLI).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./crypto": "./src/crypto/index.ts",
+    "./crypto/utils": "./src/crypto/utils.ts",
+    "./crypto/hkdf": "./src/crypto/hkdf.ts",
+    "./crypto/keys": "./src/crypto/keys.ts",
+    "./crypto/file-crypto": "./src/crypto/file-crypto.ts",
+    "./crypto/chunked-encryption": "./src/crypto/chunked-encryption.ts",
+    "./crypto/argon2": "./src/crypto/argon2.ts",
+    "./srp": "./src/srp/index.ts",
+    "./srp/client": "./src/srp/client.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.0.1",
+    "argon2-browser": "^1.18.0",
+    "bip39": "^3.1.0",
+    "secure-remote-password": "^0.3.1",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
+  }
+}
