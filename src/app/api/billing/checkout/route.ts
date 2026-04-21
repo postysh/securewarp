@@ -6,6 +6,7 @@ import { stripe } from "@/lib/billing/stripe";
 import { stripeConfig } from "@/lib/billing/config";
 import { getOrCreateStripeCustomer } from "@/lib/billing/customers";
 import { upsertSubscriptionRow } from "@/lib/billing/sync";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
 const CheckoutSchema = z.object({ tier: z.enum(["plus", "pro"]).default("plus") });
@@ -35,6 +36,10 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    if (!(await checkRateLimit(`billing-checkout:${session.userId}`, 10))) {
+      return NextResponse.json({ error: "Slow down" }, { status: 429 });
+    }
 
     const rawBody = await request.json().catch(() => ({}));
     const parsed = CheckoutSchema.safeParse(rawBody);

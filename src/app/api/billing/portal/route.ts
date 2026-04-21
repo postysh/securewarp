@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
 import { stripe } from "@/lib/billing/stripe";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
 /**
@@ -13,6 +14,13 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    // A compromised session shouldn't be able to burn our Stripe API
+    // quota. Users legitimately click "Update payment method" once or
+    // twice in a session.
+    if (!(await checkRateLimit(`billing-portal:${session.userId}`, 10))) {
+      return NextResponse.json({ error: "Slow down" }, { status: 429 });
+    }
 
     const { data: row } = await supabase
       .from("billing_customers")

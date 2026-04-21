@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getLatestSubscription } from "@/lib/billing/customers";
 import { stripe } from "@/lib/billing/stripe";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
 const CancelSchema = z.object({
@@ -20,6 +21,10 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    if (!(await checkRateLimit(`billing-cancel:${session.userId}`, 10))) {
+      return NextResponse.json({ error: "Slow down" }, { status: 429 });
+    }
 
     const body = await request.json().catch(() => ({}));
     const parsed = CancelSchema.safeParse(body);

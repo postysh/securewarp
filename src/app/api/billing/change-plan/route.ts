@@ -5,6 +5,7 @@ import { getLatestSubscription } from "@/lib/billing/customers";
 import { stripe } from "@/lib/billing/stripe";
 import { stripeConfig } from "@/lib/billing/config";
 import { upsertSubscriptionRow } from "@/lib/billing/sync";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
 const ChangeSchema = z.object({ tier: z.enum(["plus", "pro"]) });
@@ -28,6 +29,10 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    if (!(await checkRateLimit(`billing-change-plan:${session.userId}`, 10))) {
+      return NextResponse.json({ error: "Slow down" }, { status: 429 });
+    }
 
     const body = await request.json().catch(() => ({}));
     const parsed = ChangeSchema.safeParse(body);

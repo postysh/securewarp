@@ -3,6 +3,7 @@ import { getSession, deleteSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
 import { deleteBlob } from "@/lib/db/r2";
 import { auditEvent } from "@/lib/audit";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
 // Permanent account deletion. Deletes all files (DB + R2), file_keys,
@@ -18,6 +19,16 @@ export async function POST() {
     }
 
     const userId = session.userId;
+
+    // Belt-and-braces throttle. A stolen session shouldn't be able to
+    // nuke an account without tripping the limiter first; legitimate
+    // users click "Delete account" at most a few times in confusion.
+    if (!(await checkRateLimit(`delete-account:${userId}`, 3))) {
+      return NextResponse.json(
+        { error: "Too many delete attempts. Try again later." },
+        { status: 429 },
+      );
+    }
 
     // Collect all R2 storage keys before cascade-deleting the DB rows.
     const { data: files } = await supabase
