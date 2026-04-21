@@ -30,6 +30,7 @@ export async function GET(request: Request) {
       userId: user.id,
       email: user.email,
       publicEncryptionKey: user.public_encryption_key,
+      publicKemKey: user.public_kem_key,
     });
   } catch (err) {
     logError("users.public-key", err);

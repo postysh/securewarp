@@ -688,6 +688,7 @@ describe("red-team: register", () => {
         argon2Salt: "a",
         encryptedUserData: { nonce: "n", ciphertext: "c" },
         publicEncryptionKey: "pek",
+        publicKemKey: "kek",
       }),
     );
     expect(res.status).toBe(400);
@@ -709,6 +710,7 @@ describe("red-team: register", () => {
         argon2Salt: "a",
         encryptedUserData: { nonce: "n", ciphertext: "c" },
         publicEncryptionKey: "pek",
+        publicKemKey: "kek",
       }),
     );
     expect(res.status).toBe(400);
@@ -731,6 +733,7 @@ describe("red-team: register", () => {
         argon2Salt: "a",
         encryptedUserData: { nonce: "n", ciphertext: "c" },
         publicEncryptionKey: "pek",
+        publicKemKey: "kek",
       }),
     );
     expect(res.status).toBe(503);
@@ -749,6 +752,7 @@ describe("red-team: register", () => {
         argon2Salt: "a",
         encryptedUserData: { nonce: "n", ciphertext: "c" },
         publicEncryptionKey: "pek",
+        publicKemKey: "kek",
       }),
     );
     expect(res.status).toBe(429);

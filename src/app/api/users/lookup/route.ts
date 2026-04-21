@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     const normalized = normalizeEmail(email);
     const { data } = await supabase
       .from("users")
-      .select("id, email, display_name, public_encryption_key")
+      .select("id, email, display_name, public_encryption_key, public_kem_key")
       .eq("email", normalized)
       .single();
     if (!data) return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -26,6 +26,7 @@ export async function GET(request: Request) {
       email: data.email,
       displayName: (data.display_name as string | null) ?? null,
       publicEncryptionKey: data.public_encryption_key,
+      publicKemKey: data.public_kem_key,
     });
   } catch (err) {
     logError("users.lookup", err);

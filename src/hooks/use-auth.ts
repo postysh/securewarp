@@ -111,6 +111,7 @@ export function useAuth() {
           argon2Salt: toBase64(argon2Salt),
           encryptedUserData,
           publicEncryptionKey: keypairs.encryptionPublicKey,
+          publicKemKey: keypairs.kemPublicKey,
           recoveryKeyHash,
           recoveryEncryptedData,
           turnstileToken,
@@ -137,6 +138,8 @@ export function useAuth() {
         keys: {
           encryptionPublicKey: keypairs.encryptionPublicKey,
           encryptionPrivateKey: keypairs.encryptionPrivateKey,
+          kemPublicKey: keypairs.kemPublicKey,
+          kemPrivateKey: keypairs.kemPrivateKey,
         },
         unlockCacheKey,
       });
@@ -236,6 +239,8 @@ export function useAuth() {
       const keys: UserKeys = {
         encryptionPublicKey: verifyData.publicEncryptionKey,
         encryptionPrivateKey: privateKeys.encryptionPrivateKey,
+        kemPublicKey: verifyData.publicKemKey,
+        kemPrivateKey: privateKeys.kemPrivateKey,
         email,
       };
 
@@ -274,6 +279,8 @@ export function useAuth() {
         keys: {
           encryptionPublicKey: keys.encryptionPublicKey,
           encryptionPrivateKey: keys.encryptionPrivateKey,
+          kemPublicKey: keys.kemPublicKey,
+          kemPrivateKey: keys.kemPrivateKey,
         },
         unlockCacheKey,
       });
@@ -333,6 +340,8 @@ export function useAuth() {
           keys: {
             encryptionPublicKey: pending.keys.encryptionPublicKey,
             encryptionPrivateKey: pending.keys.encryptionPrivateKey,
+            kemPublicKey: pending.keys.kemPublicKey,
+            kemPrivateKey: pending.keys.kemPrivateKey,
           },
           unlockCacheKey: pending.unlockCacheKey,
         });
@@ -403,11 +412,17 @@ export function useAuth() {
       } = splitMasterKey(newMasterKey);
       const { srpSalt: newSrpSalt, srpVerifier: newSrpVerifier } = generateRegistrationData(newSrpKey);
 
-      // 5. Re-encrypt private keys with new password-derived secret
+      // 5. Re-encrypt private keys with new password-derived secret.
+      // `encryptionPublicKey` / `kemPublicKey` are intentional
+      // placeholders — public keys stored server-side (on the users
+      // row) don't change during a password change/recovery, only the
+      // at-rest ciphertext protecting the privates changes.
       setStep("Re-encrypting with new password...");
       const keypairs = {
         encryptionPublicKey: "recovered",
         encryptionPrivateKey: privateKeys.encryptionPrivateKey,
+        kemPublicKey: "recovered",
+        kemPrivateKey: privateKeys.kemPrivateKey,
       };
       const newEncryptedUserData = encryptUserData(keypairs, newPds);
 
@@ -448,6 +463,8 @@ export function useAuth() {
       const recoveredKeys = {
         encryptionPublicKey: "recovered",
         encryptionPrivateKey: privateKeys.encryptionPrivateKey,
+        kemPublicKey: "recovered",
+        kemPrivateKey: privateKeys.kemPrivateKey,
         email,
       };
       sessionStorage.setItem("securewarp_keys", JSON.stringify(recoveredKeys));
@@ -464,6 +481,8 @@ export function useAuth() {
         keys: {
           encryptionPublicKey: "recovered",
           encryptionPrivateKey: privateKeys.encryptionPrivateKey,
+          kemPublicKey: "recovered",
+          kemPrivateKey: privateKeys.kemPrivateKey,
         },
         unlockCacheKey: newUnlockCacheKey,
       });
@@ -533,6 +552,8 @@ export function useAuth() {
       const keypairs = {
         encryptionPublicKey: currentKeys.encryptionPublicKey,
         encryptionPrivateKey: currentKeys.encryptionPrivateKey,
+        kemPublicKey: currentKeys.kemPublicKey,
+        kemPrivateKey: currentKeys.kemPrivateKey,
       };
       const newEncryptedUserData = encryptUserData(keypairs, newPds);
 
@@ -574,6 +595,8 @@ export function useAuth() {
         keys: {
           encryptionPublicKey: keypairs.encryptionPublicKey,
           encryptionPrivateKey: keypairs.encryptionPrivateKey,
+          kemPublicKey: keypairs.kemPublicKey,
+          kemPrivateKey: keypairs.kemPrivateKey,
         },
         unlockCacheKey: newUnlockCacheKey,
       });

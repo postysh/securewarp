@@ -29,6 +29,7 @@
     "@noble/ciphers": "^2.0.0",
     "@noble/curves": "^2.0.0",
     "@noble/hashes": "^2.0.1",
+    "@noble/post-quantum": "^0.6.1",
     "@opennextjs/cloudflare": "^1.19.1",
     "@orama/orama": "^3.1.18",
     "@sentry/nextjs": "^10.48.0",

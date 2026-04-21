@@ -109,6 +109,7 @@ export async function POST(request: Request) {
         serverProof,
         encryptedUserData: user.encrypted_user_data,
         publicEncryptionKey: user.public_encryption_key,
+        publicKemKey: user.public_kem_key,
       });
     }
 
@@ -131,6 +132,7 @@ export async function POST(request: Request) {
       serverProof,
       encryptedUserData: user.encrypted_user_data,
       publicEncryptionKey: user.public_encryption_key,
+      publicKemKey: user.public_kem_key,
     });
   } catch (err: unknown) {
     logError("auth.login.verify", err);

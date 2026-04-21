@@ -1,19 +1,23 @@
 /**
  * Key generation and user data encryption.
  *
- * Crypto v2 (2026-04-20):
- *   - X25519 encryption keypair via `@noble/curves` (replaces
- *     `nacl.box.keyPair()`). Used by the asymmetric wrap layer in
- *     file-crypto.ts to grant file access to collaborators.
- *   - XChaCha20-Poly1305 for the private-key-at-rest encryption
- *     (replaces `nacl.secretbox`). Same 32-byte key + 24-byte nonce
- *     shape; only the AEAD primitive rotated.
- *   - No signing keypair. We used to generate Ed25519 alongside
- *     X25519, but nothing ever signed or verified anything with it —
- *     it was dormant crypto state. Removed to reduce surface area.
- *     Signed share invites are tracked as a deferred roadmap item;
- *     when we build them, we'll add Ed25519 back paired with actual
- *     verification code.
+ * Crypto v2 Phase 2a (2026-04-21):
+ *   - Users now carry BOTH an X25519 encryption keypair (classical,
+ *     used by every current wrap) AND an ML-KEM-768 keypair (post-
+ *     quantum, DORMANT in 2a — generated + stored but nothing wraps
+ *     with it yet). The hybrid wrap paths that actually combine the
+ *     two arrive in Phase 2b (file session keys), 2c (file_keys
+ *     grants), and 2d (link sharing). Keeping the ML-KEM key dormant
+ *     for one release de-risks the migration: accounts created now
+ *     already carry the PQ half, so when 2b-2d flip to hybrid wraps
+ *     there's no schema-vs-code race.
+ *
+ *   - XChaCha20-Poly1305 still seals the private-keys-at-rest blob;
+ *     the serialized payload grows to include `kemPrivateKey`
+ *     alongside `encryptionPrivateKey`.
+ *
+ *   - No signing keypair (dropped in v2 Phase 1; see
+ *     project_signed_share_invites memo for the planned rebuild).
  *
  * Recovery uses HKDF to split the BIP39 entropy into a verification
  * key (what the server stores) and an encryption key (what actually
@@ -23,17 +27,29 @@
 
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { x25519 } from "@noble/curves/ed25519.js";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import { generateMnemonic, mnemonicToEntropy } from "bip39";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { toBase64, fromBase64, randomBytes, fromHex } from "./utils";
 
-const SECRETBOX_KEY_LEN = 32;
 const SECRETBOX_NONCE_LEN = 24;
 
+/**
+ * Hybrid per-user keypair bundle. Each algorithm has its own pub +
+ * priv. `encryptionPublicKey` / `encryptionPrivateKey` keep their
+ * legacy names for the X25519 half so call sites that already speak
+ * that vocabulary stay compact; the new `kemPublicKey` /
+ * `kemPrivateKey` carry ML-KEM-768 material.
+ *
+ * In Phase 2a the KEM fields are generated + persisted but NOT used
+ * for wrapping. They become live in Phase 2b onward.
+ */
 export interface UserKeypairs {
-  encryptionPublicKey: string;   // base64
-  encryptionPrivateKey: string;  // base64
+  encryptionPublicKey: string;   // base64 — X25519 (32 bytes)
+  encryptionPrivateKey: string;  // base64 — X25519 (32 bytes)
+  kemPublicKey: string;          // base64 — ML-KEM-768 (1184 bytes)
+  kemPrivateKey: string;         // base64 — ML-KEM-768 (~2400 bytes)
 }
 
 export interface EncryptedUserData {
@@ -42,27 +58,42 @@ export interface EncryptedUserData {
 }
 
 /**
- * Generate a fresh X25519 encryption keypair.
+ * Generate a fresh hybrid (X25519 + ML-KEM-768) encryption keypair.
+ * The two halves are independent — compromising one doesn't leak
+ * the other.
  */
 export function generateKeypairs(): UserKeypairs {
-  const privateKey = x25519.utils.randomSecretKey();
-  const publicKey = x25519.getPublicKey(privateKey);
+  const xPriv = x25519.utils.randomSecretKey();
+  const xPub = x25519.getPublicKey(xPriv);
+  const kemKp = ml_kem768.keygen();
 
   return {
-    encryptionPublicKey: toBase64(publicKey),
-    encryptionPrivateKey: toBase64(privateKey),
+    encryptionPublicKey: toBase64(xPub),
+    encryptionPrivateKey: toBase64(xPriv),
+    kemPublicKey: toBase64(kemKp.publicKey),
+    kemPrivateKey: toBase64(kemKp.secretKey),
   };
 }
 
 /**
- * Encrypt private keys with the password-derived secret using XChaCha20-Poly1305.
+ * Encrypt private keys (both halves) with the password-derived
+ * secret using XChaCha20-Poly1305. The server stores the resulting
+ * ciphertext as `users.encrypted_user_data`.
+ *
+ * Payload JSON carries BOTH privates. A v1 blob (with only
+ * `encryptionPrivateKey`) decrypts cleanly; `kemPrivateKey` would
+ * come back undefined. We treat that as a legacy state in v2b+
+ * callers and regenerate the KEM keypair on next login — but every
+ * crypto-v2 account created from 2a onward writes both from the
+ * start, so the legacy path should never fire in practice.
  */
 export function encryptUserData(
   keypairs: UserKeypairs,
-  passwordDerivedSecret: Uint8Array
+  passwordDerivedSecret: Uint8Array,
 ): EncryptedUserData {
   const payload = JSON.stringify({
     encryptionPrivateKey: keypairs.encryptionPrivateKey,
+    kemPrivateKey: keypairs.kemPrivateKey,
   });
 
   const nonce = randomBytes(SECRETBOX_NONCE_LEN);
@@ -75,13 +106,15 @@ export function encryptUserData(
   };
 }
 
-/**
- * Decrypt private keys with the password-derived secret.
- */
+export interface DecryptedUserData {
+  encryptionPrivateKey: string;
+  kemPrivateKey: string;
+}
+
 export function decryptUserData(
   encrypted: EncryptedUserData,
-  passwordDerivedSecret: Uint8Array
-): { encryptionPrivateKey: string } {
+  passwordDerivedSecret: Uint8Array,
+): DecryptedUserData {
   const nonce = fromBase64(encrypted.nonce);
   const ciphertext = fromBase64(encrypted.ciphertext);
   let plaintext: Uint8Array;
@@ -92,73 +125,56 @@ export function decryptUserData(
   }
 
   const payload = JSON.parse(new TextDecoder().decode(plaintext));
+  if (typeof payload.encryptionPrivateKey !== "string") {
+    throw new Error("Decryption failed — invalid user-data payload shape");
+  }
   return {
     encryptionPrivateKey: payload.encryptionPrivateKey,
+    // Older v1 blobs didn't store the KEM private; tolerate an
+    // empty value here so change-password / recover paths don't
+    // crash on pre-2a accounts. Should never actually fire after
+    // the 2a wipe + re-register.
+    kemPrivateKey: typeof payload.kemPrivateKey === "string" ? payload.kemPrivateKey : "",
   };
 }
 
 /* ═══════ RECOVERY KEY — uses HKDF to split verification from encryption ═══════ */
 
-/**
- * Generate a recovery key as a 24-word BIP39 mnemonic.
- * 256 bits of entropy = 24 words.
- */
 export function generateRecoveryKey(): string {
   return generateMnemonic(256);
 }
 
-/**
- * Derive separate verification and encryption keys from the mnemonic entropy.
- * This ensures the hash stored on the server cannot be used to derive the encryption key.
- */
 function deriveRecoveryKeys(recoveryKey: string): {
   verificationKey: Uint8Array;
   encryptionKey: Uint8Array;
 } {
   const entropy = fromHex(mnemonicToEntropy(recoveryKey));
   const enc = new TextEncoder();
-  // Fixed, non-secret salt provides HKDF domain separation per RFC 5869.
-  // Versioned so future algorithm changes can coexist with old recovery keys.
   const salt = enc.encode("securewarp-recovery-v2");
   const verificationKey = hkdf(sha256, entropy, salt, enc.encode("securewarp-recovery-verify-v2"), 32);
   const encryptionKey = hkdf(sha256, entropy, salt, enc.encode("securewarp-recovery-encrypt-v2"), 32);
   return { verificationKey, encryptionKey };
 }
 
-/**
- * Encrypt private keys with the recovery encryption key.
- */
 export function encryptWithRecoveryKey(
   keypairs: UserKeypairs,
-  recoveryKey: string
+  recoveryKey: string,
 ): EncryptedUserData {
   const { encryptionKey } = deriveRecoveryKeys(recoveryKey);
   return encryptUserData(keypairs, encryptionKey);
 }
 
-/**
- * Decrypt private keys with the recovery encryption key.
- */
 export function decryptWithRecoveryKey(
   encrypted: EncryptedUserData,
-  recoveryKey: string
-): { encryptionPrivateKey: string } {
+  recoveryKey: string,
+): DecryptedUserData {
   const { encryptionKey } = deriveRecoveryKeys(recoveryKey);
   return decryptUserData(encrypted, encryptionKey);
 }
 
-/**
- * Hash the recovery key's verification key for server-side storage.
- * Uses the HKDF-derived verification key, NOT the raw entropy.
- */
 export async function hashRecoveryKey(recoveryKey: string): Promise<string> {
   const { verificationKey } = deriveRecoveryKeys(recoveryKey);
   const hashBuffer = await crypto.subtle.digest("SHA-256", new Uint8Array(verificationKey) as unknown as ArrayBuffer);
   const hashArray = new Uint8Array(hashBuffer);
   return toBase64(hashArray);
 }
-
-// Reference unused constants so strict-mode TypeScript doesn't flag the
-// exported-but-unreferenced guard. SECRETBOX_KEY_LEN documents the key
-// size every caller expects.
-void SECRETBOX_KEY_LEN;

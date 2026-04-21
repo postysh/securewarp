@@ -79,6 +79,7 @@ export async function POST(request: Request) {
       argon2Salt: data.argon2Salt,
       encryptedUserData: JSON.stringify(data.encryptedUserData),
       publicEncryptionKey: data.publicEncryptionKey,
+      publicKemKey: data.publicKemKey,
       recoveryKeyHash: data.recoveryKeyHash,
       recoveryEncryptedData: data.recoveryEncryptedData
         ? JSON.stringify(data.recoveryEncryptedData)

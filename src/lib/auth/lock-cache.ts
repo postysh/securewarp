@@ -77,6 +77,8 @@ interface LockCacheBlob {
 interface UnsealedKeyPayload {
   encryptionPublicKey: string;
   encryptionPrivateKey: string;
+  kemPublicKey: string;
+  kemPrivateKey: string;
 }
 
 // NOTE: `searchIndexKey` (HKDF output for search-token HMAC) is NOT
