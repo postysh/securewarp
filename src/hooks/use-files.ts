@@ -504,27 +504,34 @@ export function useFiles(keys: {
   const fetchFilesSeqRef = useRef(0);
 
   const fetchFiles = useCallback(
-    async (parentId: string | null = null, mode: ViewMode = "own", breadcrumbOverride?: { id: string | null; name: string }[], viewModeOverride?: ViewMode) => {
+    async (parentId: string | null = null, mode: ViewMode = "own", breadcrumbOverride?: { id: string | null; name: string }[], viewModeOverride?: ViewMode, opts?: { silent?: boolean }) => {
       if (!keys) return;
       const mySeq = ++fetchFilesSeqRef.current;
       const cacheKey = `${mode}:${parentId ?? "root"}`;
       const cached = fileListCache.current.get(cacheKey);
+      const silent = !!opts?.silent;
 
-      // Optimistically update the view coordinates (currentFolder,
-      // viewMode, breadcrumb) before the network round trip so the
-      // sidebar highlight and breadcrumb reflect the new view
-      // immediately. Without this, a cold fetch leaves the sidebar
-      // on the previous mode for the duration of the request — felt
-      // like a broken highlight on refresh.
-      setState((s) => ({
-        ...s,
-        ...(cached ? { files: cached, loading: false } : { loading: s.loading || !initialized || s.files.length === 0 }),
-        error: null,
-        currentFolder: mode !== "own" ? null : parentId,
-        viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
-        ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
-      }));
-      setInitialized(true);
+      // Foreground fetches (nav, mount) optimistically update view
+      // coordinates + may flip `loading: true` on a cache miss so the
+      // skeleton can render while the network call is in flight.
+      //
+      // Silent fetches (background polling) MUST leave loading, files,
+      // currentFolder, viewMode, and breadcrumb untouched at call time
+      // — any of those changing would flicker the skeleton on an
+      // empty folder or briefly blank the row on a stale cache key.
+      // Silent fetches only write to state AFTER the network response
+      // arrives, replacing `files` in place.
+      if (!silent) {
+        setState((s) => ({
+          ...s,
+          ...(cached ? { files: cached, loading: false } : { loading: s.loading || !initialized || s.files.length === 0 }),
+          error: null,
+          currentFolder: mode !== "own" ? null : parentId,
+          viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
+          ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
+        }));
+        setInitialized(true);
+      }
 
       try {
         const url =
@@ -745,20 +752,32 @@ export function useFiles(keys: {
         // Cache the results for instant navigation next time
         fileListCache.current.set(cacheKey, results);
 
+        // Silent polls: only replace `files` (and callerPermission /
+        // nextCursor which are response-bound). Don't touch loading,
+        // currentFolder, viewMode, or breadcrumb — the user may have
+        // navigated or a modal may have opened between the fetch
+        // starting and returning; stomping those fields would be a
+        // visible glitch.
         setState((s) => ({
           ...s,
           files: results,
-          loading: false,
           callerPermission: data.callerPermission ?? null,
           nextCursor: data.nextCursor ?? null,
-          currentFolder: mode !== "own" ? null : parentId,
-          viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
-          ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
+          ...(silent
+            ? {}
+            : {
+                loading: false,
+                currentFolder: mode !== "own" ? null : parentId,
+                viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
+                ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
+              }),
         }));
       } catch (err) {
         if (mySeq !== fetchFilesSeqRef.current) return;
         console.error("Fetch files error:", err);
-        setState((s) => ({ ...s, loading: false, error: "Failed to load files" }));
+        if (!silent) {
+          setState((s) => ({ ...s, loading: false, error: "Failed to load files" }));
+        }
       }
     },
     [keys, initialized]

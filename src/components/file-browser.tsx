@@ -496,7 +496,17 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     !!keys && !contextMenu && !anyModalOpen && !anyUploadInFlight;
   usePolling(
     useCallback(() => {
-      void fileOps.fetchFiles(fileOps.currentFolder, fileOps.viewMode);
+      // Silent poll — never touches loading/skeleton/currentFolder;
+      // only replaces the files array on a successful response. A
+      // mid-poll navigation or cache miss can't flash the skeleton
+      // this way.
+      void fileOps.fetchFiles(
+        fileOps.currentFolder,
+        fileOps.viewMode,
+        undefined,
+        undefined,
+        { silent: true },
+      );
     }, [fileOps]),
     20_000,
     { enabled: pollEnabled },
