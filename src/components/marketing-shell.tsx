@@ -531,34 +531,7 @@ export function MockupFooter() {
             The cloud drive that can&apos;t read your files. End to end
             encrypted. Zero knowledge by design.
           </p>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              marginTop: 18,
-            }}
-          >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                background: GREEN,
-                boxShadow: "0 0 8px rgba(239,90,60,0.5)",
-              }}
-            />
-            <span
-              style={{
-                fontSize: 11,
-                fontFamily: BRAND_MONO,
-                color: TEXT_MUTED,
-                letterSpacing: "0.04em",
-              }}
-            >
-              All systems operational
-            </span>
-          </div>
+          <StatusIndicator />
         </div>
         {cols.map((col) => (
           <div key={col.heading}>
@@ -695,6 +668,116 @@ export function MockupFooter() {
         }
       `}</style>
     </footer>
+  );
+}
+
+/**
+ * Footer status indicator. Reads the latest row from
+ * `system_status` via /api/status — the actual health check is
+ * driven by an hourly cron (see /api/cron/status-check), not by
+ * visitors. This keeps the footer O(1) per page view regardless
+ * of traffic volume and means no visitor triggers a live ping of
+ * our dependencies.
+ *
+ * Per-tab cache (sessionStorage, 10 min) means navigating between
+ * marketing pages doesn't re-fetch. Edge cache (5 min) smooths
+ * origin load even across tabs.
+ *
+ * Response is boolean-only; anon visitors never learn which
+ * dependency is red. Admins get the per-service breakdown on the
+ * admin overview.
+ */
+function StatusIndicator() {
+  const [state, setState] = useState<"loading" | "ok" | "degraded">("loading");
+
+  useEffect(() => {
+    let alive = true;
+    const CACHE_KEY = "securewarp_status_cache";
+    const CACHE_TTL_MS = 10 * 60_000;
+
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY);
+      if (raw) {
+        const entry = JSON.parse(raw) as { ok: boolean | null; at: number };
+        if (Date.now() - entry.at < CACHE_TTL_MS) {
+          setState(entry.ok === null ? "loading" : entry.ok ? "ok" : "degraded");
+          return;
+        }
+      }
+    } catch { /* corrupt entry — fall through to fetch */ }
+
+    (async () => {
+      try {
+        const res = await fetch("/api/status");
+        if (!alive) return;
+        if (!res.ok) {
+          setState("degraded");
+          return;
+        }
+        const data = (await res.json()) as { ok: boolean | null };
+        setState(data.ok === null ? "loading" : data.ok ? "ok" : "degraded");
+        try {
+          sessionStorage.setItem(
+            CACHE_KEY,
+            JSON.stringify({ ok: data.ok, at: Date.now() }),
+          );
+        } catch { /* quota / private mode — not fatal */ }
+      } catch {
+        if (alive) setState("degraded");
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const dotColor =
+    state === "ok" ? GREEN : state === "degraded" ? "rgb(220,140,60)" : "rgba(0,0,0,0.25)";
+  const dotShadow =
+    state === "ok"
+      ? "0 0 8px rgba(239,90,60,0.5)"
+      : state === "degraded"
+        ? "0 0 8px rgba(220,140,60,0.5)"
+        : "none";
+  const label =
+    state === "ok"
+      ? "All systems operational"
+      : state === "degraded"
+        ? "Degraded performance"
+        : "Checking status";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        marginTop: 18,
+      }}
+      aria-live="polite"
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 3,
+          background: dotColor,
+          boxShadow: dotShadow,
+          transition: "background 0.25s, box-shadow 0.25s",
+        }}
+      />
+      <span
+        style={{
+          fontSize: 11,
+          fontFamily: BRAND_MONO,
+          color: TEXT_MUTED,
+          letterSpacing: "0.04em",
+        }}
+      >
+        {label}
+      </span>
+    </div>
   );
 }
 
