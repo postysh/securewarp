@@ -448,7 +448,14 @@ export function useFiles(keys: {
             keys.encryptionPrivateKey,
             keys.kemPrivateKey,
           );
-          for (const link of data.parentChain) {
+          // Walk chain ancestor→file (reverse order); see the
+          // matching comment in unwrapSessionKeyFromDownload.
+          const chain = data.parentChain as Array<{
+            parentKeysClaim: string;
+            parentKeysClaimWrappedBy: string;
+          }>;
+          for (let i = chain.length - 1; i >= 0; i--) {
+            const link = chain[i];
             const unwrapped = unwrapParentKeysClaim(
               link.parentKeysClaim,
               link.parentKeysClaimWrappedBy,
@@ -823,7 +830,12 @@ export function useFiles(keys: {
                   keys.encryptionPrivateKey,
                   keys.kemPrivateKey,
                 );
-                for (const link of pd.parentChain) {
+                const chain = pd.parentChain as Array<{
+                  parentKeysClaim: string;
+                  parentKeysClaimWrappedBy: string;
+                }>;
+                for (let i = chain.length - 1; i >= 0; i--) {
+                  const link = chain[i];
                   const unwrapped = unwrapParentKeysClaim(
                     link.parentKeysClaim,
                     link.parentKeysClaimWrappedBy,
@@ -1561,18 +1573,34 @@ export function useFiles(keys: {
         keys.encryptionPrivateKey,
         keys.kemPrivateKey,
       );
-      // Walk chain from top (closest to ancestor) to bottom (the file)
-      for (const link of data.parentChain) {
+      // Walk chain from ancestor DOWN to the target file. The server
+      // builds parentChain file-first (chain[0] = target, chain[N-1]
+      // = ancestor's immediate child), so we iterate in reverse:
+      // currentPrivHier at each step must belong to the PARENT of
+      // the link we're unwrapping. chain[N-1].parentKeysClaim is
+      // wrapped under the ancestor's pub hier, so we start there.
+      // Each hop yields the link's own priv hier, which becomes the
+      // key we use for the next shallower hop. The final hop is the
+      // target file, whose session key we return.
+      const chain = data.parentChain as Array<{
+        fileId: string;
+        parentKeysClaim: string;
+        parentKeysClaimWrappedBy: string;
+      }>;
+      for (let i = chain.length - 1; i >= 0; i--) {
+        const link = chain[i];
         const unwrapped = unwrapParentKeysClaim(
           link.parentKeysClaim,
           link.parentKeysClaimWrappedBy,
-          currentPrivHier
+          currentPrivHier,
         );
         currentPrivHier = unwrapped.childPrivateHierarchicalKeys;
-        // If this is the target file, unwrapped.sessionKey is what we need
-        if (link.fileId === data.parentChain[data.parentChain.length - 1].fileId) {
+        if (i === 0) {
+          // This is the target file — its session key is what we want.
           return unwrapped.sessionKey;
         }
+        // Intermediate link; session key for a folder isn't used.
+        unwrapped.sessionKey.fill(0);
       }
       // If the chain was length 1, the loop returned above.
       // Fallback: use the last unwrapped privHier to get the session key
@@ -2158,18 +2186,23 @@ export function useFiles(keys: {
         keys.encryptionPrivateKey,
         keys.kemPrivateKey,
       );
-      for (const link of data.parentChain) {
+      // Chain is file-first (chain[0] = target, last = ancestor's
+      // immediate child). Walk it in reverse so currentPrivHier is
+      // always the PARENT of the link we're about to unwrap.
+      const chain = data.parentChain as Array<{
+        parentKeysClaim: string;
+        parentKeysClaimWrappedBy: string;
+      }>;
+      for (let i = chain.length - 1; i >= 0; i--) {
+        const link = chain[i];
         const unwrapped = unwrapParentKeysClaim(
           link.parentKeysClaim,
           link.parentKeysClaimWrappedBy,
           currentPrivHier,
         );
         currentPrivHier = unwrapped.childPrivateHierarchicalKeys;
-        // The session key is a by-product of the same unwrap. We
-        // don't need it here (share/link flows derive their own
-        // wrapping of privHier, not the session key directly), but
-        // zero it out so we don't leave plaintext key material
-        // lingering in the closure.
+        // Session key isn't needed for this helper — it returns
+        // only the file's priv hier.
         unwrapped.sessionKey.fill(0);
       }
       return currentPrivHier;
