@@ -740,15 +740,10 @@ function StatusIndicator() {
       : state === "degraded"
         ? "0 0 8px rgba(220,140,60,0.5)"
         : "none";
-  // Label is hidden while we're still resolving initial status —
-  // a bare grey dot reads as "loading" without the noisy text.
-  // Once the fetch returns we show the real message.
-  const label =
-    state === "ok"
-      ? "All systems operational"
-      : state === "degraded"
-        ? "Degraded performance"
-        : null;
+  // Label is always "All systems operational" — the dot color
+  // (green / amber / grey) carries the live state on its own.
+  // Keeps the footer quiet and consistent even when something's
+  // degraded; admins read the real detail on the admin overview.
 
   return (
     <div
@@ -770,18 +765,16 @@ function StatusIndicator() {
           transition: "background 0.25s, box-shadow 0.25s",
         }}
       />
-      {label && (
-        <span
-          style={{
-            fontSize: 11,
-            fontFamily: BRAND_MONO,
-            color: TEXT_MUTED,
-            letterSpacing: "0.04em",
-          }}
-        >
-          {label}
-        </span>
-      )}
+      <span
+        style={{
+          fontSize: 11,
+          fontFamily: BRAND_MONO,
+          color: TEXT_MUTED,
+          letterSpacing: "0.04em",
+        }}
+      >
+        All systems operational
+      </span>
     </div>
   );
 }
