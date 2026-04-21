@@ -2151,10 +2151,14 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             ? {
                 id: versionHistoryTarget.id,
                 name: versionHistoryTarget.name,
+                // True-owner check only. Workspace editors see files
+                // in their "own" view but don't own them, and upload
+                // new-version is owner-only server-side — the button
+                // must be hidden for anyone else to avoid a silent
+                // 404 freeze.
                 isOwner:
                   keys != null &&
-                  (versionHistoryTarget.ownerEmail === keys.email ||
-                    fileOps.viewMode === "own"),
+                  versionHistoryTarget.ownerEmail === keys.email,
                 encryptedPrivateHierarchicalKey: versionHistoryTarget.encryptedPrivateHierarchicalKey,
                 wrappedByPublicKey: versionHistoryTarget.wrappedByPublicKey,
                 ownerPublicKey: versionHistoryTarget.ownerPublicKey,

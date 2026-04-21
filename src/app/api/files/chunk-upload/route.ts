@@ -85,6 +85,12 @@ const NewVersionInitSchema = z.object({
   chunkCount: z.number().int().positive(),
   encryptedSessionKeyByFile: z.string().min(1),
   sessionKeyNonce: z.string(),
+  // When the file has a parent, the client re-wraps its
+  // `parent_keys_claim` so inherited-access readers get the NEW
+  // session key in the claim (the hier keypair is unchanged). Root
+  // files omit both fields.
+  parentKeysClaim: z.string().min(1).nullable().optional(),
+  parentKeysClaimWrappedBy: z.string().min(1).nullable().optional(),
 });
 
 export async function POST(request: Request) {
@@ -251,6 +257,8 @@ export async function POST(request: Request) {
         createdByUserId: session.userId,
         encryptedSessionKeyByFile: data.encryptedSessionKeyByFile,
         sessionKeyNonce: data.sessionKeyNonce,
+        parentKeysClaim: data.parentKeysClaim ?? null,
+        parentKeysClaimWrappedBy: data.parentKeysClaimWrappedBy ?? null,
       });
 
       const chunkUrls: { sequence: number; storageKey: string; uploadUrl: string }[] = [];
@@ -357,7 +365,7 @@ export async function POST(request: Request) {
       if (versionId) {
         const { data: version } = await supabase
           .from("file_versions")
-          .select("chunk_count, version_number, size_bytes, encrypted_metadata, encrypted_session_key_by_file, session_key_nonce")
+          .select("chunk_count, version_number, size_bytes, encrypted_metadata, encrypted_session_key_by_file, session_key_nonce, parent_keys_claim, parent_keys_claim_wrapped_by")
           .eq("id", versionId)
           .eq("file_id", fileId)
           .single();
@@ -380,23 +388,35 @@ export async function POST(request: Request) {
         // render the new metadata immediately. version_count is an
         // authoritative count derived by +1 from before; the sql
         // DEFAULT 1 is for backfilled rows.
+        // Compose the files-row update. parent_keys_claim is only
+        // touched when the new version carried one (parented file);
+        // root files leave the column as-is (it's NULL there anyway).
+        const fileUpdate: Record<string, unknown> = {
+          current_version_number: version.version_number,
+          version_count: (file.current_version_number as number) + 1 === version.version_number
+            ? (file.current_version_number as number) + 1
+            : version.version_number,
+          encrypted_metadata: version.encrypted_metadata,
+          size_bytes: version.size_bytes,
+          chunk_count: version.chunk_count,
+          // Phase 4: mirror the new version's session-key wrap up
+          // to the files row so list/download flows decrypt with
+          // the CURRENT version's key (not the stale v1 one).
+          encrypted_session_key_by_file: version.encrypted_session_key_by_file,
+          session_key_nonce: version.session_key_nonce,
+          updated_at: new Date().toISOString(),
+        };
+        if (version.parent_keys_claim && version.parent_keys_claim_wrapped_by) {
+          // Re-wrapped parent_keys_claim for inherited-access readers.
+          // Without this, workspace editors accessing via inheritance
+          // would pull the stale session key out of the claim and
+          // fail "invalid tag" decrypting the new metadata.
+          fileUpdate.parent_keys_claim = version.parent_keys_claim;
+          fileUpdate.parent_keys_claim_wrapped_by = version.parent_keys_claim_wrapped_by;
+        }
         const { error: finalizeErr } = await supabase
           .from("files")
-          .update({
-            current_version_number: version.version_number,
-            version_count: (file.current_version_number as number) + 1 === version.version_number
-              ? (file.current_version_number as number) + 1
-              : version.version_number,
-            encrypted_metadata: version.encrypted_metadata,
-            size_bytes: version.size_bytes,
-            chunk_count: version.chunk_count,
-            // Phase 4: mirror the new version's session-key wrap up
-            // to the files row so list/download flows decrypt with
-            // the CURRENT version's key (not the stale v1 one).
-            encrypted_session_key_by_file: version.encrypted_session_key_by_file,
-            session_key_nonce: version.session_key_nonce,
-            updated_at: new Date().toISOString(),
-          })
+          .update(fileUpdate)
           .eq("id", fileId)
           .eq("owner_id", session.userId);
         if (finalizeErr) throw finalizeErr;

@@ -86,6 +86,12 @@ export interface FileVersionRow {
   // v2 wraps (hybrid blob embeds its own nonce).
   encrypted_session_key_by_file: string;
   session_key_nonce: string | null;
+  // Staging area for the new-version-init → finalize handoff. Only
+  // populated for the in-flight "new version of a parented file";
+  // finalize mirrors these to the files row and they become dead
+  // data on the version row once older versions supersede.
+  parent_keys_claim: string | null;
+  parent_keys_claim_wrapped_by: string | null;
 }
 
 /**
@@ -109,6 +115,11 @@ export async function createFileVersion(data: {
   createdByUserId: string;
   encryptedSessionKeyByFile: string;
   sessionKeyNonce: string;
+  // Only set for new-version uploads on a parented file; finalize
+  // mirrors the pair to the files row so inherited-access readers
+  // pick up the re-wrapped claim.
+  parentKeysClaim?: string | null;
+  parentKeysClaimWrappedBy?: string | null;
 }): Promise<FileVersionRow> {
   const { data: row, error } = await supabase
     .from("file_versions")
@@ -121,6 +132,8 @@ export async function createFileVersion(data: {
       created_by_user_id: data.createdByUserId,
       encrypted_session_key_by_file: data.encryptedSessionKeyByFile,
       session_key_nonce: data.sessionKeyNonce,
+      parent_keys_claim: data.parentKeysClaim ?? null,
+      parent_keys_claim_wrapped_by: data.parentKeysClaimWrappedBy ?? null,
     })
     .select()
     .single();

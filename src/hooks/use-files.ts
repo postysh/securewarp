@@ -1203,6 +1203,57 @@ export function useFiles(keys: {
           keys.encryptionPrivateKey,
         );
 
+        // 4b. If the file has a parent (workspace / inside a folder),
+        //     re-wrap its parent_keys_claim with the NEW session key.
+        //     parent_keys_claim bundles {sessionKey, childPrivHier}
+        //     and lives on the files row; inherited-access readers
+        //     (workspace editors without a direct file_keys row)
+        //     unwrap it to get BOTH the session key AND the file's
+        //     priv hier. Without this re-wrap, v2's metadata is
+        //     encrypted with K2 but the claim still carries K1, so
+        //     inherited readers decrypt metadata with K1 → "invalid
+        //     tag". The file's priv hier itself doesn't rotate, so
+        //     we recover it from our own file_keys row and reuse.
+        const fileRowInState = state.files.find((f) => f.id === existingFileId);
+        const fileParentId = fileRowInState?.parentId ?? null;
+        let newParentKeysClaim: string | null = null;
+        let newParentKeysClaimWrappedBy: string | null = null;
+        if (fileParentId && dlData.encryptedPrivateHierarchicalKey && dlData.wrappedByPublicKey) {
+          const filePrivHier = unwrapPrivateHierarchicalKey(
+            dlData.encryptedPrivateHierarchicalKey,
+            dlData.wrappedByPublicKey,
+            keys.encryptionPrivateKey,
+            keys.kemPrivateKey,
+          );
+          // Get parent's pub hier keys. Prefer the in-memory cache
+          // (populated when the user navigated into the folder); fall
+          // back to a dedicated chunk-download fetch on cache miss.
+          const cached = folderPrivHierCache.current.get(fileParentId);
+          let parentPubX: string | undefined = cached?.publicHierarchicalKey;
+          let parentPubKem: string | undefined = cached?.publicKemHierarchicalKey;
+          if (!parentPubX || !parentPubKem) {
+            try {
+              const pRes = await fetch(
+                `/api/files/chunk-download?fileId=${fileParentId}`,
+              );
+              if (pRes.ok) {
+                const pd = await pRes.json();
+                parentPubX = pd.publicHierarchicalKey;
+                parentPubKem = pd.publicKemHierarchicalKey;
+              }
+            } catch { /* leave undefined */ }
+          }
+          if (parentPubX && parentPubKem) {
+            newParentKeysClaim = wrapParentKeysClaim(
+              sessionKey,
+              filePrivHier,
+              { x25519: parentPubX, kem: parentPubKem },
+              keys.encryptionPrivateKey,
+            );
+            newParentKeysClaimWrappedBy = keys.encryptionPublicKey;
+          }
+        }
+
         // 5. Ask the server to create the next version row + signed URLs.
         const initRes = await fetch("/api/files/chunk-upload", {
           method: "POST",
@@ -1215,6 +1266,8 @@ export function useFiles(keys: {
             chunkCount,
             encryptedSessionKeyByFile,
             sessionKeyNonce,
+            parentKeysClaim: newParentKeysClaim,
+            parentKeysClaimWrappedBy: newParentKeysClaimWrappedBy,
           }),
         });
         const initData = await initRes.json();
