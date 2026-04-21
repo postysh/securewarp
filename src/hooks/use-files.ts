@@ -101,6 +101,10 @@ export interface DecryptedFile {
   // the owner can tell at a glance which files are reachable without
   // an account.
   hasActiveLink: boolean;
+  // Server-side NEW-badge dismissal. ISO timestamp of when this user
+  // first acknowledged the file, or null if they haven't yet. Lets
+  // the badge stay dismissed across browsers and devices.
+  seenAt: string | null;
   fileLabels: { id: string; name: string; color: string }[];
   isShared: boolean;
   // Everyone who holds a wrapped hierarchical-private-key for this file,
@@ -563,7 +567,7 @@ export function useFiles(keys: {
               publicKemHierarchicalKey: (f.public_kem_hierarchical_key as string) || "",
               encryptedSessionKeyByFile: f.encrypted_session_key_by_file as string, sessionKeyNonce: (f.session_key_nonce as string) ?? "",
               parentKeysClaim: (f.parent_keys_claim as string | null) ?? null, parentKeysClaimWrappedBy: (f.parent_keys_claim_wrapped_by as string | null) ?? null,
-              isStarred: !!(f.is_starred), hasActiveLink: !!(f.has_active_link), fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
+              isStarred: !!(f.is_starred), hasActiveLink: !!(f.has_active_link), seenAt: (f.seen_at as string | null) ?? null, fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
               isShared: false, collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
               name: meta.name, type: meta.type, size: meta.size,
             } as DecryptedFile);
@@ -731,6 +735,7 @@ export function useFiles(keys: {
             workspaceId: (f.workspace_id as string | null) ?? null,
             isStarred: !!(f.is_starred),
             hasActiveLink: !!(f.has_active_link),
+            seenAt: (f.seen_at as string | null) ?? null,
             fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
             isShared: mode === "shared",
             collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
@@ -761,6 +766,7 @@ export function useFiles(keys: {
           workspaceId: (f.workspace_id as string | null) ?? null,
           isStarred: !!(f.is_starred),
           hasActiveLink: !!(f.has_active_link),
+          seenAt: (f.seen_at as string | null) ?? null,
           fileLabels: [],
           isShared: mode === "shared",
           collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
@@ -941,6 +947,7 @@ export function useFiles(keys: {
       workspaceId: state.activeWorkspace?.id ?? null,
       isStarred: false,
       hasActiveLink: false,
+      seenAt: null,
       fileLabels: [],
       isShared: false,
       collaborators: [],
@@ -3794,7 +3801,7 @@ export function useFiles(keys: {
             publicKemHierarchicalKey: f.public_kem_hierarchical_key || "",
             encryptedSessionKeyByFile: f.encrypted_session_key_by_file, sessionKeyNonce: f.session_key_nonce,
             parentKeysClaim: f.parent_keys_claim ?? null, parentKeysClaimWrappedBy: f.parent_keys_claim_wrapped_by ?? null,
-            isStarred: !!(f.is_starred), hasActiveLink: !!(f.has_active_link), fileLabels: f.file_labels ?? [],
+            isStarred: !!(f.is_starred), hasActiveLink: !!(f.has_active_link), seenAt: (f.seen_at as string | null) ?? null, fileLabels: f.file_labels ?? [],
             isShared: false, collaborators: f.collaborators ?? [],
           } as DecryptedFile);
         } catch { /* skip */ }

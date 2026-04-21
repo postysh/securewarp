@@ -635,9 +635,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     ownerEmail: f.ownerEmail,
     ownerDisplayName: f.ownerDisplayName ?? null,
     // NEW badge flag — file was created in the last 24h and the
-    // user hasn't interacted with it yet. Uploading placeholders
-    // don't get a badge (they're obviously new already).
-    isNew: !f.uploading && newFiles.isNew(f.id, f.createdAt),
+    // user hasn't interacted with it yet, on any device. Uploading
+    // placeholders don't get a badge (they're obviously new already).
+    isNew: !f.uploading && newFiles.isNew(f.id, f.createdAt, f.seenAt),
   }));
 
   const selectAll = () => setSelected(new Set(displayFiles.map((f) => f.id)));

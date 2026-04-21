@@ -67,7 +67,7 @@ export async function GET(request: Request) {
     // file_keys and file_links must never be co-joined: they have
     // different wrap semantics and lifetimes.
     const nowIso = new Date().toISOString();
-    const [collaboratorMap, starResult, labelResult, linksResult] = await Promise.all([
+    const [collaboratorMap, starResult, labelResult, linksResult, seenResult] = await Promise.all([
       getCollaboratorsBulk(fileIds),
       supabase.from("user_stars").select("file_id").eq("user_id", session.userId).in("file_id", fileIds),
       supabase.from("file_labels").select("file_id, label_id, label:labels!file_labels_label_id_fkey(id, name, color, user_id)").in("file_id", fileIds),
@@ -77,13 +77,25 @@ export async function GET(request: Request) {
         .in("file_id", fileIds)
         .is("revoked_at", null)
         .or(`expires_at.is.null,expires_at.gt.${nowIso}`),
+      // Per-user NEW-badge dismissal state. Lets a user who switches
+      // browser or device keep files dismissed across their own
+      // sessions — replaces the localStorage-only seen map.
+      supabase
+        .from("user_file_seen")
+        .select("file_id, seen_at")
+        .eq("user_id", session.userId)
+        .in("file_id", fileIds),
     ]);
 
     const { data: starRows } = starResult;
     const { data: fileLabelRows } = labelResult;
     const { data: linkRows } = linksResult;
+    const { data: seenRows } = seenResult;
     const starredSet = new Set((starRows || []).map((r) => r.file_id as string));
     const activeLinkSet = new Set((linkRows || []).map((r) => r.file_id as string));
+    const seenAtMap = new Map(
+      (seenRows || []).map((r) => [r.file_id as string, r.seen_at as string]),
+    );
     const labelsByFile = new Map<string, { id: string; name: string; color: string }[]>();
     for (const row of (fileLabelRows || [])) {
       const fid = row.file_id as string;
@@ -111,6 +123,7 @@ export async function GET(request: Request) {
       owner_display_name: ownerNameMap.get(f.owner_id) ?? null,
       is_starred: starredSet.has(f.id),
       has_active_link: activeLinkSet.has(f.id),
+      seen_at: seenAtMap.get(f.id) ?? null,
       file_labels: labelsByFile.get(f.id) ?? [],
       collaborators: (collaboratorMap.get(f.id) ?? []).map((c) => ({
         userId: c.user_id,

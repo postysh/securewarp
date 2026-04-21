@@ -646,6 +646,27 @@ DELETE FROM rate_limits WHERE reset_at < now();
 DELETE FROM used_recovery_tokens WHERE expires_at < now();
 ```
 
+#### NEW-badge tracker (per-user seen state)
+
+```sql
+-- Replaces the localStorage-only seen map in use-new-files.ts so the
+-- NEW pill stays dismissed across browsers and devices. Not security
+-- sensitive: the server already knows which files a user can access;
+-- this only records when they first acknowledged each one.
+CREATE TABLE IF NOT EXISTS user_file_seen (
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  file_id uuid NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  seen_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, file_id)
+);
+
+ALTER TABLE user_file_seen ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "users can read their own seen rows"
+  ON user_file_seen FOR SELECT
+  USING (auth.uid() = user_id);
+```
+
 ### Development
 
 ```bash
