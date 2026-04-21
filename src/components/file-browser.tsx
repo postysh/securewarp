@@ -458,14 +458,23 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
   // Background poll for the current folder so new uploads from other
   // workspace members appear without a manual refresh. fetchFiles
-  // already has stale-while-revalidate semantics (cache hit returns
-  // instantly, network response silently updates state), so this
-  // produces no loading spinner or flicker. 20s is a reasonable
-  // balance between latency and request volume at scale.
+  // hits the stale-while-revalidate cache first (loading stays
+  // false, cached files stay rendered) then quietly replaces the
+  // array when the network response arrives. No skeleton, no
+  // spinner.
   //
-  // We intentionally skip polling when a context menu is open (user
-  // is mid-action) and when a modal is front-and-center, to avoid
-  // the list mutating under the user's hover.
+  // We intentionally skip polling in any of these "user is mid-
+  // action" states — swapping the files array out from under the
+  // user would blow away optimistic UI (upload placeholders,
+  // rename in progress) and feel jumpy on hover.
+  //
+  //   - Any modal open (preview, share, move, rename, etc.)
+  //   - Context menu open
+  //   - Uploading or replacing a file — the files array currently
+  //     contains a local placeholder with uploadProgress state that
+  //     the server response doesn't know about yet. A poll would
+  //     wipe the progress bar.
+  //   - Command palette open
   const anyModalOpen =
     !!previewFileId ||
     !!versionHistoryTarget ||
@@ -480,7 +489,11 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     workspaceSettingsOpen ||
     membersOpen ||
     commandPaletteOpen;
-  const pollEnabled = !!keys && !contextMenu && !anyModalOpen;
+  const anyUploadInFlight =
+    fileOps.uploading ||
+    fileOps.uploadQueue.some((r) => r.status === "uploading");
+  const pollEnabled =
+    !!keys && !contextMenu && !anyModalOpen && !anyUploadInFlight;
   usePolling(
     useCallback(() => {
       void fileOps.fetchFiles(fileOps.currentFolder, fileOps.viewMode);
