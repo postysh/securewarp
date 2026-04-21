@@ -72,7 +72,6 @@ describe("auth integration — register + login against real Postgres", () => {
         argon2_salt: body.argon2Salt,
         encrypted_user_data: JSON.stringify(body.encryptedUserData),
         public_encryption_key: body.publicEncryptionKey,
-        public_signing_key: body.publicSigningKey,
         recovery_key_hash: body.recoveryKeyHash,
         recovery_encrypted_data: JSON.stringify(body.recoveryEncryptedData),
       })
@@ -100,7 +99,6 @@ describe("auth integration — register + login against real Postgres", () => {
       argon2_salt: body.argon2Salt,
       encrypted_user_data: JSON.stringify(body.encryptedUserData),
       public_encryption_key: body.publicEncryptionKey,
-      public_signing_key: body.publicSigningKey,
       recovery_key_hash: body.recoveryKeyHash,
       recovery_encrypted_data: JSON.stringify(body.recoveryEncryptedData),
     });
@@ -168,7 +166,6 @@ describe("auth integration — register + login against real Postgres", () => {
       argon2_salt: body.argon2Salt,
       encrypted_user_data: JSON.stringify(body.encryptedUserData),
       public_encryption_key: body.publicEncryptionKey,
-      public_signing_key: body.publicSigningKey,
       recovery_key_hash: body.recoveryKeyHash,
       recovery_encrypted_data: JSON.stringify(body.recoveryEncryptedData),
     });
@@ -229,7 +226,6 @@ describe("auth integration — register + login against real Postgres", () => {
       argon2_salt: body.argon2Salt,
       encrypted_user_data: JSON.stringify(body.encryptedUserData),
       public_encryption_key: body.publicEncryptionKey,
-      public_signing_key: body.publicSigningKey,
       recovery_key_hash: body.recoveryKeyHash,
       recovery_encrypted_data: JSON.stringify(body.recoveryEncryptedData),
     });
@@ -257,12 +253,10 @@ describe("auth integration — register + login against real Postgres", () => {
     const { passwordDerivedSecret } = splitMasterKey(master);
     const viaPassword = decryptUserData(encBlob, passwordDerivedSecret);
     expect(viaPassword.encryptionPrivateKey).toBe(account.keypairs.encryptionPrivateKey);
-    expect(viaPassword.signingPrivateKey).toBe(account.keypairs.signingPrivateKey);
 
     // Recovery path.
     const viaRecovery = decryptWithRecoveryKey(recBlob, account.recoveryKey);
     expect(viaRecovery.encryptionPrivateKey).toBe(account.keypairs.encryptionPrivateKey);
-    expect(viaRecovery.signingPrivateKey).toBe(account.keypairs.signingPrivateKey);
   });
 
   it("email unique constraint actually enforces at the DB layer", async () => {
@@ -280,7 +274,6 @@ describe("auth integration — register + login against real Postgres", () => {
       argon2_salt: body.argon2Salt,
       encrypted_user_data: JSON.stringify(body.encryptedUserData),
       public_encryption_key: body.publicEncryptionKey,
-      public_signing_key: body.publicSigningKey,
       recovery_key_hash: body.recoveryKeyHash,
       recovery_encrypted_data: JSON.stringify(body.recoveryEncryptedData),
     });
@@ -292,7 +285,6 @@ describe("auth integration — register + login against real Postgres", () => {
       argon2_salt: body.argon2Salt,
       encrypted_user_data: JSON.stringify(body.encryptedUserData),
       public_encryption_key: body.publicEncryptionKey,
-      public_signing_key: body.publicSigningKey,
       recovery_key_hash: body.recoveryKeyHash,
       recovery_encrypted_data: JSON.stringify(body.recoveryEncryptedData),
     });

@@ -9,16 +9,18 @@ import {
   decryptUserData,
 } from "./keys";
 import { randomBytes } from "./utils";
-import nacl from "tweetnacl";
+
+// XChaCha20-Poly1305 key length (crypto v2). Same 32 bytes tweetnacl's
+// secretbox used, just a different cipher under the hood.
+const SECRETBOX_KEY_LENGTH = 32;
 
 describe("keys — password path", () => {
   it("roundtrips private keys through password-derived encryption", () => {
     const kp = generateKeypairs();
-    const secret = randomBytes(nacl.secretbox.keyLength);
+    const secret = randomBytes(SECRETBOX_KEY_LENGTH);
     const encrypted = encryptUserData(kp, secret);
     const decrypted = decryptUserData(encrypted, secret);
     expect(decrypted.encryptionPrivateKey).toBe(kp.encryptionPrivateKey);
-    expect(decrypted.signingPrivateKey).toBe(kp.signingPrivateKey);
   });
 
   it("throws on wrong secret", () => {
@@ -40,7 +42,6 @@ describe("keys — recovery path", () => {
     const encrypted = encryptWithRecoveryKey(kp, rk);
     const decrypted = decryptWithRecoveryKey(encrypted, rk);
     expect(decrypted.encryptionPrivateKey).toBe(kp.encryptionPrivateKey);
-    expect(decrypted.signingPrivateKey).toBe(kp.signingPrivateKey);
   });
 
   it("rejects decryption with a different recovery key", () => {

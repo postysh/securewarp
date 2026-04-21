@@ -19,11 +19,11 @@
     "./srp/client": "./src/srp/client.ts"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.0.0",
+    "@noble/curves": "^2.0.0",
     "@noble/hashes": "^2.0.1",
     "argon2-browser": "^1.18.0",
     "bip39": "^3.1.0",
-    "secure-remote-password": "^0.3.1",
-    "tweetnacl": "^1.0.3",
-    "tweetnacl-util": "^0.15.1"
+    "secure-remote-password": "^0.3.1"
   }
 }

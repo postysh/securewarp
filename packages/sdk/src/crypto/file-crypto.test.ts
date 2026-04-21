@@ -4,8 +4,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import nacl from "tweetnacl";
+import { x25519 } from "@noble/curves/ed25519.js";
 import { toBase64 } from "./utils";
+
+function makeKp() {
+  const secretKey = x25519.utils.randomSecretKey();
+  const publicKey = x25519.getPublicKey(secretKey);
+  return { secretKey, publicKey };
+}
 import {
   generateSessionKey,
   encryptMetadata,
@@ -20,7 +26,7 @@ import {
 } from "./file-crypto";
 
 describe("session key wrap/unwrap", () => {
-  const ownerKp = nacl.box.keyPair();
+  const ownerKp = makeKp();
   const hier = generateHierarchicalKeypair();
   const sessionKey = generateSessionKey();
 
@@ -75,8 +81,8 @@ describe("metadata encrypt/decrypt", () => {
 });
 
 describe("hierarchical key chain", () => {
-  const ownerKp = nacl.box.keyPair();
-  const recipientKp = nacl.box.keyPair();
+  const ownerKp = makeKp();
+  const recipientKp = makeKp();
   const hier = generateHierarchicalKeypair();
 
   it("round-trips private hier key through user wrap", () => {
@@ -95,7 +101,7 @@ describe("hierarchical key chain", () => {
 });
 
 describe("parent_keys_claim chain (Phase 3)", () => {
-  const ownerKp = nacl.box.keyPair();
+  const ownerKp = makeKp();
   const parentHier = generateHierarchicalKeypair();
   const childHier = generateHierarchicalKeypair();
   const childSessionKey = generateSessionKey();

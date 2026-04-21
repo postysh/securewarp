@@ -10,7 +10,13 @@ description = "Global allowlist for values that match secret-shaped patterns but
 # every page load so the client-side Stripe.js can initialize. Only
 # the matching secret key (`sk_*`) is sensitive. The default gitleaks
 # rule for Stripe matches both; narrow it by exempting the `pk_` form.
+#
+# The cipher name "XChaCha20-Poly1305" also hits the generic-api-key
+# rule on entropy + hyphen shape (RuleID: generic-api-key, entropy
+# ~3.72). It appears in docs, CLAUDE.md, comments, and commit messages
+# as a primitive identifier — not a secret. Allowlist it everywhere.
 regexTargets = ["match"]
 regexes = [
   '''pk_(?:live|test)_[A-Za-z0-9]+''',
+  '''XChaCha20-Poly1305''',
 ]

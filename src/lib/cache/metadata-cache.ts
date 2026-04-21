@@ -8,9 +8,11 @@
  * ciphertext.
  */
 
-import nacl from "tweetnacl";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { toBase64, fromBase64, randomBytes } from "@/lib/crypto/utils";
+
+const SECRETBOX_NONCE_LEN = 24;
 
 const DB_NAME = "securewarp_metadata_cache";
 const STORE_NAME = "entries";
@@ -60,8 +62,8 @@ function idbClear(db: IDBDatabase): Promise<void> {
 /** Encrypt a JSON-serializable value under the given key */
 function seal(data: unknown, key: Uint8Array): string {
   const plaintext = new TextEncoder().encode(JSON.stringify(data));
-  const nonce = randomBytes(nacl.secretbox.nonceLength);
-  const ciphertext = nacl.secretbox(plaintext, nonce, key);
+  const nonce = randomBytes(SECRETBOX_NONCE_LEN);
+  const ciphertext = xchacha20poly1305(key, nonce).encrypt(plaintext);
   return toBase64(nonce) + "." + toBase64(ciphertext);
 }
 
@@ -71,8 +73,7 @@ function unseal<T>(sealed: string, key: Uint8Array): T | null {
     const [nonceB64, ctB64] = sealed.split(".");
     const nonce = fromBase64(nonceB64);
     const ciphertext = fromBase64(ctB64);
-    const plaintext = nacl.secretbox.open(ciphertext, nonce, key);
-    if (!plaintext) return null;
+    const plaintext = xchacha20poly1305(key, nonce).decrypt(ciphertext);
     return JSON.parse(new TextDecoder().decode(plaintext));
   } catch {
     return null;

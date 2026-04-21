@@ -5,8 +5,6 @@ import { createContext, useContext } from "react";
 export interface UserKeys {
   encryptionPublicKey: string;
   encryptionPrivateKey: string;
-  signingPublicKey: string;
-  signingPrivateKey: string;
   email: string;
 }
 

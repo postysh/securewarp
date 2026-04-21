@@ -25,8 +25,6 @@ function installBrowserStorageShim() {
 const keys = {
   encryptionPublicKey: "enc-pub",
   encryptionPrivateKey: "enc-priv",
-  signingPublicKey: "sig-pub",
-  signingPrivateKey: "sig-priv",
 };
 
 describe("lock-cache", () => {

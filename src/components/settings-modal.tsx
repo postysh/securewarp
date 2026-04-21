@@ -416,15 +416,9 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                     <p className="text-[11px] font-mono text-text-secondary break-all select-all">{userKeys.encryptionPublicKey}</p>
                   </div>
                 </div>
-                <div>
-                  <p className="text-[10px] font-mono uppercase text-text-disabled tracking-wider mb-1">Signing public key</p>
-                  <div className="px-3 py-2 rounded-[8px] bg-bg-field">
-                    <p className="text-[11px] font-mono text-text-secondary break-all select-all">{userKeys.signingPublicKey}</p>
-                  </div>
-                </div>
                 <div className="flex items-center gap-1.5 text-[10px] text-text-disabled">
                   <HugeiconsIcon icon={LockIcon} size={10} />
-                  Private keys never leave your browser
+                  Private key never leaves your browser
                 </div>
               </div>
             )}

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import nacl from "tweetnacl";
 import { encryptChunk, decryptChunk } from "./chunked-encryption";
+import { randomBytes } from "./utils";
 
 function key() {
-  return nacl.randomBytes(nacl.secretbox.keyLength);
+  return randomBytes(32);
 }
 
 describe("chunked-encryption", () => {

@@ -10,53 +10,19 @@
  * postMessage. This is the same key that lives in sessionStorage on
  * the main thread — the worker has no additional access beyond what
  * the page already holds. The key is NOT persisted by the worker.
+ *
+ * Crypto v2: uses the SDK's `unwrapPrivateHierarchicalKey` +
+ * `unwrapSessionKeyFromFile` + `decryptMetadata` directly rather than
+ * inlining. The previous "avoid import issues in worker context"
+ * concern was pre-SDK-extraction; now that crypto lives in
+ * `@securewarp/sdk`, standard ES-module imports work in Workers too.
  */
 
-import nacl from "tweetnacl";
-import { fromBase64, toBase64 } from "./utils";
-
-// Inline the unwrap functions to avoid import issues in worker context
-
-function unwrapPrivHier(
-  encryptedPrivHier: string,
-  wrappedByPublicKey: string,
-  recipientPrivateKey: string
-): string {
-  const combined = fromBase64(encryptedPrivHier);
-  const nonce = combined.slice(0, nacl.box.nonceLength);
-  const ciphertext = combined.slice(nacl.box.nonceLength);
-  const senderPub = fromBase64(wrappedByPublicKey);
-  const recipientSec = fromBase64(recipientPrivateKey);
-  const plaintext = nacl.box.open(ciphertext, nonce, senderPub, recipientSec);
-  if (!plaintext) throw new Error("Unwrap priv hier failed");
-  return toBase64(plaintext);
-}
-
-function unwrapSessionKey(
-  encSessionKey: string,
-  sessionKeyNonce: string,
-  ownerPublicKey: string,
-  privateHierarchicalKey: string
-): Uint8Array {
-  const ciphertext = fromBase64(encSessionKey);
-  const nonce = fromBase64(sessionKeyNonce);
-  const senderPub = fromBase64(ownerPublicKey);
-  const recipientSec = fromBase64(privateHierarchicalKey);
-  const plaintext = nacl.box.open(ciphertext, nonce, senderPub, recipientSec);
-  if (!plaintext) throw new Error("Unwrap session key failed");
-  return plaintext;
-}
-
-function decryptMeta(
-  encrypted: { nonce: string; ciphertext: string },
-  sessionKey: Uint8Array
-): { name: string; type: string; size: number } {
-  const nonce = fromBase64(encrypted.nonce);
-  const ciphertext = fromBase64(encrypted.ciphertext);
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, sessionKey);
-  if (!plaintext) throw new Error("Metadata decrypt failed");
-  return JSON.parse(new TextDecoder().decode(plaintext));
-}
+import {
+  unwrapPrivateHierarchicalKey,
+  unwrapSessionKeyFromFile,
+  decryptMetadata,
+} from "@/lib/crypto/file-crypto";
 
 export interface DecryptRequest {
   id: number;
@@ -93,13 +59,25 @@ self.onmessage = (e: MessageEvent<DecryptRequest>) => {
   const results: DecryptResult["results"] = [];
 
   for (const f of files) {
+    let sk: Uint8Array | null = null;
     try {
       if (!f.encryptedPrivHier) continue;
-      const privHier = unwrapPrivHier(f.encryptedPrivHier, f.wrappedByPublicKey, encryptionPrivateKey);
-      const sk = unwrapSessionKey(f.encSessionKeyByFile, f.sessionKeyNonce, f.ownerPublicKey, privHier);
-      const encMeta = typeof f.encryptedMetadata === "string" ? JSON.parse(f.encryptedMetadata) : f.encryptedMetadata;
-      const meta = decryptMeta(encMeta, sk);
-      sk.fill(0);
+      const privHier = unwrapPrivateHierarchicalKey(
+        f.encryptedPrivHier,
+        f.wrappedByPublicKey,
+        encryptionPrivateKey,
+      );
+      sk = unwrapSessionKeyFromFile(
+        f.encSessionKeyByFile,
+        f.sessionKeyNonce,
+        f.ownerPublicKey,
+        privHier,
+      );
+      const encMeta =
+        typeof f.encryptedMetadata === "string"
+          ? JSON.parse(f.encryptedMetadata)
+          : f.encryptedMetadata;
+      const meta = decryptMetadata(encMeta, sk);
       results.push({
         fileId: f.fileId,
         name: meta.name,
@@ -117,6 +95,8 @@ self.onmessage = (e: MessageEvent<DecryptRequest>) => {
         size: 0,
         isFolder: f.isFolder,
       });
+    } finally {
+      if (sk) sk.fill(0);
     }
   }
 

@@ -1,9 +1,18 @@
 /**
  * File encryption — client-side only.
  *
+ * Crypto v2 primitives (2026-04-20):
+ *   - Symmetric AEAD: XChaCha20-Poly1305 via `@noble/ciphers` (replaces
+ *     xsalsa20-poly1305 from tweetnacl). Same 32-byte key + 24-byte
+ *     nonce shape, so storage layout is unchanged.
+ *   - Asymmetric key wrap: X25519 ECDH via `@noble/curves` → HKDF-SHA256
+ *     → XChaCha20-Poly1305 (replaces nacl.box). This is NaCl's own
+ *     spec updated to modern primitives: ECDH shared secret, HKDF for
+ *     key-derivation domain separation, then the modern AEAD.
+ *
  * Phase 2 hierarchical key model (Skiff-style):
  *   - Every file has a random symmetric `sessionKey` for content + metadata.
- *   - Every file has an asymmetric `hierarchicalKeyPair` (nacl.box).
+ *   - Every file has an asymmetric `hierarchicalKeyPair` (X25519).
  *   - `sessionKey` is wrapped *once* to the file's public hierarchical key,
  *     using the owner's private key as the box sender. Stored on the file.
  *   - Each collaborator's file_keys row stores `privateHierarchicalKey`
@@ -16,9 +25,23 @@
  * Phase 3 folder inheritance via parent_keys_claim.
  */
 
-import nacl from "tweetnacl";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { x25519 } from "@noble/curves/ed25519.js";
+import { hkdf } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { argon2id } from "@noble/hashes/argon2.js";
-import { toBase64, fromBase64, randomBytes } from "./utils";
+import { toBase64, fromBase64, randomBytes, utf8Encode } from "./utils";
+
+// XChaCha20-Poly1305 spec: 32-byte key, 24-byte nonce, 16-byte Poly1305 tag.
+// `xchacha20poly1305(key, nonce).encrypt(plaintext)` returns `plaintext||tag`.
+const SECRETBOX_KEY_LEN = 32;
+const SECRETBOX_NONCE_LEN = 24;
+
+// Domain-separated HKDF params for the X25519 → symmetric-key derivation.
+// Bumped to `-v2` for crypto v2 so any future rotation can ship as `-v3`
+// without colliding with legacy blobs.
+const BOX_HKDF_SALT = utf8Encode("securewarp-box-v2");
+const BOX_HKDF_INFO = utf8Encode("securewarp-x25519-xchacha20poly1305-v2");
 
 export interface EncryptedFile {
   encryptedContent: Uint8Array;  // raw ciphertext to upload to R2
@@ -31,11 +54,117 @@ export interface EncryptedMetadata {
   ciphertext: string; // base64
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Internal helpers
+// ──────────────────────────────────────────────────────────────────────
+
+function secretboxSeal(plaintext: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array {
+  return xchacha20poly1305(key, nonce).encrypt(plaintext);
+}
+
+function secretboxOpen(ciphertext: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array {
+  // Raw AEAD open. Noble throws with message "invalid tag" on
+  // authentication failure. Callers that need a stable user-facing
+  // message (e.g. "Box decryption failed", "Link unwrap failed",
+  // "Wrong link password") wrap this in their own try/catch with the
+  // appropriate text; leaving raw-throw here avoids one-size-fits-all
+  // errors that lose context at the call site.
+  return xchacha20poly1305(key, nonce).decrypt(ciphertext);
+}
+
+/**
+ * Derive a symmetric AEAD key from an X25519 ECDH shared secret. Used
+ * on both sides of a box wrap; given (senderPriv, recipientPub) or
+ * (senderPub, recipientPriv), HKDF-SHA256 collapses the 32-byte shared
+ * secret + domain-separated salt/info to a 32-byte XChaCha20-Poly1305
+ * key. The resulting keys are deterministic for a given (priv, pub)
+ * pair — we never transmit the derived key, only the fresh nonce and
+ * the ciphertext.
+ */
+function deriveBoxKey(senderPriv: Uint8Array, recipientPub: Uint8Array): Uint8Array {
+  const shared = x25519.getSharedSecret(senderPriv, recipientPub);
+  return hkdf(sha256, shared, BOX_HKDF_SALT, BOX_HKDF_INFO, SECRETBOX_KEY_LEN);
+}
+
+// Shared box wrap helper. Returns combined nonce‖ciphertext base64 plus
+// the nonce separately (for cases where the storage schema splits them).
+function boxWrap(
+  message: Uint8Array,
+  recipientPublicKey: string,
+  senderPrivateKey: string
+): { combined: string; nonceB64: string; ciphertextB64: string } {
+  const recipientPub = fromBase64(recipientPublicKey);
+  const senderPriv = fromBase64(senderPrivateKey);
+  const key = deriveBoxKey(senderPriv, recipientPub);
+  try {
+    const nonce = randomBytes(SECRETBOX_NONCE_LEN);
+    const ciphertext = secretboxSeal(message, nonce, key);
+    const combined = new Uint8Array(nonce.length + ciphertext.length);
+    combined.set(nonce);
+    combined.set(ciphertext, nonce.length);
+    return {
+      combined: toBase64(combined),
+      nonceB64: toBase64(nonce),
+      ciphertextB64: toBase64(ciphertext),
+    };
+  } finally {
+    key.fill(0);
+  }
+}
+
+function boxOpenCombined(
+  combinedB64: string,
+  senderPublicKey: string,
+  recipientPrivateKey: string
+): Uint8Array {
+  const combined = fromBase64(combinedB64);
+  const nonce = combined.slice(0, SECRETBOX_NONCE_LEN);
+  const ciphertext = combined.slice(SECRETBOX_NONCE_LEN);
+  const recipientPriv = fromBase64(recipientPrivateKey);
+  const senderPub = fromBase64(senderPublicKey);
+  // Note the direction flip: on unwrap, the "sender" is the recipient
+  // of the ECDH pair. X25519 is symmetric — (priv_A, pub_B) produces the
+  // same shared secret as (priv_B, pub_A) — so we can derive with the
+  // unwrapper's priv + wrapper's pub and get the same key.
+  const key = deriveBoxKey(recipientPriv, senderPub);
+  try {
+    return secretboxOpen(ciphertext, nonce, key);
+  } catch {
+    throw new Error("Box decryption failed — wrong key or tampered ciphertext");
+  } finally {
+    key.fill(0);
+  }
+}
+
+function boxOpenSplit(
+  ciphertextB64: string,
+  nonceB64: string,
+  senderPublicKey: string,
+  recipientPrivateKey: string
+): Uint8Array {
+  const ciphertext = fromBase64(ciphertextB64);
+  const nonce = fromBase64(nonceB64);
+  const recipientPriv = fromBase64(recipientPrivateKey);
+  const senderPub = fromBase64(senderPublicKey);
+  const key = deriveBoxKey(recipientPriv, senderPub);
+  try {
+    return secretboxOpen(ciphertext, nonce, key);
+  } catch {
+    throw new Error("Box decryption failed — wrong key or tampered ciphertext");
+  } finally {
+    key.fill(0);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Session key + content + metadata (symmetric AEAD)
+// ──────────────────────────────────────────────────────────────────────
+
 /**
  * Generate a random session key for a file.
  */
 export function generateSessionKey(): Uint8Array {
-  return randomBytes(nacl.secretbox.keyLength);
+  return randomBytes(SECRETBOX_KEY_LEN);
 }
 
 /**
@@ -45,11 +174,8 @@ export function encryptFileContent(content: Uint8Array, sessionKey: Uint8Array):
   ciphertext: Uint8Array;
   nonce: string;
 } {
-  const nonce = randomBytes(nacl.secretbox.nonceLength);
-  const ciphertext = nacl.secretbox(content, nonce, sessionKey);
-
-  if (!ciphertext) throw new Error("File encryption failed");
-
+  const nonce = randomBytes(SECRETBOX_NONCE_LEN);
+  const ciphertext = secretboxSeal(content, nonce, sessionKey);
   return {
     ciphertext,
     nonce: toBase64(nonce),
@@ -61,11 +187,7 @@ export function encryptFileContent(content: Uint8Array, sessionKey: Uint8Array):
  */
 export function decryptFileContent(ciphertext: Uint8Array, nonceB64: string, sessionKey: Uint8Array): Uint8Array {
   const nonce = fromBase64(nonceB64);
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, sessionKey);
-
-  if (!plaintext) throw new Error("File decryption failed — wrong key or corrupted data");
-
-  return plaintext;
+  return secretboxOpen(ciphertext, nonce, sessionKey);
 }
 
 /**
@@ -76,12 +198,9 @@ export function encryptMetadata(
   sessionKey: Uint8Array
 ): EncryptedMetadata {
   const payload = JSON.stringify(metadata);
-  const nonce = randomBytes(nacl.secretbox.nonceLength);
+  const nonce = randomBytes(SECRETBOX_NONCE_LEN);
   const messageBytes = new TextEncoder().encode(payload);
-  const ciphertext = nacl.secretbox(messageBytes, nonce, sessionKey);
-
-  if (!ciphertext) throw new Error("Metadata encryption failed");
-
+  const ciphertext = secretboxSeal(messageBytes, nonce, sessionKey);
   return {
     nonce: toBase64(nonce),
     ciphertext: toBase64(ciphertext),
@@ -97,10 +216,7 @@ export function decryptMetadata(
 ): { name: string; type: string; size: number } {
   const nonce = fromBase64(encrypted.nonce);
   const ciphertext = fromBase64(encrypted.ciphertext);
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, sessionKey);
-
-  if (!plaintext) throw new Error("Metadata decryption failed");
-
+  const plaintext = secretboxOpen(ciphertext, nonce, sessionKey);
   return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
@@ -114,80 +230,24 @@ export interface HierarchicalKeypair {
 }
 
 /**
- * Generate a fresh Curve25519 keypair for use as a file's hierarchical key.
+ * Generate a fresh X25519 keypair for use as a file's hierarchical key.
  * Nothing distinguishes these from a user's own encryption keypair at the
  * crypto layer — only the role they play in the storage model differs.
  */
 export function generateHierarchicalKeypair(): HierarchicalKeypair {
-  const kp = nacl.box.keyPair();
+  const privateKey = x25519.utils.randomSecretKey();
+  const publicKey = x25519.getPublicKey(privateKey);
   return {
-    publicKey: toBase64(kp.publicKey),
-    privateKey: toBase64(kp.secretKey),
+    publicKey: toBase64(publicKey),
+    privateKey: toBase64(privateKey),
   };
-}
-
-// Shared nacl.box wrap helper. Returns combined nonce‖ciphertext base64 plus
-// the nonce separately (for cases where the storage schema splits them).
-function boxWrap(
-  message: Uint8Array,
-  recipientPublicKey: string,
-  senderPrivateKey: string
-): { combined: string; nonceB64: string; ciphertextB64: string } {
-  const pubKey = fromBase64(recipientPublicKey);
-  const privKey = fromBase64(senderPrivateKey);
-  const nonce = randomBytes(nacl.box.nonceLength);
-  const ciphertext = nacl.box(message, nonce, pubKey, privKey);
-  if (!ciphertext) throw new Error("Box encryption failed");
-
-  const combined = new Uint8Array(nonce.length + ciphertext.length);
-  combined.set(nonce);
-  combined.set(ciphertext, nonce.length);
-  return {
-    combined: toBase64(combined),
-    nonceB64: toBase64(nonce),
-    ciphertextB64: toBase64(ciphertext),
-  };
-}
-
-function boxOpenCombined(
-  combinedB64: string,
-  senderPublicKey: string,
-  recipientPrivateKey: string
-): Uint8Array {
-  const combined = fromBase64(combinedB64);
-  const nonce = combined.slice(0, nacl.box.nonceLength);
-  const ciphertext = combined.slice(nacl.box.nonceLength);
-  const plain = nacl.box.open(
-    ciphertext,
-    nonce,
-    fromBase64(senderPublicKey),
-    fromBase64(recipientPrivateKey)
-  );
-  if (!plain) throw new Error("Box decryption failed — wrong key or tampered ciphertext");
-  return plain;
-}
-
-function boxOpenSplit(
-  ciphertextB64: string,
-  nonceB64: string,
-  senderPublicKey: string,
-  recipientPrivateKey: string
-): Uint8Array {
-  const plain = nacl.box.open(
-    fromBase64(ciphertextB64),
-    fromBase64(nonceB64),
-    fromBase64(senderPublicKey),
-    fromBase64(recipientPrivateKey)
-  );
-  if (!plain) throw new Error("Box decryption failed — wrong key or tampered ciphertext");
-  return plain;
 }
 
 /**
  * Wrap a file's session key to its own public hierarchical key. The owner
  * is always the box sender — their public key is what a reader uses to
- * unwrap via nacl.box.open. Returns `ciphertext` + `nonce` as separate
- * base64 strings so the DB schema can store them in distinct columns.
+ * unwrap. Returns `ciphertext` + `nonce` as separate base64 strings so the
+ * DB schema can store them in distinct columns.
  */
 export function wrapSessionKeyToFile(
   sessionKey: Uint8Array,
@@ -227,7 +287,7 @@ export function unwrapSessionKeyFromFile(
  * Wrap a file's private hierarchical key to a collaborator's public key.
  * Either the owner or any existing collaborator can call this — the
  * `wrappedByPublicKey` is the sharer's own public key, which the recipient
- * must use when unwrapping via nacl.box.open.
+ * must use when unwrapping.
  */
 export function wrapPrivateHierarchicalKeyForUser(
   filePrivateHierarchicalKey: string,
@@ -269,22 +329,21 @@ export function unwrapPrivateHierarchicalKey(
  * on the client; the server only ever sees the wrapped ciphertext.
  */
 export function generateLinkKey(): Uint8Array {
-  return randomBytes(nacl.secretbox.keyLength);
+  return randomBytes(SECRETBOX_KEY_LEN);
 }
 
 /**
  * Wrap a file's private hierarchical key under a link's symmetric key.
- * Uses `nacl.secretbox` so no sender public key is involved — anyone
- * who holds `linkKey` can unwrap. `linkKey` lives only in the URL fragment
- * and is never transmitted to the server.
+ * Uses XChaCha20-Poly1305 directly so no sender public key is involved —
+ * anyone who holds `linkKey` can unwrap. `linkKey` lives only in the URL
+ * fragment and is never transmitted to the server.
  */
 export function wrapPrivateHierarchicalKeyForLink(
   privateHierarchicalKey: string, // base64
   linkKey: Uint8Array
 ): { encryptedPrivateHierarchicalKey: string; linkKeyNonce: string } {
-  const nonce = randomBytes(nacl.secretbox.nonceLength);
-  const ciphertext = nacl.secretbox(fromBase64(privateHierarchicalKey), nonce, linkKey);
-  if (!ciphertext) throw new Error("Link wrap failed");
+  const nonce = randomBytes(SECRETBOX_NONCE_LEN);
+  const ciphertext = secretboxSeal(fromBase64(privateHierarchicalKey), nonce, linkKey);
   return {
     encryptedPrivateHierarchicalKey: toBase64(ciphertext),
     linkKeyNonce: toBase64(nonce),
@@ -301,12 +360,16 @@ export function unwrapPrivateHierarchicalKeyFromLink(
   linkKeyNonce: string,
   linkKey: Uint8Array
 ): string {
-  const plain = nacl.secretbox.open(
-    fromBase64(encryptedPrivateHierarchicalKey),
-    fromBase64(linkKeyNonce),
-    linkKey
-  );
-  if (!plain) throw new Error("Link unwrap failed — wrong key or tampered ciphertext");
+  let plain: Uint8Array;
+  try {
+    plain = secretboxOpen(
+      fromBase64(encryptedPrivateHierarchicalKey),
+      fromBase64(linkKeyNonce),
+      linkKey,
+    );
+  } catch {
+    throw new Error("Link unwrap failed — wrong key or tampered ciphertext");
+  }
   return toBase64(plain);
 }
 
@@ -337,7 +400,7 @@ export function decodeLinkKeyFromFragment(fragment: string): Uint8Array {
 const LINK_ARGON2_MEMORY_KB = 32 * 1024; // 32 MB
 const LINK_ARGON2_ITERATIONS = 2;
 const LINK_ARGON2_PARALLELISM = 1;
-const LINK_KEY_LENGTH = nacl.secretbox.keyLength;
+const LINK_KEY_LENGTH = SECRETBOX_KEY_LEN;
 
 /**
  * Derive a 32-byte symmetric key from a link password using Argon2id.
@@ -363,15 +426,17 @@ export function wrapLinkKeyWithPassword(
 ): { passwordSalt: string; passwordWrappedLinkKey: string; passwordWrapNonce: string } {
   const salt = randomBytes(16);
   const wrappingKey = deriveLinkWrappingKey(password, salt);
-  const nonce = randomBytes(nacl.secretbox.nonceLength);
-  const ciphertext = nacl.secretbox(linkKey, nonce, wrappingKey);
-  wrappingKey.fill(0);
-  if (!ciphertext) throw new Error("Password wrap failed");
-  return {
-    passwordSalt: toBase64(salt),
-    passwordWrappedLinkKey: toBase64(ciphertext),
-    passwordWrapNonce: toBase64(nonce),
-  };
+  try {
+    const nonce = randomBytes(SECRETBOX_NONCE_LEN);
+    const ciphertext = secretboxSeal(linkKey, nonce, wrappingKey);
+    return {
+      passwordSalt: toBase64(salt),
+      passwordWrappedLinkKey: toBase64(ciphertext),
+      passwordWrapNonce: toBase64(nonce),
+    };
+  } finally {
+    wrappingKey.fill(0);
+  }
 }
 
 /**
@@ -386,14 +451,17 @@ export function unwrapLinkKeyWithPassword(
   password: string
 ): Uint8Array {
   const wrappingKey = deriveLinkWrappingKey(password, fromBase64(passwordSalt));
-  const plain = nacl.secretbox.open(
-    fromBase64(passwordWrappedLinkKey),
-    fromBase64(passwordWrapNonce),
-    wrappingKey
-  );
-  wrappingKey.fill(0);
-  if (!plain) throw new Error("Wrong link password");
-  return plain;
+  try {
+    return secretboxOpen(
+      fromBase64(passwordWrappedLinkKey),
+      fromBase64(passwordWrapNonce),
+      wrappingKey,
+    );
+  } catch {
+    throw new Error("Wrong link password");
+  } finally {
+    wrappingKey.fill(0);
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -414,7 +482,7 @@ interface ParentClaimPayload {
 /**
  * Wrap `{sessionKey, childPrivateHierarchicalKey}` under the *parent's*
  * public hierarchical key, with the owner's private encryption key as the
- * nacl.box sender. The result is a single base64 combined nonce‖ciphertext.
+ * box sender. The result is a single base64 combined nonce‖ciphertext.
  *
  * At read time the unwrap needs the parent's *private* hier key (obtained
  * by the user unwrapping their file_keys row on the parent) and the owner's

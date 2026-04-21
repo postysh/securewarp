@@ -148,7 +148,6 @@ function userWithTotp(email = "alice@example.com") {
     argon2_salt: "argon",
     encrypted_user_data: "enc",
     public_encryption_key: "pek",
-    public_signing_key: "psk",
     recovery_key_hash: null,
     recovery_encrypted_data: null,
     created_at: new Date().toISOString(),
@@ -689,7 +688,6 @@ describe("red-team: register", () => {
         argon2Salt: "a",
         encryptedUserData: { nonce: "n", ciphertext: "c" },
         publicEncryptionKey: "pek",
-        publicSigningKey: "psk",
       }),
     );
     expect(res.status).toBe(400);
@@ -711,7 +709,6 @@ describe("red-team: register", () => {
         argon2Salt: "a",
         encryptedUserData: { nonce: "n", ciphertext: "c" },
         publicEncryptionKey: "pek",
-        publicSigningKey: "psk",
       }),
     );
     expect(res.status).toBe(400);
@@ -734,7 +731,6 @@ describe("red-team: register", () => {
         argon2Salt: "a",
         encryptedUserData: { nonce: "n", ciphertext: "c" },
         publicEncryptionKey: "pek",
-        publicSigningKey: "psk",
       }),
     );
     expect(res.status).toBe(503);
@@ -753,7 +749,6 @@ describe("red-team: register", () => {
         argon2Salt: "a",
         encryptedUserData: { nonce: "n", ciphertext: "c" },
         publicEncryptionKey: "pek",
-        publicSigningKey: "psk",
       }),
     );
     expect(res.status).toBe(429);

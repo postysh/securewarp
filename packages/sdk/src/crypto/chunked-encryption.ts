@@ -4,10 +4,16 @@
  * Splits files into fixed-size chunks, encrypts each independently.
  * Each chunk is authenticated with its sequence number and isLastChunk flag
  * to prevent reordering and truncation attacks.
+ *
+ * AEAD: XChaCha20-Poly1305 via `@noble/ciphers` (crypto v2; replaced
+ * xsalsa20-poly1305 in 2026-04-20). Same 32-byte key + 24-byte nonce,
+ * so the chunk header format + storage layout are unchanged.
  */
 
-import nacl from "tweetnacl";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { toBase64, fromBase64, randomBytes } from "./utils";
+
+const SECRETBOX_NONCE_LEN = 24;
 
 export const CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB per chunk
 export const MAX_FILE_SIZE_FREE = 100 * 1024 * 1024; // 100 MB for free tier
@@ -60,10 +66,8 @@ export function encryptChunk(
   authPayload[4] = isFinal ? 1 : 0;
   authPayload.set(chunkData, 5);
 
-  const nonce = randomBytes(nacl.secretbox.nonceLength);
-  const ciphertext = nacl.secretbox(authPayload, nonce, sessionKey);
-
-  if (!ciphertext) throw new Error(`Chunk ${index} encryption failed`);
+  const nonce = randomBytes(SECRETBOX_NONCE_LEN);
+  const ciphertext = xchacha20poly1305(sessionKey, nonce).encrypt(authPayload);
 
   return {
     index,
@@ -85,9 +89,15 @@ export function decryptChunk(
   sessionKey: Uint8Array
 ): Uint8Array {
   const nonce = fromBase64(nonceB64);
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, sessionKey);
-
-  if (!plaintext) throw new Error(`Chunk ${expectedIndex} decryption failed`);
+  // `.decrypt()` throws with "invalid tag" on Poly1305 mismatch. Wrap
+  // with the historical "Chunk N decryption failed" message so callers
+  // and tests have a stable surface string.
+  let plaintext: Uint8Array;
+  try {
+    plaintext = xchacha20poly1305(sessionKey, nonce).decrypt(ciphertext);
+  } catch {
+    throw new Error(`Chunk ${expectedIndex} decryption failed`);
+  }
 
   // Verify authentication data
   const view = new DataView(plaintext.buffer, plaintext.byteOffset);

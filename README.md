@@ -17,9 +17,9 @@ Password
 
 File Upload
   → Random session key per file
-  → xsalsa20-poly1305 (encrypt content in 50 MB chunks)
+  → XChaCha20-Poly1305 (encrypt content in 50 MB chunks)
   → Authenticated chunks (sequence + isFinal prevents tampering)
-  → Session key encrypted with recipient's Curve25519 public key
+  → Session key wrapped to recipient's X25519 pub key via ECDH + HKDF + XChaCha20-Poly1305
   → Encrypted blob uploaded directly to R2 (server never touches plaintext)
 ```
 
@@ -27,13 +27,14 @@ File Upload
 
 | Primitive | Usage |
 |-----------|-------|
-| **Curve25519** | Asymmetric encryption keypairs |
-| **Ed25519** | Digital signatures |
-| **xsalsa20-poly1305** | Symmetric file + metadata encryption |
+| **X25519** | Asymmetric encryption keypairs (ECDH for key wrap) |
+| **XChaCha20-Poly1305** | Symmetric file + metadata encryption (AEAD) |
 | **Argon2id** | Password-based key derivation |
-| **HKDF-SHA256** | Key splitting (auth key + encryption key) |
+| **HKDF-SHA256** | Key splitting (auth key + encryption key + ECDH-to-AEAD KDF) |
 | **SRP-6a** | Zero-knowledge password authentication |
 | **BIP39** | 24-word mnemonic recovery keys |
+
+Crypto v2 (2026-04-20) rotated off tweetnacl's `nacl.box` / `nacl.secretbox` (which used Curve25519 + xsalsa20-poly1305) to `@noble/ciphers` + `@noble/curves`. The asymmetric wrap is now explicit: X25519 ECDH produces a shared secret, HKDF-SHA256 derives a 32-byte key, XChaCha20-Poly1305 seals with a 24-byte nonce. Where older comments in this file still reference `nacl.box` / `xsalsa20-poly1305`, read them as this chain / XChaCha20-Poly1305 respectively; a full prose pass is tracked as a follow-up.
 
 ### Zero-Knowledge Auth (SRP-6a)
 
@@ -56,7 +57,7 @@ The threat model is deliberately the same as the SRP verifier's: a disk-level at
 | **Framework** | Next.js 16 (App Router) |
 | **Frontend** | React 19, Tailwind CSS 4, TypeScript |
 | **Icons** | Hugeicons |
-| **Client Crypto** | tweetnacl, argon2-browser (WASM), @noble/hashes, bip39 |
+| **Client Crypto** | @noble/ciphers (XChaCha20-Poly1305), @noble/curves (X25519), @noble/hashes (HKDF + SHA-256), argon2-browser (WASM), bip39 |
 | **Auth Protocol** | secure-remote-password (SRP-6a) |
 | **Sessions** | jose (JWT), HttpOnly cookies |
 | **Database** | Supabase Postgres (service-role, no Supabase Auth) |

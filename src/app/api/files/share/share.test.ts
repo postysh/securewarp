@@ -6,24 +6,33 @@
  */
 
 import { describe, it, expect } from "vitest";
-import nacl from "tweetnacl";
-import { toBase64, fromBase64 } from "@/lib/crypto/utils";
+import { x25519 } from "@noble/curves/ed25519.js";
+import { toBase64 } from "@/lib/crypto/utils";
 import {
   generateHierarchicalKeypair,
   wrapPrivateHierarchicalKeyForUser,
+  unwrapPrivateHierarchicalKey,
 } from "@/lib/crypto/file-crypto";
 
+// Helper — generate an X25519 keypair in the same base64 format the
+// wrap/unwrap helpers consume. Drops the historical tweetnacl `keyPair()`
+// shape in favor of noble's matched priv/pub call.
+function makeKeypair(): { publicKey: string; secretKey: string } {
+  const secretKey = x25519.utils.randomSecretKey();
+  const publicKey = x25519.getPublicKey(secretKey);
+  return { publicKey: toBase64(publicKey), secretKey: toBase64(secretKey) };
+}
+
 describe("share crypto invariants", () => {
-  // Generate two users' keypairs
-  const ownerKp = nacl.box.keyPair();
-  const recipientKp = nacl.box.keyPair();
+  const ownerKp = makeKeypair();
+  const recipientKp = makeKeypair();
   const hier = generateHierarchicalKeypair();
 
   it("wraps private hier key for recipient using owner's private key", () => {
     const wrapped = wrapPrivateHierarchicalKeyForUser(
       hier.privateKey,
-      toBase64(recipientKp.publicKey),
-      toBase64(ownerKp.secretKey)
+      recipientKp.publicKey,
+      ownerKp.secretKey,
     );
     expect(wrapped).toBeTruthy();
     expect(typeof wrapped).toBe("string");
@@ -33,54 +42,39 @@ describe("share crypto invariants", () => {
   it("recipient can unwrap with their private key + owner's public key", () => {
     const wrapped = wrapPrivateHierarchicalKeyForUser(
       hier.privateKey,
-      toBase64(recipientKp.publicKey),
-      toBase64(ownerKp.secretKey)
+      recipientKp.publicKey,
+      ownerKp.secretKey,
     );
-
-    // Unwrap: combined = nonce || ciphertext
-    const combined = fromBase64(wrapped);
-    const nonce = combined.slice(0, nacl.box.nonceLength);
-    const ciphertext = combined.slice(nacl.box.nonceLength);
-    const plaintext = nacl.box.open(
-      ciphertext,
-      nonce,
-      ownerKp.publicKey, // sender's public key
-      recipientKp.secretKey // recipient's private key
+    const recovered = unwrapPrivateHierarchicalKey(
+      wrapped,
+      ownerKp.publicKey,
+      recipientKp.secretKey,
     );
-    expect(plaintext).not.toBeNull();
-    expect(toBase64(plaintext!)).toBe(hier.privateKey);
+    expect(recovered).toBe(hier.privateKey);
   });
 
   it("wrong recipient cannot unwrap", () => {
     const wrapped = wrapPrivateHierarchicalKeyForUser(
       hier.privateKey,
-      toBase64(recipientKp.publicKey),
-      toBase64(ownerKp.secretKey)
+      recipientKp.publicKey,
+      ownerKp.secretKey,
     );
-
-    const wrongKp = nacl.box.keyPair();
-    const combined = fromBase64(wrapped);
-    const nonce = combined.slice(0, nacl.box.nonceLength);
-    const ciphertext = combined.slice(nacl.box.nonceLength);
-    const plaintext = nacl.box.open(
-      ciphertext,
-      nonce,
-      ownerKp.publicKey,
-      wrongKp.secretKey // wrong key
-    );
-    expect(plaintext).toBeNull();
+    const wrongKp = makeKeypair();
+    expect(() =>
+      unwrapPrivateHierarchicalKey(wrapped, ownerKp.publicKey, wrongKp.secretKey),
+    ).toThrow();
   });
 
-  it("wrapped key differs per recipient (different nonce)", () => {
+  it("wrapped key differs per wrap call (different nonce)", () => {
     const wrap1 = wrapPrivateHierarchicalKeyForUser(
       hier.privateKey,
-      toBase64(recipientKp.publicKey),
-      toBase64(ownerKp.secretKey)
+      recipientKp.publicKey,
+      ownerKp.secretKey,
     );
     const wrap2 = wrapPrivateHierarchicalKeyForUser(
       hier.privateKey,
-      toBase64(recipientKp.publicKey),
-      toBase64(ownerKp.secretKey)
+      recipientKp.publicKey,
+      ownerKp.secretKey,
     );
     // Same plaintext but different nonces → different ciphertext
     expect(wrap1).not.toBe(wrap2);

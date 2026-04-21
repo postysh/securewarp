@@ -143,7 +143,6 @@ export async function prepareRegistration(email?: string): Promise<{
       ciphertext: encryptedUserData.ciphertext,
     },
     publicEncryptionKey: keypairs.encryptionPublicKey,
-    publicSigningKey: keypairs.signingPublicKey,
     recoveryKeyHash,
     recoveryEncryptedData: {
       nonce: recoveryEncryptedData.nonce,

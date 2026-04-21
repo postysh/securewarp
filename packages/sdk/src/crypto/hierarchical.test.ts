@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import nacl from "tweetnacl";
+import { x25519 } from "@noble/curves/ed25519.js";
 import {
   generateSessionKey,
   generateHierarchicalKeypair,
@@ -22,15 +22,16 @@ import {
 import { toBase64 } from "./utils";
 
 /**
- * Simulated "user" — owns a Curve25519 keypair, the same shape a real
+ * Simulated "user" — owns an X25519 keypair, the same shape a real
  * SecureWarp account has. Used to stand in for user A, B, C in sharing
  * scenarios without touching any network/server code.
  */
 function makeUser() {
-  const kp = nacl.box.keyPair();
+  const privateKey = x25519.utils.randomSecretKey();
+  const publicKey = x25519.getPublicKey(privateKey);
   return {
-    publicKey: toBase64(kp.publicKey),
-    privateKey: toBase64(kp.secretKey),
+    publicKey: toBase64(publicKey),
+    privateKey: toBase64(privateKey),
   };
 }
 

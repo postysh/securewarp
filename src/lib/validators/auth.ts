@@ -10,7 +10,6 @@ export const RegisterSchema = z.object({
     ciphertext: z.string().min(1),
   }),
   publicEncryptionKey: z.string().min(1),
-  publicSigningKey: z.string().min(1),
   recoveryKeyHash: z.string().optional(),
   recoveryEncryptedData: z.object({
     nonce: z.string().min(1),

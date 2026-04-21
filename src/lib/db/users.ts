@@ -9,7 +9,6 @@ export interface UserRow {
   argon2_salt: string;
   encrypted_user_data: string;
   public_encryption_key: string;
-  public_signing_key: string;
   recovery_key_hash: string | null;
   recovery_encrypted_data: string | null;
   created_at: string;
@@ -34,7 +33,6 @@ export async function createUser(data: {
   argon2Salt: string;
   encryptedUserData: string;
   publicEncryptionKey: string;
-  publicSigningKey: string;
   recoveryKeyHash?: string;
   recoveryEncryptedData?: string;
 }): Promise<UserRow> {
@@ -47,7 +45,6 @@ export async function createUser(data: {
       argon2_salt: data.argon2Salt,
       encrypted_user_data: data.encryptedUserData,
       public_encryption_key: data.publicEncryptionKey,
-      public_signing_key: data.publicSigningKey,
       recovery_key_hash: data.recoveryKeyHash || null,
       recovery_encrypted_data: data.recoveryEncryptedData || null,
     })

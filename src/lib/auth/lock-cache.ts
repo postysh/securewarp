@@ -45,15 +45,21 @@
  *     new flow writes a fresh blob with the new-password-derived key.
  */
 
-import nacl from "tweetnacl";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import {
   toBase64,
   fromBase64,
   randomBytes,
 } from "@/lib/crypto/utils";
-import type { UserKeys } from "@/hooks/use-user-keys";
 
-const STORAGE_KEY = "securewarp_lock_cache_v1";
+// Crypto v2 bump: the old `_v1` blob was sealed with xsalsa20-poly1305
+// under HKDF `-v1` info strings. Neither the old blob nor the old key
+// derivation is compatible with v2 — any returning user with a v1 blob
+// falls through to the full login path (same graceful degradation as
+// if they'd never had a cache), which re-registers a fresh v2 blob on
+// next login.
+const STORAGE_KEY = "securewarp_lock_cache_v2";
+const SECRETBOX_NONCE_LEN = 24;
 
 // What we persist. `email` and `argon2Salt` live alongside the blob
 // in plaintext because neither is a secret — the salt is the same one
@@ -71,8 +77,6 @@ interface LockCacheBlob {
 interface UnsealedKeyPayload {
   encryptionPublicKey: string;
   encryptionPrivateKey: string;
-  signingPublicKey: string;
-  signingPrivateKey: string;
 }
 
 // NOTE: `searchIndexKey` (HKDF output for search-token HMAC) is NOT
@@ -95,9 +99,8 @@ export function saveLockCache(params: {
 }): void {
   if (typeof window === "undefined") return;
   const plaintext = new TextEncoder().encode(JSON.stringify(params.keys));
-  const nonce = randomBytes(nacl.secretbox.nonceLength);
-  const ciphertext = nacl.secretbox(plaintext, nonce, params.unlockCacheKey);
-  if (!ciphertext) throw new Error("Lock cache seal failed");
+  const nonce = randomBytes(SECRETBOX_NONCE_LEN);
+  const ciphertext = xchacha20poly1305(params.unlockCacheKey, nonce).encrypt(plaintext);
 
   const blob: LockCacheBlob = {
     email: params.email,
@@ -158,8 +161,12 @@ export function unlockKeys(unlockCacheKey: Uint8Array): UnsealedKeyPayload {
   }
   const ciphertext = fromBase64(blob.ciphertext);
   const nonce = fromBase64(blob.nonce);
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, unlockCacheKey);
-  if (!plaintext) throw new Error("Wrong password");
+  let plaintext: Uint8Array;
+  try {
+    plaintext = xchacha20poly1305(unlockCacheKey, nonce).decrypt(ciphertext);
+  } catch {
+    throw new Error("Wrong password");
+  }
   return JSON.parse(new TextDecoder().decode(plaintext)) as UnsealedKeyPayload;
 }
 

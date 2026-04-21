@@ -33,7 +33,7 @@
  *   doesn't leak the previous one's entries).
  */
 
-import nacl from "tweetnacl";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { fromBase64, toBase64, randomBytes } from "@/lib/crypto/utils";
 
 const DB_NAME = "securewarp_search";
@@ -73,7 +73,7 @@ interface MetaRow {
   version: number;
 }
 
-const NONCE_LEN = nacl.secretbox.nonceLength;
+const NONCE_LEN = 24; // XChaCha20-Poly1305 nonce length
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -116,11 +116,11 @@ function tx<T>(
 }
 
 function deriveKey(encryptionPrivateKeyB64: string): Uint8Array {
-  // The user's private encryption key is 32 bytes in nacl.box format.
-  // We reuse it directly as the symmetric secretbox key. The key
-  // never leaves the client; the cache is unreadable to anyone who
-  // doesn't already hold the user's private key (i.e. anyone who
-  // couldn't decrypt the files themselves).
+  // The user's private encryption key is 32 bytes (X25519). We reuse
+  // it directly as the symmetric XChaCha20-Poly1305 key. The key never
+  // leaves the client; the cache is unreadable to anyone who doesn't
+  // already hold the user's private key (i.e. anyone who couldn't
+  // decrypt the files themselves).
   const raw = fromBase64(encryptionPrivateKeyB64);
   return raw.slice(0, 32);
 }
@@ -131,8 +131,7 @@ function encryptEntry(
 ): { nonce: string; ciphertext: string } {
   const nonce = randomBytes(NONCE_LEN);
   const plaintext = new TextEncoder().encode(JSON.stringify(entry));
-  const ciphertext = nacl.secretbox(plaintext, nonce, key);
-  if (!ciphertext) throw new Error("Cache encrypt failed");
+  const ciphertext = xchacha20poly1305(key, nonce).encrypt(plaintext);
   return { nonce: toBase64(nonce), ciphertext: toBase64(ciphertext) };
 }
 
@@ -142,8 +141,12 @@ function decryptEntry(
 ): SearchCacheEntry | null {
   const nonce = fromBase64(row.nonce);
   const ciphertext = fromBase64(row.ciphertext);
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, key);
-  if (!plaintext) return null;
+  let plaintext: Uint8Array;
+  try {
+    plaintext = xchacha20poly1305(key, nonce).decrypt(ciphertext);
+  } catch {
+    return null;
+  }
   try {
     return JSON.parse(new TextDecoder().decode(plaintext)) as SearchCacheEntry;
   } catch {

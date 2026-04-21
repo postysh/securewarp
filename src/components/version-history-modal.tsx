@@ -10,7 +10,6 @@ import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
 import { decryptMetadata } from "@/lib/crypto/file-crypto";
 import { fromBase64 } from "@/lib/crypto/utils";
-import nacl from "tweetnacl";
 import {
   unwrapPrivateHierarchicalKey,
   unwrapSessionKeyFromFile,
@@ -255,9 +254,8 @@ export function VersionHistoryModal({
     return versions.length > 0 ? versions[0].versionNumber : 1;
   }, [file?.currentVersionNumber, versions]);
 
-  // Keep unused imports' type checker happy (nacl + fromBase64 are
-  // reserved for a future per-version key-rotation migration).
-  void nacl;
+  // fromBase64 is reserved for a future per-version key-rotation path;
+  // retain the import so touching that file doesn't have to re-plumb it.
   void fromBase64;
 
   if (!file) return null;

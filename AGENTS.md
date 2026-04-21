@@ -14,9 +14,13 @@ derived key material beyond the SRP verifier and the public keys. If a change
 would cause the server to handle any of those, stop and flag it — it is not a
 bug fix, it is a product-level regression.
 
-Client-side primitives are fixed: xsalsa20-poly1305 (tweetnacl), Argon2id,
-HKDF-SHA256 (@noble/hashes), SRP-6a (secure-remote-password), BIP39. Don't
-swap them without a migration path for existing ciphertext and stored hashes.
+Client-side primitives are fixed: XChaCha20-Poly1305 (@noble/ciphers),
+X25519 (@noble/curves) — used for the asymmetric "box" wrap via ECDH +
+HKDF → XChaCha20-Poly1305, Argon2id, HKDF-SHA256 (@noble/hashes),
+SRP-6a (secure-remote-password), BIP39. Don't swap them without a
+migration path for existing ciphertext and stored hashes. Crypto v2
+(2026-04-20) rotated off tweetnacl — don't re-introduce it or
+`nacl.box` / `nacl.secretbox` in new code.
 
 ## Touching `src/lib/crypto/**` or `src/lib/srp/**`
 

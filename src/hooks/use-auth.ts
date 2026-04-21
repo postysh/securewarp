@@ -111,7 +111,6 @@ export function useAuth() {
           argon2Salt: toBase64(argon2Salt),
           encryptedUserData,
           publicEncryptionKey: keypairs.encryptionPublicKey,
-          publicSigningKey: keypairs.signingPublicKey,
           recoveryKeyHash,
           recoveryEncryptedData,
           turnstileToken,
@@ -138,8 +137,6 @@ export function useAuth() {
         keys: {
           encryptionPublicKey: keypairs.encryptionPublicKey,
           encryptionPrivateKey: keypairs.encryptionPrivateKey,
-          signingPublicKey: keypairs.signingPublicKey,
-          signingPrivateKey: keypairs.signingPrivateKey,
         },
         unlockCacheKey,
       });
@@ -239,8 +236,6 @@ export function useAuth() {
       const keys: UserKeys = {
         encryptionPublicKey: verifyData.publicEncryptionKey,
         encryptionPrivateKey: privateKeys.encryptionPrivateKey,
-        signingPublicKey: verifyData.publicSigningKey,
-        signingPrivateKey: privateKeys.signingPrivateKey,
         email,
       };
 
@@ -279,8 +274,6 @@ export function useAuth() {
         keys: {
           encryptionPublicKey: keys.encryptionPublicKey,
           encryptionPrivateKey: keys.encryptionPrivateKey,
-          signingPublicKey: keys.signingPublicKey,
-          signingPrivateKey: keys.signingPrivateKey,
         },
         unlockCacheKey,
       });
@@ -340,8 +333,6 @@ export function useAuth() {
           keys: {
             encryptionPublicKey: pending.keys.encryptionPublicKey,
             encryptionPrivateKey: pending.keys.encryptionPrivateKey,
-            signingPublicKey: pending.keys.signingPublicKey,
-            signingPrivateKey: pending.keys.signingPrivateKey,
           },
           unlockCacheKey: pending.unlockCacheKey,
         });
@@ -417,8 +408,6 @@ export function useAuth() {
       const keypairs = {
         encryptionPublicKey: "recovered",
         encryptionPrivateKey: privateKeys.encryptionPrivateKey,
-        signingPublicKey: "recovered",
-        signingPrivateKey: privateKeys.signingPrivateKey,
       };
       const newEncryptedUserData = encryptUserData(keypairs, newPds);
 
@@ -459,8 +448,6 @@ export function useAuth() {
       const recoveredKeys = {
         encryptionPublicKey: "recovered",
         encryptionPrivateKey: privateKeys.encryptionPrivateKey,
-        signingPublicKey: "recovered",
-        signingPrivateKey: privateKeys.signingPrivateKey,
         email,
       };
       sessionStorage.setItem("securewarp_keys", JSON.stringify(recoveredKeys));
@@ -477,8 +464,6 @@ export function useAuth() {
         keys: {
           encryptionPublicKey: "recovered",
           encryptionPrivateKey: privateKeys.encryptionPrivateKey,
-          signingPublicKey: "recovered",
-          signingPrivateKey: privateKeys.signingPrivateKey,
         },
         unlockCacheKey: newUnlockCacheKey,
       });
@@ -548,8 +533,6 @@ export function useAuth() {
       const keypairs = {
         encryptionPublicKey: currentKeys.encryptionPublicKey,
         encryptionPrivateKey: currentKeys.encryptionPrivateKey,
-        signingPublicKey: currentKeys.signingPublicKey,
-        signingPrivateKey: currentKeys.signingPrivateKey,
       };
       const newEncryptedUserData = encryptUserData(keypairs, newPds);
 
@@ -591,8 +574,6 @@ export function useAuth() {
         keys: {
           encryptionPublicKey: keypairs.encryptionPublicKey,
           encryptionPrivateKey: keypairs.encryptionPrivateKey,
-          signingPublicKey: keypairs.signingPublicKey,
-          signingPrivateKey: keypairs.signingPrivateKey,
         },
         unlockCacheKey: newUnlockCacheKey,
       });

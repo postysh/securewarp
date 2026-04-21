@@ -63,7 +63,6 @@ async function registerUser() {
       argon2_salt: body.argon2Salt,
       encrypted_user_data: JSON.stringify(body.encryptedUserData),
       public_encryption_key: body.publicEncryptionKey,
-      public_signing_key: body.publicSigningKey,
       recovery_key_hash: body.recoveryKeyHash,
       recovery_encrypted_data: JSON.stringify(body.recoveryEncryptedData),
     })
