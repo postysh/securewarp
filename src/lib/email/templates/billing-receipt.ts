@@ -5,6 +5,11 @@
  * plan label, and dates come from Stripe (server-side billing
  * records) which never see user file content. Display name is
  * plaintext on `users.display_name`. See AGENTS.md → "Email".
+ *
+ * Visual language matches the marketing site — cream gutter, white
+ * card, warm-orange accent, mono eyebrows / BETA pill. The amount
+ * + plan sit in a prominent receipt block so the key data reads
+ * at a glance in the inbox preview.
  */
 
 export interface BillingReceiptData {
@@ -16,53 +21,165 @@ export interface BillingReceiptData {
   portalUrl: string;
 }
 
+const SANS =
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
+const MONO =
+  "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace";
+
 export function billingReceiptTemplate(data: BillingReceiptData): {
   subject: string;
   html: string;
   text: string;
 } {
   const name = data.displayName?.trim() || null;
-  const greeting = name ? `Thanks, ${name}` : "Thanks for your payment";
+  const greetingText = name ? `Thanks, ${name}.` : "Thanks for your payment.";
+  const greetingHtml = name ? `Thanks, ${escapeHtml(name)}.` : "Thanks for your payment.";
   const subject = `Payment received — ${data.amountFormatted} for SecureWarp ${data.planLabel}`;
-  const renewalLine = data.nextRenewalDate
-    ? `Your next renewal is ${data.nextRenewalDate}.`
-    : null;
+  const hasInvoice = !!data.invoicePdfUrl;
 
   const html = `<!doctype html>
 <html>
-  <body style="margin:0;padding:0;background:#0a0a0a;color:#e5e5e5;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="padding:32px 16px;">
-      <tr><td align="center">
-        <table role="presentation" width="520" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;background:#141414;border:1px solid #262626;border-radius:8px;padding:32px;">
-          <tr><td>
-            <h1 style="margin:0 0 16px;font-size:20px;font-weight:600;color:#fafafa;">${escapeHtml(greeting)}</h1>
-            <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#a3a3a3;">
-              We charged <strong style="color:#fafafa;">${escapeHtml(data.amountFormatted)}</strong> for your SecureWarp <strong style="color:#fafafa;">${escapeHtml(data.planLabel)}</strong> plan.
-              ${renewalLine ? " " + escapeHtml(renewalLine) : ""}
-            </p>
-            <p style="margin:0 0 24px;">
-              <a href="${escapeAttr(data.portalUrl)}" style="display:inline-block;padding:10px 16px;background:#fafafa;color:#0a0a0a;text-decoration:none;border-radius:6px;font-size:14px;font-weight:500;">Manage billing</a>
-              ${data.invoicePdfUrl ? `<a href="${escapeAttr(data.invoicePdfUrl)}" style="display:inline-block;margin-left:8px;padding:10px 16px;background:transparent;color:#fafafa;text-decoration:none;border:1px solid #404040;border-radius:6px;font-size:14px;font-weight:500;">Download invoice</a>` : ""}
-            </p>
-            <p style="margin:0;font-size:12px;color:#525252;">
-              You're receiving this because you have an active SecureWarp subscription. Turn off receipts in Settings → Notifications.
-            </p>
-          </td></tr>
-        </table>
-      </td></tr>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light only" />
+    <meta name="supported-color-schemes" content="light only" />
+  </head>
+  <body style="margin:0;padding:0;background:#faf8f4;color:#0a0a0a;font-family:${SANS};">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#faf8f4;">
+      <tr>
+        <td align="center" style="padding:48px 16px;">
+          <table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="max-width:560px;background:#ffffff;border:1px solid rgba(0,0,0,0.06);border-radius:10px;">
+            <tr>
+              <td style="padding:28px 32px 0;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td style="font-size:13px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#0a0a0a;font-family:${MONO};padding-right:10px;">
+                      Securewarp
+                    </td>
+                    <td style="font-size:9px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#ef5a3c;background:rgba(239,90,60,0.1);border:1px solid rgba(239,90,60,0.25);padding:3px 7px;border-radius:4px;font-family:${MONO};line-height:1;">
+                      Beta
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:28px 32px 8px;">
+                <p style="margin:0 0 12px;font-size:11px;font-weight:500;letter-spacing:0.14em;text-transform:uppercase;color:#ef5a3c;font-family:${MONO};">
+                  Payment received
+                </p>
+                <h1 style="margin:0 0 16px;font-size:28px;line-height:1.15;font-weight:400;letter-spacing:-0.6px;color:#0a0a0a;font-family:${SANS};">
+                  ${greetingHtml}
+                </h1>
+                <p style="margin:0 0 22px;font-size:15px;line-height:1.625;color:rgba(0,0,0,0.68);font-family:${SANS};">
+                  Your SecureWarp subscription is paid up. Details below for your records.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 22px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid rgba(0,0,0,0.08);border-radius:8px;">
+                  <tr>
+                    <td style="padding:18px 20px;border-bottom:1px solid rgba(0,0,0,0.06);">
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                        <tr>
+                          <td style="font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:rgba(0,0,0,0.5);font-family:${MONO};padding-bottom:6px;">
+                            Amount charged
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="font-size:32px;line-height:1;font-weight:500;color:#0a0a0a;font-family:${SANS};letter-spacing:-0.6px;">
+                            ${escapeHtml(data.amountFormatted)}
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:0;">
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                        <tr>
+                          <td width="50%" style="padding:14px 20px;border-right:1px solid rgba(0,0,0,0.06);${data.nextRenewalDate ? "border-bottom:1px solid rgba(0,0,0,0.06);" : ""}">
+                            <p style="margin:0 0 4px;font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:rgba(0,0,0,0.5);font-family:${MONO};">Plan</p>
+                            <p style="margin:0;font-size:14px;color:#0a0a0a;font-family:${SANS};font-weight:500;">${escapeHtml(data.planLabel)}</p>
+                          </td>
+                          <td width="50%" style="padding:14px 20px;${data.nextRenewalDate ? "border-bottom:1px solid rgba(0,0,0,0.06);" : ""}">
+                            <p style="margin:0 0 4px;font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:rgba(0,0,0,0.5);font-family:${MONO};">Billing cycle</p>
+                            <p style="margin:0;font-size:14px;color:#0a0a0a;font-family:${SANS};">Monthly</p>
+                          </td>
+                        </tr>
+                        ${data.nextRenewalDate ? `<tr>
+                          <td colspan="2" style="padding:14px 20px;">
+                            <p style="margin:0 0 4px;font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:rgba(0,0,0,0.5);font-family:${MONO};">Next renewal</p>
+                            <p style="margin:0;font-size:14px;color:#0a0a0a;font-family:${SANS};">${escapeHtml(data.nextRenewalDate)}</p>
+                          </td>
+                        </tr>` : ""}
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 28px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td style="background:#ef5a3c;border-radius:8px;${hasInvoice ? "padding-right:8px;" : ""}">
+                      <a href="${escapeAttr(data.portalUrl)}" style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;font-family:${MONO};">
+                        Manage billing →
+                      </a>
+                    </td>
+                    ${hasInvoice ? `<td style="padding-left:10px;">
+                      <a href="${escapeAttr(data.invoicePdfUrl!)}" style="display:inline-block;padding:12px 22px;color:#0a0a0a;text-decoration:none;font-size:12px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;font-family:${MONO};border:1px solid rgba(0,0,0,0.12);border-radius:8px;">
+                        Download invoice
+                      </a>
+                    </td>` : ""}
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px;">
+                <div style="height:1px;background:rgba(0,0,0,0.06);"></div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 32px 28px;">
+                <p style="margin:0;font-size:11px;line-height:1.6;color:rgba(0,0,0,0.44);font-family:${SANS};">
+                  You're receiving this because you have an active SecureWarp subscription. Turn off receipts in Settings → Notifications.
+                </p>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:24px 0 0;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:rgba(0,0,0,0.42);font-family:${MONO};">
+            Cloud storage, not cloud surveillance.
+          </p>
+        </td>
+      </tr>
     </table>
   </body>
 </html>`;
 
   const text = [
-    greeting,
+    "SECUREWARP · BETA",
+    "PAYMENT RECEIVED",
     "",
-    `We charged ${data.amountFormatted} for your SecureWarp ${data.planLabel} plan.${renewalLine ? " " + renewalLine : ""}`,
+    greetingText,
+    "",
+    "Your SecureWarp subscription is paid up. Details below for your records.",
+    "",
+    `Amount charged: ${data.amountFormatted}`,
+    `Plan: ${data.planLabel}`,
+    "Billing cycle: Monthly",
+    ...(data.nextRenewalDate ? [`Next renewal: ${data.nextRenewalDate}`] : []),
     "",
     `Manage billing: ${data.portalUrl}`,
     ...(data.invoicePdfUrl ? [`Download invoice: ${data.invoicePdfUrl}`] : []),
     "",
+    "---",
     "You're receiving this because you have an active SecureWarp subscription. Turn off receipts in Settings → Notifications.",
+    "",
+    "Cloud storage, not cloud surveillance.",
   ].join("\n");
 
   return { subject, html, text };
