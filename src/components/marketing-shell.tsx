@@ -456,6 +456,7 @@ export function MockupFooter() {
         { label: "About", href: "/about" },
         { label: "Support", href: "/support" },
         { label: "X", href: "https://x.com/Securewarp" },
+        { label: "Instagram", href: "https://www.instagram.com/securewarp" },
       ],
     },
     {
