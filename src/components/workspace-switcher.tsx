@@ -12,6 +12,7 @@ import { useFilesContext } from "@/hooks/use-files";
 import { WorkspaceSettings } from "./workspace-settings";
 import { buildWorkspaceFolder } from "@/lib/crypto/workspace-folder";
 import { usePolling } from "@/hooks/use-polling";
+import { useRealtimeChannel } from "@/hooks/use-realtime";
 
 interface Workspace {
   id: string;
@@ -113,8 +114,36 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   // settings form and wipes whatever the admin was mid-typing
   // (description, name, color). Polling resumes as soon as the
   // modal closes.
+  //
+  // Polling runs as a safety net alongside Realtime. It can go
+  // once the user-channel subscription is demonstrably covering
+  // every relevant event (invite, removal, role change).
   usePolling(refreshWorkspaceList, 20_000, {
     enabled: !showSettings && !showCreateModal,
+  });
+
+  // Realtime — subscribe to the caller's personal channel so
+  // share/invite/removal events arrive in <1s instead of waiting
+  // for the poll cycle. Tokens endpoint returns the HMAC-signed
+  // user channel alongside the workspace channels.
+  const [userChannel, setUserChannel] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/realtime/tokens");
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { userChannel: string };
+        if (data.userChannel) setUserChannel(data.userChannel);
+      } catch { /* next focus/reload re-tries */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useRealtimeChannel(userChannel, (event) => {
+    if (event === "workspace.invited" || event === "workspace.member_removed") {
+      void refreshWorkspaceList();
+    }
   });
 
   const updatePos = useCallback(() => {

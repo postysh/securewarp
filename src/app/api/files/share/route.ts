@@ -7,6 +7,8 @@ import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
 import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
 import { supabase } from "@/lib/db/supabase";
+import { broadcast } from "@/lib/realtime/broadcast";
+import { channelForUser } from "@/lib/realtime/channels";
 import { logError } from "@/lib/log";
 
 const ShareSchema = z.object({
@@ -113,6 +115,12 @@ export async function POST(request: Request) {
         description: `${actorLabel} shared a file with you`,
         fileId,
         actorUserId: session.userId,
+      });
+      // Realtime nudge — the recipient's drive refreshes without
+      // waiting for the 20s poll to catch the new file_keys row.
+      // Fire-and-forget; the notification row above is authoritative.
+      await broadcast(channelForUser(recipient.id), "share.granted", {
+        fileId,
       });
     }
 

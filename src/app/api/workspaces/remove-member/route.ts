@@ -4,6 +4,8 @@ import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { broadcast } from "@/lib/realtime/broadcast";
+import { channelForUser } from "@/lib/realtime/channels";
 import { logError } from "@/lib/log";
 
 const Schema = z.object({
@@ -58,6 +60,13 @@ export async function POST(request: Request) {
       actorUserId: session.userId,
       targetUserId: parsed.data.userId,
       detail: parsed.data.workspaceId,
+    });
+
+    // Realtime nudge — the removed user's drive bounces them back
+    // to personal drive + shows the banner without waiting for the
+    // 20s workspace-list poll to detect the missing membership.
+    await broadcast(channelForUser(parsed.data.userId), "workspace.member_removed", {
+      workspaceId: parsed.data.workspaceId,
     });
 
     return NextResponse.json({ success: true });

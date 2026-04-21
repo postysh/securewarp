@@ -9,6 +9,8 @@ import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
 import { getEntitlements } from "@/lib/billing/customers";
 import { auditEvent } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { broadcast } from "@/lib/realtime/broadcast";
+import { channelForUser } from "@/lib/realtime/channels";
 import { logError } from "@/lib/log";
 
 const InviteSchema = z.object({
@@ -137,6 +139,14 @@ export async function POST(request: Request) {
       description: `${actorLabel} invited you to the ${ws.name} workspace`,
       fileId: ws.root_folder_id,
       actorUserId: session.userId,
+    });
+
+    // Realtime nudge — invitee's workspace dropdown picks up the
+    // new entry live. Client re-fetches /api/realtime/tokens so it
+    // also subscribes to the new workspace channel for future
+    // file-level events.
+    await broadcast(channelForUser(recipient.id), "workspace.invited", {
+      workspaceId,
     });
 
     return NextResponse.json({ success: true });
