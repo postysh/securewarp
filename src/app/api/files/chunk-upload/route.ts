@@ -10,6 +10,7 @@ import {
 import { getUploadUrl } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
 import { assertWithinQuota } from "@/lib/db/quota";
+import { pruneVersionsForFile } from "@/lib/db/version-prune";
 import { getBoolFlag } from "@/lib/flags";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
@@ -381,6 +382,16 @@ export async function POST(request: Request) {
           .eq("id", fileId)
           .eq("owner_id", session.userId);
         if (finalizeErr) throw finalizeErr;
+
+        // Retention prune — best-effort. The new version is already
+        // live, so pruning older ones on failure just defers to the
+        // nightly cron instead of rolling back the upload. Never let
+        // a prune error fail the finalize response.
+        try {
+          await pruneVersionsForFile(session.userId, fileId);
+        } catch (err) {
+          logError("chunk-upload.prune", { fileId, err });
+        }
 
         return NextResponse.json({ success: true });
       }

@@ -21,6 +21,12 @@ export interface TierLimits {
    *  with plenty of total storage can still gate huge single files
    *  that would tie up R2 slots during long uploads. */
   maxFileSizeBytes: number;
+  /** How many past versions of a file to retain, in addition to the
+   *  current one. A new upload beyond this cap prunes the oldest. */
+  versionCount: number;
+  /** How long past versions live before the nightly cron prunes them.
+   *  Both caps apply — whichever trips first. */
+  versionTtlDays: number;
 }
 
 const MB = 1024 * 1024;
@@ -34,6 +40,8 @@ export const TIER_LIMITS: Record<Tier, TierLimits> = {
     seats: 1,
     workspaces: 1,
     maxFileSizeBytes: 100 * MB,
+    versionCount: 3,
+    versionTtlDays: 7,
   },
   plus: {
     label: "Plus",
@@ -42,6 +50,8 @@ export const TIER_LIMITS: Record<Tier, TierLimits> = {
     seats: 3,
     workspaces: Infinity,
     maxFileSizeBytes: 5 * GB,
+    versionCount: 10,
+    versionTtlDays: 30,
   },
   pro: {
     label: "Pro",
@@ -50,6 +60,8 @@ export const TIER_LIMITS: Record<Tier, TierLimits> = {
     seats: 10,
     workspaces: Infinity,
     maxFileSizeBytes: 25 * GB,
+    versionCount: 30,
+    versionTtlDays: 90,
   },
 };
 

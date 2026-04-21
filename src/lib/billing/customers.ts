@@ -140,6 +140,8 @@ export interface Entitlements {
   seats: number;
   workspaces: number;
   maxFileSizeBytes: number;
+  versionCount: number;
+  versionTtlDays: number;
   isCustom: boolean;
 }
 
@@ -148,7 +150,7 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
   const base = TIER_LIMITS[tier];
   const { data: ov } = await supabase
     .from("user_entitlement_overrides")
-    .select("tier_label_override, storage_gb_override, seats_override, workspaces_override, price_cents_override, max_file_size_bytes_override")
+    .select("tier_label_override, storage_gb_override, seats_override, workspaces_override, price_cents_override, max_file_size_bytes_override, version_count_override, version_ttl_days_override")
     .eq("user_id", userId)
     .maybeSingle();
   if (!ov) {
@@ -160,6 +162,8 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
       seats: base.seats,
       workspaces: base.workspaces,
       maxFileSizeBytes: base.maxFileSizeBytes,
+      versionCount: base.versionCount,
+      versionTtlDays: base.versionTtlDays,
       isCustom: false,
     };
   }
@@ -178,6 +182,8 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
       seats: base.seats,
       workspaces: base.workspaces,
       maxFileSizeBytes: base.maxFileSizeBytes,
+      versionCount: base.versionCount,
+      versionTtlDays: base.versionTtlDays,
       isCustom: false,
     };
   }
@@ -187,7 +193,9 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
     ov.seats_override !== null ||
     ov.workspaces_override !== null ||
     ov.price_cents_override !== null ||
-    ov.max_file_size_bytes_override !== null;
+    ov.max_file_size_bytes_override !== null ||
+    ov.version_count_override !== null ||
+    ov.version_ttl_days_override !== null;
   return {
     tier,
     tierLabel: (ov.tier_label_override as string | null) ?? base.label,
@@ -196,6 +204,8 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
     seats: (ov.seats_override as number | null) ?? base.seats,
     workspaces: (ov.workspaces_override as number | null) ?? base.workspaces,
     maxFileSizeBytes: (ov.max_file_size_bytes_override as number | null) ?? base.maxFileSizeBytes,
+    versionCount: (ov.version_count_override as number | null) ?? base.versionCount,
+    versionTtlDays: (ov.version_ttl_days_override as number | null) ?? base.versionTtlDays,
     isCustom: hasAnyOverride,
   };
 }

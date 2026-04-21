@@ -55,6 +55,8 @@ export async function GET() {
         seats: ent.seats === Infinity ? null : ent.seats,
         workspaces: ent.workspaces === Infinity ? null : ent.workspaces,
         maxFileSizeBytes: ent.maxFileSizeBytes,
+        versionCount: ent.versionCount,
+        versionTtlDays: ent.versionTtlDays,
         priceCents: ent.priceCents,
         label: ent.tierLabel,
       },
@@ -66,6 +68,8 @@ export async function GET() {
         seats: l.seats === Infinity ? null : l.seats,
         workspaces: l.workspaces === Infinity ? null : l.workspaces,
         maxFileSizeBytes: l.maxFileSizeBytes,
+        versionCount: l.versionCount,
+        versionTtlDays: l.versionTtlDays,
       })),
     });
   } catch (err) {

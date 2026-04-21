@@ -30,6 +30,12 @@ const UpsertSchema = z.object({
   // a browser-side chunked upload, and the higher bound also keeps
   // the admin UI's numeric input in a sane range.
   maxFileSizeBytesOverride: z.number().int().positive().max(1024 * 1024 * 1024 * 1024).nullable().optional(),
+  // Version retention. `versionCount` is past versions kept beyond
+  // the current one; `versionTtlDays` is the age cap on any past
+  // version. 1000 / 3650 ceilings are defensive upper bounds — well
+  // above any reasonable custom-deal value.
+  versionCountOverride: z.number().int().positive().max(1000).nullable().optional(),
+  versionTtlDaysOverride: z.number().int().positive().max(3650).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
 });
 
@@ -95,6 +101,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       workspaces_override: parsed.data.workspacesOverride ?? null,
       price_cents_override: parsed.data.priceCentsOverride ?? null,
       max_file_size_bytes_override: parsed.data.maxFileSizeBytesOverride ?? null,
+      version_count_override: parsed.data.versionCountOverride ?? null,
+      version_ttl_days_override: parsed.data.versionTtlDaysOverride ?? null,
       notes: parsed.data.notes ?? null,
       created_by_user_id: ctx.userId,
       updated_at: new Date().toISOString(),
@@ -119,6 +127,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         workspaces: payload.workspaces_override,
         priceCents: payload.price_cents_override,
         maxFileSizeBytes: payload.max_file_size_bytes_override,
+        versionCount: payload.version_count_override,
+        versionTtlDays: payload.version_ttl_days_override,
       }),
     });
 

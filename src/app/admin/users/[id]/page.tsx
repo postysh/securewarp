@@ -141,6 +141,8 @@ export default function AdminUserDetailPage() {
     workspaces_override: number | null;
     price_cents_override: number | null;
     max_file_size_bytes_override: number | null;
+    version_count_override: number | null;
+    version_ttl_days_override: number | null;
     notes: string | null;
   } | null>(null);
   // Tier-gating: an override on a Free-tier user is stored but
@@ -231,6 +233,8 @@ export default function AdminUserDetailPage() {
     workspacesOverride: number | null;
     priceCentsOverride: number | null;
     maxFileSizeBytesOverride: number | null;
+    versionCountOverride: number | null;
+    versionTtlDaysOverride: number | null;
     notes: string | null;
   }) => {
     setOverrideBusy(true);
@@ -690,6 +694,8 @@ export default function AdminUserDetailPage() {
                           { label: "Workspaces", value: override.workspaces_override !== null ? override.workspaces_override.toLocaleString() : "—" },
                           { label: "Price", value: override.price_cents_override !== null ? `$${(override.price_cents_override / 100).toFixed(2)}/mo` : "—" },
                           { label: "Max file size", value: override.max_file_size_bytes_override !== null ? formatBytes(override.max_file_size_bytes_override) : "—" },
+                          { label: "Past versions kept", value: override.version_count_override !== null ? override.version_count_override.toLocaleString() : "—" },
+                          { label: "Version TTL", value: override.version_ttl_days_override !== null ? `${override.version_ttl_days_override} day${override.version_ttl_days_override === 1 ? "" : "s"}` : "—" },
                         ].map((r) => (
                           <div key={r.label} className="flex items-center justify-between px-3 py-2.5 border-b border-border-tertiary">
                             <span className="text-[12px] text-text-secondary">{r.label}</span>
@@ -1192,6 +1198,8 @@ function OverrideModal({
     workspaces_override: number | null;
     price_cents_override: number | null;
     max_file_size_bytes_override: number | null;
+    version_count_override: number | null;
+    version_ttl_days_override: number | null;
     notes: string | null;
   } | null;
   busy: boolean;
@@ -1203,6 +1211,8 @@ function OverrideModal({
     workspacesOverride: number | null;
     priceCentsOverride: number | null;
     maxFileSizeBytesOverride: number | null;
+    versionCountOverride: number | null;
+    versionTtlDaysOverride: number | null;
     notes: string | null;
   }) => void;
 }) {
@@ -1219,6 +1229,12 @@ function OverrideModal({
     initial?.max_file_size_bytes_override != null
       ? (initial.max_file_size_bytes_override / (1024 * 1024 * 1024)).toString()
       : "",
+  );
+  const [versionCount, setVersionCount] = useState(
+    initial?.version_count_override != null ? String(initial.version_count_override) : "",
+  );
+  const [versionTtlDays, setVersionTtlDays] = useState(
+    initial?.version_ttl_days_override != null ? String(initial.version_ttl_days_override) : "",
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
 
@@ -1317,6 +1333,28 @@ function OverrideModal({
             className="w-full h-[34px] px-3 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none"
           />
         </div>
+        <div>
+          <label className="block text-[11px] font-mono uppercase tracking-wider text-text-disabled mb-1">Past versions kept</label>
+          <input
+            type="number"
+            min="1"
+            value={versionCount}
+            onChange={(e) => setVersionCount(e.target.value)}
+            placeholder="inherit"
+            className="w-full h-[34px] px-3 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-[11px] font-mono uppercase tracking-wider text-text-disabled mb-1">Version TTL (days)</label>
+          <input
+            type="number"
+            min="1"
+            value={versionTtlDays}
+            onChange={(e) => setVersionTtlDays(e.target.value)}
+            placeholder="inherit"
+            className="w-full h-[34px] px-3 rounded-[8px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled border border-transparent focus:border-border-primary focus:outline-none"
+          />
+        </div>
       </div>
       <label className="block text-[11px] font-mono uppercase tracking-wider text-text-disabled mb-1">Notes</label>
       <textarea
@@ -1338,6 +1376,8 @@ function OverrideModal({
             workspacesOverride: toIntOrNull(workspaces),
             priceCentsOverride: toPriceCentsOrNull(price),
             maxFileSizeBytesOverride: toBytesFromGbOrNull(maxFileGB),
+            versionCountOverride: toIntOrNull(versionCount),
+            versionTtlDaysOverride: toIntOrNull(versionTtlDays),
             notes: notes.trim() || null,
           })
         }

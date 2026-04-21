@@ -68,6 +68,8 @@ export async function GET() {
       usedBytes,
       maxBytes,
       maxFileSizeBytes: ent.maxFileSizeBytes,
+      versionCount: ent.versionCount,
+      versionTtlDays: ent.versionTtlDays,
       tierLabel: ent.tierLabel,
       filesBytes,
       filesCount,

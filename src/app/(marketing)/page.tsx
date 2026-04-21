@@ -705,10 +705,10 @@ function PricingSection() {
       features: [
         "20 GB encrypted storage",
         "100 MB max file size",
+        "3 past versions, 7 day history",
         "1 user, 1 workspace",
         "Client side encryption",
         "File sharing with public links",
-        "File versioning",
         "Trash with 30 day recovery",
       ],
       cta: "Sign up",
@@ -721,6 +721,7 @@ function PricingSection() {
       features: [
         "500 GB encrypted storage",
         "5 GB max file size",
+        "10 past versions, 30 day history",
         "Up to 3 team seats",
         "Unlimited workspaces",
         "Everything in Free",
@@ -737,6 +738,7 @@ function PricingSection() {
       features: [
         "2 TB encrypted storage",
         "25 GB max file size",
+        "30 past versions, 90 day history",
         "Up to 10 team seats",
         "Unlimited workspaces",
         "Everything in Plus",
@@ -753,13 +755,13 @@ function PricingSection() {
   }> = [
     { label: "Storage", values: ["20 GB", "500 GB", "2 TB"] },
     { label: "Max file size", values: ["100 MB", "5 GB", "25 GB"] },
+    { label: "Version history", values: ["3 versions, 7 days", "10 versions, 30 days", "30 versions, 90 days"] },
     { label: "Team seats", values: ["1", "3", "10"] },
     { label: "Workspaces", values: ["1", "Unlimited", "Unlimited"] },
     { label: "End to end encryption", values: ["check", "check", "check"] },
     { label: "Zero knowledge servers", values: ["check", "check", "check"] },
     { label: "File sharing with links", values: ["check", "check", "check"] },
     { label: "Password protected links", values: ["check", "check", "check"] },
-    { label: "File versioning", values: ["check", "check", "check"] },
     { label: "Two factor authentication", values: ["check", "check", "check"] },
     { label: "Priority support", values: ["dash", "check", "check"] },
   ];
