@@ -11,6 +11,8 @@ import {
   BRAND_MONO,
 } from "@/components/marketing-shell";
 import { Templates, type TemplateName } from "@/lib/email/templates";
+import { EMAIL_PREVIEW_FIXTURES } from "@/lib/email/preview-fixtures";
+import { SendTestButton } from "./send-test-button";
 
 /**
  * Renders a single transactional email template with fixture data.
@@ -19,49 +21,6 @@ import { Templates, type TemplateName } from "@/lib/email/templates";
  * chrome. Plain-text rendering is shown below in a pre block so
  * the raw copy can be eyeballed alongside.
  */
-
-// Fixtures — plausibly realistic sample data for each template.
-// Kept plaintext-only in the same spirit as the zero-knowledge rule
-// the real send path enforces.
-const FIXTURES: Record<TemplateName, unknown> = {
-  welcome: {
-    displayName: "Jane Doe",
-    driveUrl: "https://www.securewarp.com/drive",
-  },
-  "support-received": {
-    fromEmail: "jane@example.com",
-    fromName: "Jane Doe",
-    subject: "Can't find a shared file",
-    message:
-      "Hi team, a colleague shared a folder with me last week and it isn't showing up in Shared with me. Am I missing something?\n\nThanks!\nJane",
-  },
-  "support-ack": {
-    userName: "Jane",
-    subject: "Can't find a shared file",
-  },
-  "billing-receipt": {
-    displayName: "Jane Doe",
-    planLabel: "Plus",
-    amountFormatted: "$4.99",
-    invoicePdfUrl: "https://pay.stripe.com/invoice/acct_demo/test_abc/pdf",
-    nextRenewalDate: "May 20, 2026",
-    portalUrl: "https://www.securewarp.com/drive",
-  },
-  "billing-payment-failed": {
-    displayName: "Jane Doe",
-    planLabel: "Pro",
-    amountFormatted: "$9.99",
-    portalUrl: "https://www.securewarp.com/drive",
-    retryDate: "April 24, 2026",
-  },
-  "billing-renewal-reminder": {
-    displayName: "Jane Doe",
-    planLabel: "Plus",
-    amountFormatted: "$4.99",
-    renewalDate: "April 23, 2026",
-    portalUrl: "https://www.securewarp.com/drive",
-  },
-};
 
 function isKnownTemplate(name: string): name is TemplateName {
   return name in Templates;
@@ -80,7 +39,7 @@ export default async function EmailPreview({
     html: string;
     text: string;
   };
-  const { subject, html, text } = renderFn(FIXTURES[template]);
+  const { subject, html, text } = renderFn(EMAIL_PREVIEW_FIXTURES[template]);
 
   return (
     <MarketingShell>
@@ -137,6 +96,10 @@ export default async function EmailPreview({
           Subject shown above. HTML and plain-text renderings below use fixture
           data — see <code style={{ fontFamily: BRAND_MONO }}>src/app/dev/emails/[template]/page.tsx</code>.
         </p>
+      </section>
+
+      <section style={{ padding: "0 32px 20px" }}>
+        <SendTestButton template={template} />
       </section>
 
       <section style={{ padding: "0 32px 16px" }}>
