@@ -50,6 +50,7 @@ import { FileDetailsModal } from "./file-details-modal";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
 import { usePolling } from "@/hooks/use-polling";
+import { useRealtimeChannel } from "@/hooks/use-realtime";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { userLabel, userInitials, userColor } from "@/lib/display";
 import { useUserKeys } from "@/hooks/use-user-keys";
@@ -500,6 +501,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       // only replaces the files array on a successful response. A
       // mid-poll navigation or cache miss can't flash the skeleton
       // this way.
+      //
+      // Still runs as a safety net alongside the new Realtime
+      // subscriptions. Once Realtime is demonstrably covering every
+      // event we care about, polling can go.
       void fileOps.fetchFiles(
         fileOps.currentFolder,
         fileOps.viewMode,
@@ -511,6 +516,57 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     20_000,
     { enabled: pollEnabled },
   );
+
+  // Supabase Realtime — subscribe to the active workspace's channel
+  // so file.created / file.updated events arriving from other
+  // members trigger a silent refetch immediately, without waiting
+  // for the 20s poll cycle. Tokens fetched on mount from
+  // /api/realtime/tokens, which HMAC-signs channel names so anon
+  // subscribers can't guess their way into another workspace's
+  // event stream.
+  const [realtimeWorkspaceChannels, setRealtimeWorkspaceChannels] = useState<
+    Record<string, string>
+  >({});
+  useEffect(() => {
+    if (!keys) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/realtime/tokens");
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          workspaceChannels: { workspaceId: string; channel: string }[];
+        };
+        const map: Record<string, string> = {};
+        for (const w of data.workspaceChannels ?? []) map[w.workspaceId] = w.channel;
+        setRealtimeWorkspaceChannels(map);
+      } catch { /* next refocus / reload re-tries */ }
+    })();
+    return () => { cancelled = true; };
+  }, [keys]);
+
+  const activeWorkspaceChannel = fileOps.activeWorkspace
+    ? realtimeWorkspaceChannels[fileOps.activeWorkspace.id] ?? null
+    : null;
+
+  useRealtimeChannel(activeWorkspaceChannel, (event) => {
+    // Targeted updates arrive with event names like "file.created".
+    // For now every file.* event triggers a silent refetch of the
+    // current folder — simple, correct, and incremental handlers
+    // can be added per-event later. The refetch is the same
+    // stale-while-revalidate path the poll uses, so there's no
+    // skeleton or placeholder-stomping as long as the existing
+    // gating covers the state.
+    if (event.startsWith("file.") && pollEnabled) {
+      void fileOps.fetchFiles(
+        fileOps.currentFolder,
+        fileOps.viewMode,
+        undefined,
+        undefined,
+        { silent: true },
+      );
+    }
+  });
 
 
   // Fetch pinned IDs on mount

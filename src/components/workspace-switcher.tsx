@@ -108,7 +108,14 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
     void refreshWorkspaceList();
   }, [refreshWorkspaceList]);
 
-  usePolling(refreshWorkspaceList, 20_000);
+  // Pause polling while the admin has any workspace modal open —
+  // otherwise a 20s refresh re-syncs the workspace row into the
+  // settings form and wipes whatever the admin was mid-typing
+  // (description, name, color). Polling resumes as soon as the
+  // modal closes.
+  usePolling(refreshWorkspaceList, 20_000, {
+    enabled: !showSettings && !showCreateModal,
+  });
 
   const updatePos = useCallback(() => {
     if (!btnRef.current) return;

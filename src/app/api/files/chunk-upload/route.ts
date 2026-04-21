@@ -13,6 +13,8 @@ import { assertWithinQuota } from "@/lib/db/quota";
 import { pruneVersionsForFile } from "@/lib/db/version-prune";
 import { getBoolFlag } from "@/lib/flags";
 import { auditEvent } from "@/lib/audit";
+import { broadcast } from "@/lib/realtime/broadcast";
+import { channelForWorkspace } from "@/lib/realtime/channels";
 import { logError } from "@/lib/log";
 
 // Step 1: Initialize chunked upload — creates file record, returns presigned URLs for all chunks
@@ -458,6 +460,24 @@ export async function POST(request: Request) {
         .eq("id", fileId)
         .eq("owner_id", session.userId);
       if (finalizeErr) throw finalizeErr;
+
+      // Broadcast to the file's workspace so other members' drives
+      // pick up the new row without polling. parent_id tells the
+      // client which folder view should append the row. Fire-and-
+      // forget: if the broadcast fails, polling/focus-refresh
+      // still surfaces the change later.
+      const { data: finalRow } = await supabase
+        .from("files")
+        .select("workspace_id, parent_id")
+        .eq("id", fileId)
+        .single();
+      if (finalRow?.workspace_id) {
+        await broadcast(
+          channelForWorkspace(finalRow.workspace_id as string),
+          "file.created",
+          { fileId, parentId: finalRow.parent_id ?? null },
+        );
+      }
 
       return NextResponse.json({ success: true });
     }
