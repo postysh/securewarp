@@ -67,7 +67,7 @@
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.2",
+    "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.4",
