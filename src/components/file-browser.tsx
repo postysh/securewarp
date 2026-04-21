@@ -49,7 +49,6 @@ import { WorkspaceActivityPage } from "./workspace-activity-modal";
 import { FileDetailsModal } from "./file-details-modal";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
-import { usePolling } from "@/hooks/use-polling";
 import { useRealtimeChannel } from "@/hooks/use-realtime";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { userLabel, userInitials, userColor } from "@/lib/display";
@@ -457,25 +456,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     setFilterLabel(null);
   }, [fileOps.viewMode, fileOps.currentFolder]);
 
-  // Background poll for the current folder so new uploads from other
-  // workspace members appear without a manual refresh. fetchFiles
-  // hits the stale-while-revalidate cache first (loading stays
-  // false, cached files stay rendered) then quietly replaces the
-  // array when the network response arrives. No skeleton, no
-  // spinner.
+  // All refresh paths are Realtime now — no polling. See
+  // /src/lib/realtime/broadcast.ts for the publisher side.
   //
-  // We intentionally skip polling in any of these "user is mid-
-  // action" states — swapping the files array out from under the
-  // user would blow away optimistic UI (upload placeholders,
-  // rename in progress) and feel jumpy on hover.
-  //
-  //   - Any modal open (preview, share, move, rename, etc.)
-  //   - Context menu open
-  //   - Uploading or replacing a file — the files array currently
-  //     contains a local placeholder with uploadProgress state that
-  //     the server response doesn't know about yet. A poll would
-  //     wipe the progress bar.
-  //   - Command palette open
+  // Same "user is mid-action" gates still apply to the event
+  // handler because silent refetch still replaces the files array
+  // (which could stomp optimistic placeholders like in-progress
+  // uploads). When gated off, events are dropped — the view is
+  // already lagged by design, and the next action (navigation,
+  // modal close, refocus) will catch up.
   const anyModalOpen =
     !!previewFileId ||
     !!versionHistoryTarget ||
@@ -493,38 +482,25 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const anyUploadInFlight =
     fileOps.uploading ||
     fileOps.uploadQueue.some((r) => r.status === "uploading");
-  const pollEnabled =
+  const refreshEnabled =
     !!keys && !contextMenu && !anyModalOpen && !anyUploadInFlight;
-  usePolling(
-    useCallback(() => {
-      // Silent poll — never touches loading/skeleton/currentFolder;
-      // only replaces the files array on a successful response. A
-      // mid-poll navigation or cache miss can't flash the skeleton
-      // this way.
-      //
-      // Still runs as a safety net alongside the new Realtime
-      // subscriptions. Once Realtime is demonstrably covering every
-      // event we care about, polling can go.
-      void fileOps.fetchFiles(
-        fileOps.currentFolder,
-        fileOps.viewMode,
-        undefined,
-        undefined,
-        { silent: true },
-      );
-    }, [fileOps]),
-    20_000,
-    { enabled: pollEnabled },
-  );
 
-  // Supabase Realtime — subscribe to the active workspace's channel
-  // so file.created / file.updated events arriving from other
-  // members trigger a silent refetch immediately, without waiting
-  // for the 20s poll cycle. Tokens fetched on mount from
-  // /api/realtime/tokens, which HMAC-signs channel names so anon
-  // subscribers can't guess their way into another workspace's
-  // event stream.
-  const [realtimeWorkspaceChannels, setRealtimeWorkspaceChannels] = useState<
+  const silentRefetch = useCallback(() => {
+    void fileOps.fetchFiles(
+      fileOps.currentFolder,
+      fileOps.viewMode,
+      undefined,
+      undefined,
+      { silent: true },
+    );
+  }, [fileOps]);
+
+  // Tokens from /api/realtime/tokens — user channel + one per
+  // workspace membership. Refetched when the active workspace
+  // changes so a just-invited workspace picks up its channel
+  // without a page reload.
+  const [userChannel, setUserChannel] = useState<string | null>(null);
+  const [workspaceChannels, setWorkspaceChannels] = useState<
     Record<string, string>
   >({});
   useEffect(() => {
@@ -535,38 +511,55 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         const res = await fetch("/api/realtime/tokens");
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as {
+          userChannel: string;
           workspaceChannels: { workspaceId: string; channel: string }[];
         };
         const map: Record<string, string> = {};
         for (const w of data.workspaceChannels ?? []) map[w.workspaceId] = w.channel;
-        setRealtimeWorkspaceChannels(map);
-      } catch { /* next refocus / reload re-tries */ }
+        setUserChannel(data.userChannel);
+        setWorkspaceChannels(map);
+      } catch { /* focus-refresh / reload re-tries */ }
     })();
     return () => { cancelled = true; };
-  }, [keys]);
+  }, [keys, fileOps.activeWorkspace?.id]);
 
   const activeWorkspaceChannel = fileOps.activeWorkspace
-    ? realtimeWorkspaceChannels[fileOps.activeWorkspace.id] ?? null
+    ? workspaceChannels[fileOps.activeWorkspace.id] ?? null
     : null;
 
+  // Workspace channel: file.created / renamed / moved / trashed /
+  // restored / purged / new_version — all trigger a silent refetch
+  // of the current folder view.
   useRealtimeChannel(activeWorkspaceChannel, (event) => {
-    // Targeted updates arrive with event names like "file.created".
-    // For now every file.* event triggers a silent refetch of the
-    // current folder — simple, correct, and incremental handlers
-    // can be added per-event later. The refetch is the same
-    // stale-while-revalidate path the poll uses, so there's no
-    // skeleton or placeholder-stomping as long as the existing
-    // gating covers the state.
-    if (event.startsWith("file.") && pollEnabled) {
-      void fileOps.fetchFiles(
-        fileOps.currentFolder,
-        fileOps.viewMode,
-        undefined,
-        undefined,
-        { silent: true },
-      );
-    }
+    if (event.startsWith("file.") && refreshEnabled) silentRefetch();
   });
+
+  // User channel: share.granted — a file was shared with me, so
+  // my drive view should re-fetch to pick up the new row. Also
+  // covers "Shared with me" view updates.
+  useRealtimeChannel(userChannel, (event) => {
+    if (event === "share.granted" && refreshEnabled) silentRefetch();
+  });
+
+  // Safety net: when the tab comes back into focus after being
+  // hidden, Realtime may have missed events while disconnected.
+  // A focus-refresh refetches once — cheap and predictable.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible" && refreshEnabled) {
+        silentRefetch();
+      }
+    };
+    const onFocus = () => {
+      if (refreshEnabled) silentRefetch();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshEnabled, silentRefetch]);
 
 
   // Fetch pinned IDs on mount

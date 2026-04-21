@@ -4,6 +4,8 @@ import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
 import { deleteBlob } from "@/lib/db/r2";
 import { auditEvent } from "@/lib/audit";
+import { broadcast } from "@/lib/realtime/broadcast";
+import { channelForWorkspace } from "@/lib/realtime/channels";
 import { logError } from "@/lib/log";
 
 // Hard delete. Only valid on rows that are currently in the trash
@@ -129,6 +131,15 @@ export async function POST(request: Request) {
       .eq("owner_id", rootOwnerId);
     if (delErr) {
       throw new Error(`Purge failed: ${delErr.message}`);
+    }
+
+    // Broadcast on the workspace channel if this was a workspace
+    // file. We read workspace_id from the files row we loaded at
+    // the top (pre-delete) since the row is now gone.
+    if (workspaceId) {
+      await broadcast(channelForWorkspace(workspaceId), "file.purged", {
+        fileId,
+      });
     }
 
     auditEvent({

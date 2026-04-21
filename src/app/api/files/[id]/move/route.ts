@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
+import { broadcastFileMutation } from "@/lib/realtime/broadcast";
 import { logError } from "@/lib/log";
 
 // Owner-only move. The caller re-wraps `parent_keys_claim` on the
@@ -153,6 +154,10 @@ export async function POST(
       actorUserId: session.userId,
       targetFileId: fileId,
       detail: newParentId ?? "root",
+    });
+
+    await broadcastFileMutation(fileId, "file.moved", {
+      newParentId: newParentId ?? null,
     });
 
     return NextResponse.json({ success: true });

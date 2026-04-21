@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getFileById, updateFileMetadata, getEffectivePermission } from "@/lib/db/files";
 import { auditEvent } from "@/lib/audit";
+import { broadcastFileMutation } from "@/lib/realtime/broadcast";
 import { logError } from "@/lib/log";
 
 // Any collaborator (anyone with a `file_keys` row on this file) may
@@ -56,6 +57,8 @@ export async function POST(
       actorUserId: session.userId,
       detail: fileId,
     });
+
+    await broadcastFileMutation(fileId, "file.renamed");
 
     return NextResponse.json({ success: true });
   } catch (err) {

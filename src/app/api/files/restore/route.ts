@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
+import { broadcastFileMutation } from "@/lib/realtime/broadcast";
 import { logError } from "@/lib/log";
 
 // Owner-only restore from trash. Reverses the recursive soft delete
@@ -69,6 +70,8 @@ export async function POST(request: Request) {
       actorUserId: session.userId,
       targetFileId: fileId,
     });
+
+    await broadcastFileMutation(fileId, "file.restored");
 
     return NextResponse.json({ success: true });
   } catch (err) {

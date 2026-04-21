@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
+import { broadcastFileMutation } from "@/lib/realtime/broadcast";
 import { logError } from "@/lib/log";
 
 // Owner-only soft delete. Recursively marks the file (or every
@@ -80,6 +81,12 @@ export async function POST(request: Request) {
       targetFileId: fileId,
       detail: "trashed",
     });
+
+    // Broadcast AFTER the soft-delete. The row still has its
+    // workspace_id set (soft delete doesn't nullify it) so the
+    // helper can find the channel. Members re-fetch their current
+    // view and the trashed row drops out of the listing.
+    await broadcastFileMutation(fileId, "file.trashed");
 
     return NextResponse.json({ success: true });
   } catch (err) {

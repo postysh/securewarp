@@ -1,5 +1,6 @@
 import "server-only";
 import { supabase } from "@/lib/db/supabase";
+import { channelForWorkspace } from "@/lib/realtime/channels";
 import { logError } from "@/lib/log";
 
 /**
@@ -34,5 +35,44 @@ export async function broadcast(
     await supabase.removeChannel(ch);
   } catch (err) {
     logError("realtime.broadcast", { channel, event, err });
+  }
+}
+
+/**
+ * Broadcast a file mutation to its workspace channel, if any.
+ * No-op for personal-drive files (no workspace membership to
+ * notify — direct collaborators will see the change on focus
+ * refresh / next navigation).
+ *
+ * Helper exists so route handlers can `await fileMutation(...)`
+ * without repeating the "fetch the workspace_id, then publish"
+ * dance per site.
+ */
+export async function broadcastFileMutation(
+  fileId: string,
+  event:
+    | "file.created"
+    | "file.renamed"
+    | "file.moved"
+    | "file.trashed"
+    | "file.restored"
+    | "file.purged"
+    | "file.new_version",
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  try {
+    const { data } = await supabase
+      .from("files")
+      .select("workspace_id")
+      .eq("id", fileId)
+      .maybeSingle();
+    const workspaceId = (data?.workspace_id as string | null) ?? null;
+    if (!workspaceId) return;
+    await broadcast(channelForWorkspace(workspaceId), event, {
+      fileId,
+      ...extra,
+    });
+  } catch (err) {
+    logError("realtime.broadcastFileMutation", { fileId, event, err });
   }
 }

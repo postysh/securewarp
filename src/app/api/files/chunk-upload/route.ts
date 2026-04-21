@@ -13,7 +13,7 @@ import { assertWithinQuota } from "@/lib/db/quota";
 import { pruneVersionsForFile } from "@/lib/db/version-prune";
 import { getBoolFlag } from "@/lib/flags";
 import { auditEvent } from "@/lib/audit";
-import { broadcast } from "@/lib/realtime/broadcast";
+import { broadcast, broadcastFileMutation } from "@/lib/realtime/broadcast";
 import { channelForWorkspace } from "@/lib/realtime/channels";
 import { logError } from "@/lib/log";
 
@@ -428,6 +428,13 @@ export async function POST(request: Request) {
           .eq("id", fileId)
           .eq("owner_id", session.userId);
         if (finalizeErr) throw finalizeErr;
+
+        // New-version landed — workspace members see the updated
+        // name/size/metadata without waiting on polling. Fires the
+        // generic file.new_version event (not file.created so the
+        // client can distinguish "brand new file" from "existing
+        // file updated" if it wants to).
+        await broadcastFileMutation(fileId, "file.new_version");
 
         // Retention prune — best-effort. The new version is already
         // live, so pruning older ones on failure just defers to the
