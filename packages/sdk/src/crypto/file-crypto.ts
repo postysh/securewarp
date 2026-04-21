@@ -1,52 +1,78 @@
 /**
  * File encryption — client-side only.
  *
- * Crypto v2 primitives (2026-04-20):
- *   - Symmetric AEAD: XChaCha20-Poly1305 via `@noble/ciphers` (replaces
- *     xsalsa20-poly1305 from tweetnacl). Same 32-byte key + 24-byte
- *     nonce shape, so storage layout is unchanged.
- *   - Asymmetric key wrap: X25519 ECDH via `@noble/curves` → HKDF-SHA256
- *     → XChaCha20-Poly1305 (replaces nacl.box). This is NaCl's own
- *     spec updated to modern primitives: ECDH shared secret, HKDF for
- *     key-derivation domain separation, then the modern AEAD.
+ * Crypto v2 Phase 2b (2026-04-21): every asymmetric wrap is now a
+ * hybrid of X25519 ECDH + ML-KEM-768 encapsulation, combined via
+ * HKDF-SHA256 and sealed with XChaCha20-Poly1305. If EITHER
+ * algorithm stays secure, the wrap stays secure. This defends
+ * against a harvest-now-decrypt-later adversary who records our
+ * ciphertext today and breaks Curve25519 in 10–15 years with a
+ * quantum computer.
  *
- * Phase 2 hierarchical key model (Skiff-style):
- *   - Every file has a random symmetric `sessionKey` for content + metadata.
- *   - Every file has an asymmetric `hierarchicalKeyPair` (X25519).
- *   - `sessionKey` is wrapped *once* to the file's public hierarchical key,
- *     using the owner's private key as the box sender. Stored on the file.
- *   - Each collaborator's file_keys row stores `privateHierarchicalKey`
- *     wrapped to *their* public encryption key by whoever granted access.
- *   - To read: collaborator unwraps privateHierarchicalKey → uses it to
- *     unwrap sessionKey → uses sessionKey for content.
+ * Sender authentication is preserved via the X25519 static ECDH
+ * half (same model as NaCl's box): the classical shared secret is
+ * only derivable by a party holding the sender's long-term private
+ * key. ML-KEM adds PQ confidentiality on top; it does not itself
+ * authenticate the sender, which is consistent with the existing
+ * design. Signed share-invites remain a separately-tracked
+ * roadmap item.
  *
- * This design lets non-owners re-share (they hold privateHierarchicalKey),
- * makes adding a collaborator O(1) regardless of file size, and sets up
- * Phase 3 folder inheritance via parent_keys_claim.
+ * Hybrid blob layout (single base64 string):
+ *   [version: 1 byte = 0x02]
+ *   [ml_kem_ciphertext: 1088 bytes]
+ *   [nonce: 24 bytes (XChaCha20-Poly1305)]
+ *   [aead_ciphertext: plaintext ‖ 16-byte Poly1305 tag]
+ *
+ * Symmetric paths (file content, metadata, link-key wraps,
+ * password-protected links) are unchanged — they already used
+ * XChaCha20-Poly1305 directly in v2 Phase 1 and didn't touch
+ * asymmetric crypto.
+ *
+ * Phase 2 hierarchical model (same structure as v1 Skiff design):
+ *   - Every file has a random symmetric `sessionKey` for content
+ *     + metadata.
+ *   - Every file has a HYBRID hierarchical keypair (X25519 +
+ *     ML-KEM-768).
+ *   - `sessionKey` is wrapped *once* to the file's hybrid public
+ *     hierarchical keys by the owner's X25519 private key (ECDH
+ *     sender). Stored on the file.
+ *   - Each collaborator's file_keys row wraps the hybrid
+ *     `HierarchicalPrivateKeys` bundle to THEIR hybrid public user
+ *     keys via whoever granted access.
+ *   - To read: collaborator unwraps their file_keys row →
+ *     unwraps session key → uses session key for content.
  */
 
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { x25519 } from "@noble/curves/ed25519.js";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { argon2id } from "@noble/hashes/argon2.js";
 import { toBase64, fromBase64, randomBytes, utf8Encode } from "./utils";
 
-// XChaCha20-Poly1305 spec: 32-byte key, 24-byte nonce, 16-byte Poly1305 tag.
-// `xchacha20poly1305(key, nonce).encrypt(plaintext)` returns `plaintext||tag`.
+// XChaCha20-Poly1305 spec
 const SECRETBOX_KEY_LEN = 32;
 const SECRETBOX_NONCE_LEN = 24;
 
-// Domain-separated HKDF params for the X25519 → symmetric-key derivation.
-// Bumped to `-v2` for crypto v2 so any future rotation can ship as `-v3`
-// without colliding with legacy blobs.
-const BOX_HKDF_SALT = utf8Encode("securewarp-box-v2");
-const BOX_HKDF_INFO = utf8Encode("securewarp-x25519-xchacha20poly1305-v2");
+// ML-KEM-768 spec (NIST FIPS-203). publicKey=1184, secretKey=2400,
+// cipherText=1088, sharedSecret=32.
+const ML_KEM_CT_LEN = 1088;
+
+// Hybrid blob format version. Bumped to 3+ for any future rotation.
+const HYBRID_VERSION = 0x02;
+const HYBRID_HEADER_LEN = 1 + ML_KEM_CT_LEN + SECRETBOX_NONCE_LEN;
+
+// Domain separation for the combined-secret HKDF. Bumping these
+// invalidates every stored wrap, so version alongside the blob
+// byte — a future v3 coexists with v2 blobs during any migration.
+const HYBRID_HKDF_SALT = utf8Encode("securewarp-hybrid-v2");
+const HYBRID_HKDF_INFO = utf8Encode("securewarp-x25519-mlkem768-xchacha20-v2");
 
 export interface EncryptedFile {
-  encryptedContent: Uint8Array;  // raw ciphertext to upload to R2
-  nonce: string;                 // base64
-  sessionKey: string;            // base64 — the raw session key (encrypt this per-user)
+  encryptedContent: Uint8Array;
+  nonce: string;      // base64
+  sessionKey: string; // base64
 }
 
 export interface EncryptedMetadata {
@@ -54,8 +80,127 @@ export interface EncryptedMetadata {
   ciphertext: string; // base64
 }
 
+/**
+ * Hybrid public-key pair: X25519 for classical ECDH, ML-KEM-768 for
+ * PQ encapsulation. Every wrap target (user, file's hier keypair,
+ * parent folder's hier keypair) exposes both.
+ */
+export interface HybridPublicKeys {
+  x25519: string; // base64 — 32 bytes
+  kem: string;    // base64 — 1184 bytes (ML-KEM-768)
+}
+
+/**
+ * Matching private halves. `kem` is a full ML-KEM-768 secret key
+ * (~2400 bytes).
+ */
+export interface HybridPrivateKeys {
+  x25519: string; // base64 — 32 bytes
+  kem: string;    // base64 — ~2400 bytes
+}
+
+export interface HierarchicalKeypair {
+  publicKeys: HybridPublicKeys;
+  privateKeys: HybridPrivateKeys;
+}
+
 // ──────────────────────────────────────────────────────────────────────
-// Internal helpers
+// Internal: hybrid wrap/unwrap primitives
+// ──────────────────────────────────────────────────────────────────────
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) { out.set(p, off); off += p.length; }
+  return out;
+}
+
+function deriveHybridKey(xShared: Uint8Array, kemShared: Uint8Array): Uint8Array {
+  const ikm = concatBytes(xShared, kemShared);
+  try {
+    return hkdf(sha256, ikm, HYBRID_HKDF_SALT, HYBRID_HKDF_INFO, SECRETBOX_KEY_LEN);
+  } finally {
+    ikm.fill(0);
+  }
+}
+
+/**
+ * Hybrid wrap: encapsulate `message` to the recipient's (X25519,
+ * ML-KEM) public keys, authenticated by the sender's X25519 private
+ * key. Returns a single self-contained base64 blob.
+ */
+function hybridWrap(
+  message: Uint8Array,
+  recipientXPubB64: string,
+  recipientKemPubB64: string,
+  senderXPrivB64: string,
+): string {
+  const recipientXPub = fromBase64(recipientXPubB64);
+  const recipientKemPub = fromBase64(recipientKemPubB64);
+  const senderXPriv = fromBase64(senderXPrivB64);
+
+  const xShared = x25519.getSharedSecret(senderXPriv, recipientXPub);
+  const { cipherText: kemCt, sharedSecret: kemShared } =
+    ml_kem768.encapsulate(recipientKemPub);
+
+  const key = deriveHybridKey(xShared, kemShared);
+  try {
+    const nonce = randomBytes(SECRETBOX_NONCE_LEN);
+    const aeadCt = xchacha20poly1305(key, nonce).encrypt(message);
+    return toBase64(
+      concatBytes(new Uint8Array([HYBRID_VERSION]), kemCt, nonce, aeadCt),
+    );
+  } finally {
+    xShared.fill(0);
+    kemShared.fill(0);
+    key.fill(0);
+  }
+}
+
+function hybridUnwrap(
+  blobB64: string,
+  senderXPubB64: string,
+  recipientXPrivB64: string,
+  recipientKemPrivB64: string,
+): Uint8Array {
+  const blob = fromBase64(blobB64);
+  if (blob.length < HYBRID_HEADER_LEN) {
+    throw new Error("Hybrid unwrap failed — blob too short");
+  }
+  if (blob[0] !== HYBRID_VERSION) {
+    throw new Error(`Hybrid unwrap failed — unsupported version ${blob[0]}`);
+  }
+  const kemCt = blob.slice(1, 1 + ML_KEM_CT_LEN);
+  const nonce = blob.slice(1 + ML_KEM_CT_LEN, HYBRID_HEADER_LEN);
+  const aeadCt = blob.slice(HYBRID_HEADER_LEN);
+
+  const senderXPub = fromBase64(senderXPubB64);
+  const recipientXPriv = fromBase64(recipientXPrivB64);
+  const recipientKemPriv = fromBase64(recipientKemPrivB64);
+
+  // X25519 is symmetric: (recipient_priv, sender_pub) yields the same
+  // shared secret as (sender_priv, recipient_pub).
+  const xShared = x25519.getSharedSecret(recipientXPriv, senderXPub);
+  const kemShared = ml_kem768.decapsulate(kemCt, recipientKemPriv);
+
+  const key = deriveHybridKey(xShared, kemShared);
+  try {
+    try {
+      return xchacha20poly1305(key, nonce).decrypt(aeadCt);
+    } catch {
+      throw new Error("Hybrid unwrap failed — wrong key or tampered ciphertext");
+    }
+  } finally {
+    xShared.fill(0);
+    kemShared.fill(0);
+    key.fill(0);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Symmetric helpers (unchanged from Phase 1)
 // ──────────────────────────────────────────────────────────────────────
 
 function secretboxSeal(plaintext: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array {
@@ -63,156 +208,43 @@ function secretboxSeal(plaintext: Uint8Array, nonce: Uint8Array, key: Uint8Array
 }
 
 function secretboxOpen(ciphertext: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array {
-  // Raw AEAD open. Noble throws with message "invalid tag" on
-  // authentication failure. Callers that need a stable user-facing
-  // message (e.g. "Box decryption failed", "Link unwrap failed",
-  // "Wrong link password") wrap this in their own try/catch with the
-  // appropriate text; leaving raw-throw here avoids one-size-fits-all
-  // errors that lose context at the call site.
+  // Noble throws "invalid tag" on AEAD failure. Callers wrap with their
+  // own try/catch for stable user-facing messages.
   return xchacha20poly1305(key, nonce).decrypt(ciphertext);
 }
 
-/**
- * Derive a symmetric AEAD key from an X25519 ECDH shared secret. Used
- * on both sides of a box wrap; given (senderPriv, recipientPub) or
- * (senderPub, recipientPriv), HKDF-SHA256 collapses the 32-byte shared
- * secret + domain-separated salt/info to a 32-byte XChaCha20-Poly1305
- * key. The resulting keys are deterministic for a given (priv, pub)
- * pair — we never transmit the derived key, only the fresh nonce and
- * the ciphertext.
- */
-function deriveBoxKey(senderPriv: Uint8Array, recipientPub: Uint8Array): Uint8Array {
-  const shared = x25519.getSharedSecret(senderPriv, recipientPub);
-  return hkdf(sha256, shared, BOX_HKDF_SALT, BOX_HKDF_INFO, SECRETBOX_KEY_LEN);
-}
-
-// Shared box wrap helper. Returns combined nonce‖ciphertext base64 plus
-// the nonce separately (for cases where the storage schema splits them).
-function boxWrap(
-  message: Uint8Array,
-  recipientPublicKey: string,
-  senderPrivateKey: string
-): { combined: string; nonceB64: string; ciphertextB64: string } {
-  const recipientPub = fromBase64(recipientPublicKey);
-  const senderPriv = fromBase64(senderPrivateKey);
-  const key = deriveBoxKey(senderPriv, recipientPub);
-  try {
-    const nonce = randomBytes(SECRETBOX_NONCE_LEN);
-    const ciphertext = secretboxSeal(message, nonce, key);
-    const combined = new Uint8Array(nonce.length + ciphertext.length);
-    combined.set(nonce);
-    combined.set(ciphertext, nonce.length);
-    return {
-      combined: toBase64(combined),
-      nonceB64: toBase64(nonce),
-      ciphertextB64: toBase64(ciphertext),
-    };
-  } finally {
-    key.fill(0);
-  }
-}
-
-function boxOpenCombined(
-  combinedB64: string,
-  senderPublicKey: string,
-  recipientPrivateKey: string
-): Uint8Array {
-  const combined = fromBase64(combinedB64);
-  const nonce = combined.slice(0, SECRETBOX_NONCE_LEN);
-  const ciphertext = combined.slice(SECRETBOX_NONCE_LEN);
-  const recipientPriv = fromBase64(recipientPrivateKey);
-  const senderPub = fromBase64(senderPublicKey);
-  // Note the direction flip: on unwrap, the "sender" is the recipient
-  // of the ECDH pair. X25519 is symmetric — (priv_A, pub_B) produces the
-  // same shared secret as (priv_B, pub_A) — so we can derive with the
-  // unwrapper's priv + wrapper's pub and get the same key.
-  const key = deriveBoxKey(recipientPriv, senderPub);
-  try {
-    return secretboxOpen(ciphertext, nonce, key);
-  } catch {
-    throw new Error("Box decryption failed — wrong key or tampered ciphertext");
-  } finally {
-    key.fill(0);
-  }
-}
-
-function boxOpenSplit(
-  ciphertextB64: string,
-  nonceB64: string,
-  senderPublicKey: string,
-  recipientPrivateKey: string
-): Uint8Array {
-  const ciphertext = fromBase64(ciphertextB64);
-  const nonce = fromBase64(nonceB64);
-  const recipientPriv = fromBase64(recipientPrivateKey);
-  const senderPub = fromBase64(senderPublicKey);
-  const key = deriveBoxKey(recipientPriv, senderPub);
-  try {
-    return secretboxOpen(ciphertext, nonce, key);
-  } catch {
-    throw new Error("Box decryption failed — wrong key or tampered ciphertext");
-  } finally {
-    key.fill(0);
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────
-// Session key + content + metadata (symmetric AEAD)
-// ──────────────────────────────────────────────────────────────────────
-
-/**
- * Generate a random session key for a file.
- */
 export function generateSessionKey(): Uint8Array {
   return randomBytes(SECRETBOX_KEY_LEN);
 }
 
-/**
- * Encrypt file content with a session key.
- */
 export function encryptFileContent(content: Uint8Array, sessionKey: Uint8Array): {
   ciphertext: Uint8Array;
   nonce: string;
 } {
   const nonce = randomBytes(SECRETBOX_NONCE_LEN);
   const ciphertext = secretboxSeal(content, nonce, sessionKey);
-  return {
-    ciphertext,
-    nonce: toBase64(nonce),
-  };
+  return { ciphertext, nonce: toBase64(nonce) };
 }
 
-/**
- * Decrypt file content with a session key.
- */
 export function decryptFileContent(ciphertext: Uint8Array, nonceB64: string, sessionKey: Uint8Array): Uint8Array {
   const nonce = fromBase64(nonceB64);
   return secretboxOpen(ciphertext, nonce, sessionKey);
 }
 
-/**
- * Encrypt file metadata (name, type, size) with the session key.
- */
 export function encryptMetadata(
   metadata: { name: string; type: string; size: number },
-  sessionKey: Uint8Array
+  sessionKey: Uint8Array,
 ): EncryptedMetadata {
   const payload = JSON.stringify(metadata);
   const nonce = randomBytes(SECRETBOX_NONCE_LEN);
   const messageBytes = new TextEncoder().encode(payload);
   const ciphertext = secretboxSeal(messageBytes, nonce, sessionKey);
-  return {
-    nonce: toBase64(nonce),
-    ciphertext: toBase64(ciphertext),
-  };
+  return { nonce: toBase64(nonce), ciphertext: toBase64(ciphertext) };
 }
 
-/**
- * Decrypt file metadata with the session key.
- */
 export function decryptMetadata(
   encrypted: EncryptedMetadata,
-  sessionKey: Uint8Array
+  sessionKey: Uint8Array,
 ): { name: string; type: string; size: number } {
   const nonce = fromBase64(encrypted.nonce);
   const ciphertext = fromBase64(encrypted.ciphertext);
@@ -221,163 +253,162 @@ export function decryptMetadata(
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Hierarchical keypair (Phase 2)
+// Hierarchical keypair (hybrid)
 // ──────────────────────────────────────────────────────────────────────
 
-export interface HierarchicalKeypair {
-  publicKey: string;  // base64
-  privateKey: string; // base64
-}
-
 /**
- * Generate a fresh X25519 keypair for use as a file's hierarchical key.
- * Nothing distinguishes these from a user's own encryption keypair at the
- * crypto layer — only the role they play in the storage model differs.
+ * Generate a fresh hybrid (X25519 + ML-KEM-768) hierarchical keypair
+ * for a file. The two halves are independent — compromising one
+ * doesn't reveal the other.
  */
 export function generateHierarchicalKeypair(): HierarchicalKeypair {
-  const privateKey = x25519.utils.randomSecretKey();
-  const publicKey = x25519.getPublicKey(privateKey);
+  const xPriv = x25519.utils.randomSecretKey();
+  const xPub = x25519.getPublicKey(xPriv);
+  const kemKp = ml_kem768.keygen();
   return {
-    publicKey: toBase64(publicKey),
-    privateKey: toBase64(privateKey),
+    publicKeys: {
+      x25519: toBase64(xPub),
+      kem: toBase64(kemKp.publicKey),
+    },
+    privateKeys: {
+      x25519: toBase64(xPriv),
+      kem: toBase64(kemKp.secretKey),
+    },
   };
 }
 
 /**
- * Wrap a file's session key to its own public hierarchical key. The owner
- * is always the box sender — their public key is what a reader uses to
- * unwrap. Returns `ciphertext` + `nonce` as separate base64 strings so the
- * DB schema can store them in distinct columns.
+ * Serialize a hybrid private-key bundle as JSON bytes. Used for the
+ * payload wrapped into file_keys / parent_keys_claim / link rows.
+ */
+function serializeHybridPrivate(priv: HybridPrivateKeys): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(priv));
+}
+
+function deserializeHybridPrivate(bytes: Uint8Array): HybridPrivateKeys {
+  const parsed = JSON.parse(new TextDecoder().decode(bytes)) as HybridPrivateKeys;
+  if (typeof parsed.x25519 !== "string" || typeof parsed.kem !== "string") {
+    throw new Error("Invalid hybrid-private payload");
+  }
+  return parsed;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Session key → file's hybrid pub hier keys
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Wrap the file's session key to its own hybrid public hierarchical
+ * keys. The owner is the X25519 ECDH sender. Returns a single blob;
+ * `sessionKeyNonce` is an empty string placeholder in v2 (kept on
+ * the DB row for back-compat; a later migration drops it).
  */
 export function wrapSessionKeyToFile(
   sessionKey: Uint8Array,
-  filePublicHierarchicalKey: string,
-  ownerPrivateKey: string
+  filePubHier: HybridPublicKeys,
+  ownerXPriv: string,
 ): { encryptedSessionKeyByFile: string; sessionKeyNonce: string } {
-  const { nonceB64, ciphertextB64 } = boxWrap(
-    sessionKey,
-    filePublicHierarchicalKey,
-    ownerPrivateKey
-  );
-  return {
-    encryptedSessionKeyByFile: ciphertextB64,
-    sessionKeyNonce: nonceB64,
-  };
+  const blob = hybridWrap(sessionKey, filePubHier.x25519, filePubHier.kem, ownerXPriv);
+  return { encryptedSessionKeyByFile: blob, sessionKeyNonce: "" };
 }
 
-/**
- * Unwrap a file's session key given its private hierarchical key and the
- * owner's public key (the box sender at upload time).
- */
 export function unwrapSessionKeyFromFile(
   encryptedSessionKeyByFile: string,
-  sessionKeyNonce: string,
-  ownerPublicKey: string,
-  filePrivateHierarchicalKey: string
+  _sessionKeyNonce: string, // unused in v2; kept in signature for caller ergonomics
+  ownerXPub: string,
+  filePrivHier: HybridPrivateKeys,
 ): Uint8Array {
-  return boxOpenSplit(
+  return hybridUnwrap(
     encryptedSessionKeyByFile,
-    sessionKeyNonce,
-    ownerPublicKey,
-    filePrivateHierarchicalKey
+    ownerXPub,
+    filePrivHier.x25519,
+    filePrivHier.kem,
   );
 }
 
-/**
- * Wrap a file's private hierarchical key to a collaborator's public key.
- * Either the owner or any existing collaborator can call this — the
- * `wrappedByPublicKey` is the sharer's own public key, which the recipient
- * must use when unwrapping.
- */
+// ──────────────────────────────────────────────────────────────────────
+// Private hier → collaborator (the file_keys row payload)
+// ──────────────────────────────────────────────────────────────────────
+
 export function wrapPrivateHierarchicalKeyForUser(
-  filePrivateHierarchicalKey: string,
-  recipientPublicKey: string,
-  sharerPrivateKey: string
+  filePrivHier: HybridPrivateKeys,
+  recipientPubUser: HybridPublicKeys,
+  sharerXPriv: string,
 ): string {
-  const { combined } = boxWrap(
-    fromBase64(filePrivateHierarchicalKey),
-    recipientPublicKey,
-    sharerPrivateKey
-  );
-  return combined;
+  const payload = serializeHybridPrivate(filePrivHier);
+  try {
+    return hybridWrap(payload, recipientPubUser.x25519, recipientPubUser.kem, sharerXPriv);
+  } finally {
+    payload.fill(0);
+  }
 }
 
-/**
- * Unwrap your own file_keys row to recover the file's private hierarchical
- * key. `wrappedByPublicKey` is the sharer's public key at the time of the
- * grant (owner for initial rows, any collaborator for re-shares).
- */
 export function unwrapPrivateHierarchicalKey(
-  encryptedPrivateHierarchicalKey: string,
-  wrappedByPublicKey: string,
-  recipientPrivateKey: string
-): string {
-  const raw = boxOpenCombined(
-    encryptedPrivateHierarchicalKey,
-    wrappedByPublicKey,
-    recipientPrivateKey
+  encryptedPrivateHier: string,
+  wrappedByXPub: string,
+  recipientXPriv: string,
+  recipientKemPriv: string,
+): HybridPrivateKeys {
+  const bytes = hybridUnwrap(
+    encryptedPrivateHier,
+    wrappedByXPub,
+    recipientXPriv,
+    recipientKemPriv,
   );
-  return toBase64(raw);
+  try {
+    return deserializeHybridPrivate(bytes);
+  } finally {
+    bytes.fill(0);
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Link sharing — Phase 4
+// Link sharing (symmetric wrap over the hybrid priv bundle)
 // ──────────────────────────────────────────────────────────────────────
 
-/**
- * Fresh symmetric key for a public link. Lives only in the URL fragment
- * on the client; the server only ever sees the wrapped ciphertext.
- */
 export function generateLinkKey(): Uint8Array {
   return randomBytes(SECRETBOX_KEY_LEN);
 }
 
-/**
- * Wrap a file's private hierarchical key under a link's symmetric key.
- * Uses XChaCha20-Poly1305 directly so no sender public key is involved —
- * anyone who holds `linkKey` can unwrap. `linkKey` lives only in the URL
- * fragment and is never transmitted to the server.
- */
 export function wrapPrivateHierarchicalKeyForLink(
-  privateHierarchicalKey: string, // base64
-  linkKey: Uint8Array
+  privHier: HybridPrivateKeys,
+  linkKey: Uint8Array,
 ): { encryptedPrivateHierarchicalKey: string; linkKeyNonce: string } {
-  const nonce = randomBytes(SECRETBOX_NONCE_LEN);
-  const ciphertext = secretboxSeal(fromBase64(privateHierarchicalKey), nonce, linkKey);
-  return {
-    encryptedPrivateHierarchicalKey: toBase64(ciphertext),
-    linkKeyNonce: toBase64(nonce),
-  };
+  const payload = serializeHybridPrivate(privHier);
+  try {
+    const nonce = randomBytes(SECRETBOX_NONCE_LEN);
+    const ciphertext = secretboxSeal(payload, nonce, linkKey);
+    return {
+      encryptedPrivateHierarchicalKey: toBase64(ciphertext),
+      linkKeyNonce: toBase64(nonce),
+    };
+  } finally {
+    payload.fill(0);
+  }
 }
 
-/**
- * Inverse of `wrapPrivateHierarchicalKeyForLink`. The recovered private
- * hier key is then fed into `unwrapSessionKeyFromFile` along with the
- * owner's public key (which the server can return — it's public).
- */
 export function unwrapPrivateHierarchicalKeyFromLink(
-  encryptedPrivateHierarchicalKey: string,
+  encryptedPrivateHier: string,
   linkKeyNonce: string,
-  linkKey: Uint8Array
-): string {
+  linkKey: Uint8Array,
+): HybridPrivateKeys {
   let plain: Uint8Array;
   try {
     plain = secretboxOpen(
-      fromBase64(encryptedPrivateHierarchicalKey),
+      fromBase64(encryptedPrivateHier),
       fromBase64(linkKeyNonce),
       linkKey,
     );
   } catch {
     throw new Error("Link unwrap failed — wrong key or tampered ciphertext");
   }
-  return toBase64(plain);
+  try {
+    return deserializeHybridPrivate(plain);
+  } finally {
+    plain.fill(0);
+  }
 }
 
-/**
- * URL-safe base64 without padding. The linkKey lives in
- * `window.location.hash`; standard base64 can include `/` and `+` which
- * are fine in fragments but awkward in logs and copy-paste flows.
- */
 export function encodeLinkKeyForFragment(linkKey: Uint8Array): string {
   return toBase64(linkKey).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -389,24 +420,14 @@ export function decodeLinkKeyFromFragment(fragment: string): Uint8Array {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Phase 4.1 — password-protected links
+// Password-protected links (Phase 4.1, symmetric — unchanged by v2)
 // ──────────────────────────────────────────────────────────────────────
 
-// Argon2id parameters for link password derivation. Deliberately lighter
-// than the SRP main-key parameters (64 MB / 3 iters) because link password
-// entry is interactive on a variety of devices, but still strong enough
-// to make offline brute force expensive. 32 MB / 2 iters is the RFC 9106
-// "memory-constrained" recommendation.
-const LINK_ARGON2_MEMORY_KB = 32 * 1024; // 32 MB
+const LINK_ARGON2_MEMORY_KB = 32 * 1024;
 const LINK_ARGON2_ITERATIONS = 2;
 const LINK_ARGON2_PARALLELISM = 1;
 const LINK_KEY_LENGTH = SECRETBOX_KEY_LEN;
 
-/**
- * Derive a 32-byte symmetric key from a link password using Argon2id.
- * Used to wrap the actual linkKey before storing on the server — the
- * password itself never leaves the browser and isn't stored anywhere.
- */
 export function deriveLinkWrappingKey(password: string, salt: Uint8Array): Uint8Array {
   return argon2id(password, salt, {
     t: LINK_ARGON2_ITERATIONS,
@@ -416,13 +437,9 @@ export function deriveLinkWrappingKey(password: string, salt: Uint8Array): Uint8
   });
 }
 
-/**
- * Wrap a linkKey under a password-derived key. Returns all three fields
- * that live on a password-protected `file_links` row.
- */
 export function wrapLinkKeyWithPassword(
   linkKey: Uint8Array,
-  password: string
+  password: string,
 ): { passwordSalt: string; passwordWrappedLinkKey: string; passwordWrapNonce: string } {
   const salt = randomBytes(16);
   const wrappingKey = deriveLinkWrappingKey(password, salt);
@@ -439,16 +456,11 @@ export function wrapLinkKeyWithPassword(
   }
 }
 
-/**
- * Recover a linkKey from its password wrap. Throws on wrong password —
- * the caller should translate that into a user-visible "wrong password"
- * without retrying (rate-limiting is the server's job).
- */
 export function unwrapLinkKeyWithPassword(
   passwordWrappedLinkKey: string,
   passwordSalt: string,
   passwordWrapNonce: string,
-  password: string
+  password: string,
 ): Uint8Array {
   const wrappingKey = deriveLinkWrappingKey(password, fromBase64(passwordSalt));
   try {
@@ -465,63 +477,50 @@ export function unwrapLinkKeyWithPassword(
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Parent keys claim — Phase 3 folder inheritance
+// Parent keys claim (folder inheritance, hybrid in v2)
 // ──────────────────────────────────────────────────────────────────────
 
-/**
- * Payload of a parent_keys_claim: the child's session key and its own
- * private hierarchical key, both base64. Wrapped once at upload time so
- * anyone who can unwrap the parent can unwrap every descendant without
- * per-child ACL fan-out.
- */
 interface ParentClaimPayload {
-  sessionKey: string;
-  childPrivateHierarchicalKey: string;
+  sessionKey: string;                            // base64
+  childPrivateHierarchicalKeys: HybridPrivateKeys;
 }
 
-/**
- * Wrap `{sessionKey, childPrivateHierarchicalKey}` under the *parent's*
- * public hierarchical key, with the owner's private encryption key as the
- * box sender. The result is a single base64 combined nonce‖ciphertext.
- *
- * At read time the unwrap needs the parent's *private* hier key (obtained
- * by the user unwrapping their file_keys row on the parent) and the owner's
- * public key (stored alongside as `parent_keys_claim_wrapped_by`).
- */
 export function wrapParentKeysClaim(
   sessionKey: Uint8Array,
-  childPrivateHierarchicalKey: string,
-  parentPublicHierarchicalKey: string,
-  ownerPrivateKey: string
+  childPrivHier: HybridPrivateKeys,
+  parentPubHier: HybridPublicKeys,
+  ownerXPriv: string,
 ): string {
   const payload: ParentClaimPayload = {
     sessionKey: toBase64(sessionKey),
-    childPrivateHierarchicalKey,
+    childPrivateHierarchicalKeys: childPrivHier,
   };
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
-  const { combined } = boxWrap(bytes, parentPublicHierarchicalKey, ownerPrivateKey);
-  return combined;
+  try {
+    return hybridWrap(bytes, parentPubHier.x25519, parentPubHier.kem, ownerXPriv);
+  } finally {
+    bytes.fill(0);
+  }
 }
 
-/**
- * Unwrap a parent_keys_claim using the parent's private hierarchical key.
- * Returns the child's session key (raw bytes) and its own private hier key
- * (base64). The caller is responsible for zeroing the returned sessionKey
- * as soon as it's done with it.
- */
 export function unwrapParentKeysClaim(
   parentKeysClaim: string,
-  wrappedByPublicKey: string,
-  parentPrivateHierarchicalKey: string
-): { sessionKey: Uint8Array; childPrivateHierarchicalKey: string } {
-  const bytes = boxOpenCombined(
+  wrappedByXPub: string,
+  parentPrivHier: HybridPrivateKeys,
+): { sessionKey: Uint8Array; childPrivateHierarchicalKeys: HybridPrivateKeys } {
+  const bytes = hybridUnwrap(
     parentKeysClaim,
-    wrappedByPublicKey,
-    parentPrivateHierarchicalKey
+    wrappedByXPub,
+    parentPrivHier.x25519,
+    parentPrivHier.kem,
   );
-  const payload = JSON.parse(new TextDecoder().decode(bytes)) as ParentClaimPayload;
-  return {
-    sessionKey: fromBase64(payload.sessionKey),
-    childPrivateHierarchicalKey: payload.childPrivateHierarchicalKey,
-  };
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(bytes)) as ParentClaimPayload;
+    return {
+      sessionKey: fromBase64(payload.sessionKey),
+      childPrivateHierarchicalKeys: payload.childPrivateHierarchicalKeys,
+    };
+  } finally {
+    bytes.fill(0);
+  }
 }

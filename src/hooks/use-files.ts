@@ -16,6 +16,8 @@ import {
   wrapPrivateHierarchicalKeyForLink,
   encodeLinkKeyForFragment,
   wrapLinkKeyWithPassword,
+  type HybridPublicKeys,
+  type HybridPrivateKeys,
 } from "@/lib/crypto/file-crypto";
 import {
   fileChunkGenerator,
@@ -77,7 +79,12 @@ export interface DecryptedFile {
   encryptedPrivateHierarchicalKey: string;
   wrappedByPublicKey: string;
   ownerPublicKey: string;
+  // Crypto v2 Phase 2b — file's hybrid pub hier keys (X25519 +
+  // ML-KEM-768) and owner's ML-KEM pub, needed for the hybrid
+  // session-key unwrap.
+  ownerPublicKemKey: string;
   publicHierarchicalKey: string;
+  publicKemHierarchicalKey: string;
   encryptedSessionKeyByFile: string;
   sessionKeyNonce: string;
   // Phase 3 parent_keys_claim. Non-null for any file with a parent.
@@ -164,6 +171,8 @@ interface UseFilesState {
 export function useFiles(keys: {
   encryptionPublicKey: string;
   encryptionPrivateKey: string;
+  kemPublicKey: string;
+  kemPrivateKey: string;
   email: string;
 } | null) {
   const [state, setState] = useState<UseFilesState>(() => {
@@ -240,16 +249,25 @@ export function useFiles(keys: {
   // LRU cache for folder hierarchical keys. Bounded to 128 entries
   // to prevent unbounded memory growth for users with hundreds of
   // folders. Evicts least-recently-used entries automatically.
+  // Crypto v2 Phase 2b — cache holds hybrid pub + priv hier bundles
+  // per folder. The X25519 + ML-KEM split means both halves must
+  // survive in memory; serializing or dropping one would break the
+  // hybrid wrap/unwrap invariant.
   const folderPrivHierCache = useRef((() => {
     const MAX = 128;
-    const map = new Map<string, { publicHierarchicalKey: string; privateHierarchicalKey: string }>();
+    type Entry = {
+      publicHierarchicalKey: string;
+      publicKemHierarchicalKey: string;
+      privateHierarchicalKeys: HybridPrivateKeys;
+    };
+    const map = new Map<string, Entry>();
     return {
       get(key: string) {
         const val = map.get(key);
         if (val) { map.delete(key); map.set(key, val); } // move to end (most recent)
         return val;
       },
-      set(key: string, val: { publicHierarchicalKey: string; privateHierarchicalKey: string }) {
+      set(key: string, val: Entry) {
         map.delete(key);
         map.set(key, val);
         if (map.size > MAX) { const first = map.keys().next().value; if (first) map.delete(first); }
@@ -430,20 +448,37 @@ export function useFiles(keys: {
           const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
           if (!encPrivHier) continue;
           try {
-            const privHier = unwrapPrivateHierarchicalKey(encPrivHier, (f.wrapped_by_public_key as string) || "", keys.encryptionPrivateKey);
-            const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file as string, f.session_key_nonce as string, (f.owner_public_key as string) || "", privHier);
+            const privHier = unwrapPrivateHierarchicalKey(
+              encPrivHier,
+              (f.wrapped_by_public_key as string) || "",
+              keys.encryptionPrivateKey,
+              keys.kemPrivateKey,
+            );
+            const sk = unwrapSessionKeyFromFile(
+              f.encrypted_session_key_by_file as string,
+              (f.session_key_nonce as string) ?? "",
+              (f.owner_public_key as string) || "",
+              privHier,
+            );
             const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata as string) : f.encrypted_metadata;
             const meta = decryptMetadata(encMeta, sk);
             sk.fill(0);
-            if ((f.is_folder as boolean) && privHier && f.public_hierarchical_key) {
-              folderPrivHierCache.current.set(f.id as string, { publicHierarchicalKey: f.public_hierarchical_key as string, privateHierarchicalKey: privHier });
+            if ((f.is_folder as boolean) && f.public_hierarchical_key && f.public_kem_hierarchical_key) {
+              folderPrivHierCache.current.set(f.id as string, {
+                publicHierarchicalKey: f.public_hierarchical_key as string,
+                publicKemHierarchicalKey: f.public_kem_hierarchical_key as string,
+                privateHierarchicalKeys: privHier,
+              });
             }
             results.push({
               id: f.id as string, isFolder: f.is_folder as boolean, parentId: (f.parent_id as string | null) ?? null,
               ownerId: (f.owner_id as string) || "", ownerEmail: (f.owner_email as string | null) ?? null, ownerDisplayName: (f.owner_display_name as string | null) ?? null, createdAt: f.created_at as string, updatedAt: f.updated_at as string,
               encryptedPrivateHierarchicalKey: encPrivHier, wrappedByPublicKey: (f.wrapped_by_public_key as string) || "",
-              ownerPublicKey: (f.owner_public_key as string) || "", publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
-              encryptedSessionKeyByFile: f.encrypted_session_key_by_file as string, sessionKeyNonce: f.session_key_nonce as string,
+              ownerPublicKey: (f.owner_public_key as string) || "",
+              ownerPublicKemKey: (f.owner_public_kem_key as string) || "",
+              publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
+              publicKemHierarchicalKey: (f.public_kem_hierarchical_key as string) || "",
+              encryptedSessionKeyByFile: f.encrypted_session_key_by_file as string, sessionKeyNonce: (f.session_key_nonce as string) ?? "",
               parentKeysClaim: (f.parent_keys_claim as string | null) ?? null, parentKeysClaimWrappedBy: (f.parent_keys_claim_wrapped_by as string | null) ?? null,
               isStarred: !!(f.is_starred), hasActiveLink: !!(f.has_active_link), fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
               isShared: false, collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
@@ -531,7 +566,9 @@ export function useFiles(keys: {
           const encryptedPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
           const wrappedByPublicKey = (f.wrapped_by_public_key as string) || "";
           const ownerPublicKey = (f.owner_public_key as string) || "";
+          const ownerPublicKemKey = (f.owner_public_kem_key as string) || "";
           const publicHierarchicalKey = (f.public_hierarchical_key as string) || "";
+          const publicKemHierarchicalKey = (f.public_kem_hierarchical_key as string) || "";
           const encryptedSessionKeyByFile = (f.encrypted_session_key_by_file as string) || "";
           const sessionKeyNonce = (f.session_key_nonce as string) || "";
           const parentKeysClaim = (f.parent_keys_claim as string | null) ?? null;
@@ -540,13 +577,14 @@ export function useFiles(keys: {
           const isFolder = f.is_folder as boolean;
 
           let sessionKey: Uint8Array;
-          let privHier: string | null = null;
+          let privHier: HybridPrivateKeys | null = null;
 
           if (encryptedPrivHier) {
             privHier = unwrapPrivateHierarchicalKey(
               encryptedPrivHier,
               wrappedByPublicKey,
-              keys.encryptionPrivateKey
+              keys.encryptionPrivateKey,
+              keys.kemPrivateKey,
             );
             sessionKey = unwrapSessionKeyFromFile(
               encryptedSessionKeyByFile,
@@ -560,18 +598,19 @@ export function useFiles(keys: {
             const unwrapped = unwrapParentKeysClaim(
               parentKeysClaim,
               parentKeysClaimWrappedBy,
-              parentEntry.privateHierarchicalKey
+              parentEntry.privateHierarchicalKeys
             );
             sessionKey = unwrapped.sessionKey;
-            privHier = unwrapped.childPrivateHierarchicalKey;
+            privHier = unwrapped.childPrivateHierarchicalKeys;
           } else {
             throw new Error("no decrypt path");
           }
 
-          if (isFolder && privHier && publicHierarchicalKey) {
+          if (isFolder && privHier && publicHierarchicalKey && publicKemHierarchicalKey) {
             folderPrivHierCache.current.set(f.id as string, {
               publicHierarchicalKey,
-              privateHierarchicalKey: privHier,
+              publicKemHierarchicalKey,
+              privateHierarchicalKeys: privHier,
             });
           }
 
@@ -592,7 +631,9 @@ export function useFiles(keys: {
             encryptedPrivateHierarchicalKey: encryptedPrivHier,
             wrappedByPublicKey,
             ownerPublicKey,
+            ownerPublicKemKey,
             publicHierarchicalKey,
+            publicKemHierarchicalKey,
             encryptedSessionKeyByFile,
             sessionKeyNonce,
             parentKeysClaim,
@@ -620,7 +661,9 @@ export function useFiles(keys: {
           encryptedPrivateHierarchicalKey: (f.encrypted_private_hierarchical_key as string) || "",
           wrappedByPublicKey: (f.wrapped_by_public_key as string) || "",
           ownerPublicKey: (f.owner_public_key as string) || "",
+          ownerPublicKemKey: (f.owner_public_kem_key as string) || "",
           publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
+          publicKemHierarchicalKey: (f.public_kem_hierarchical_key as string) || "",
           encryptedSessionKeyByFile: (f.encrypted_session_key_by_file as string) || "",
           sessionKeyNonce: (f.session_key_nonce as string) || "",
           parentKeysClaim: (f.parent_keys_claim as string | null) ?? null,
@@ -672,12 +715,14 @@ export function useFiles(keys: {
                   const pPrivHier = unwrapPrivateHierarchicalKey(
                     pd.encryptedPrivateHierarchicalKey,
                     pd.wrappedByPublicKey,
-                    keys.encryptionPrivateKey
+                    keys.encryptionPrivateKey,
+                    keys.kemPrivateKey,
                   );
-                  if (pd.publicHierarchicalKey) {
+                  if (pd.publicHierarchicalKey && pd.publicKemHierarchicalKey) {
                     folderPrivHierCache.current.set(pid, {
                       publicHierarchicalKey: pd.publicHierarchicalKey,
-                      privateHierarchicalKey: pPrivHier,
+                      publicKemHierarchicalKey: pd.publicKemHierarchicalKey,
+                      privateHierarchicalKeys: pPrivHier,
                     });
                   }
                 }
@@ -747,7 +792,9 @@ export function useFiles(keys: {
       encryptedPrivateHierarchicalKey: "",
       wrappedByPublicKey: keys.encryptionPublicKey,
       ownerPublicKey: keys.encryptionPublicKey,
+      ownerPublicKemKey: keys.kemPublicKey,
       publicHierarchicalKey: "",
+      publicKemHierarchicalKey: "",
       encryptedSessionKeyByFile: "",
       sessionKeyNonce: "",
       parentKeysClaim: null,
@@ -824,15 +871,15 @@ export function useFiles(keys: {
       //     owner's private key as the box sender.
       const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(
         sessionKey,
-        hier.publicKey,
+        hier.publicKeys,
         keys.encryptionPrivateKey
       );
       // 1b. Wrap the file's private hier key to the owner's own public
       //     key. This is the row that lives in file_keys and is what
       //     collaborators unwrap after being granted access.
       const encryptedPrivateHierarchicalKey = wrapPrivateHierarchicalKeyForUser(
-        hier.privateKey,
-        keys.encryptionPublicKey,
+        hier.privateKeys,
+        { x25519: keys.encryptionPublicKey, kem: keys.kemPublicKey },
         keys.encryptionPrivateKey
       );
 
@@ -853,8 +900,17 @@ export function useFiles(keys: {
               const pd = await pRes.json();
               const pKey = pd.encryptedPrivateHierarchicalKey;
               if (pKey) {
-                const pPrivHier = unwrapPrivateHierarchicalKey(pKey, pd.wrappedByPublicKey, keys.encryptionPrivateKey);
-                parentEntry = { publicHierarchicalKey: pd.publicHierarchicalKey, privateHierarchicalKey: pPrivHier };
+                const pPrivHier = unwrapPrivateHierarchicalKey(
+                  pKey,
+                  pd.wrappedByPublicKey,
+                  keys.encryptionPrivateKey,
+                  keys.kemPrivateKey,
+                );
+                parentEntry = {
+                  publicHierarchicalKey: pd.publicHierarchicalKey,
+                  publicKemHierarchicalKey: pd.publicKemHierarchicalKey,
+                  privateHierarchicalKeys: pPrivHier,
+                };
                 folderPrivHierCache.current.set(parentId, parentEntry);
               }
             }
@@ -865,8 +921,11 @@ export function useFiles(keys: {
         }
         parentKeysClaim = wrapParentKeysClaim(
           sessionKey,
-          hier.privateKey,
-          parentEntry.publicHierarchicalKey,
+          hier.privateKeys,
+          {
+            x25519: parentEntry.publicHierarchicalKey,
+            kem: parentEntry.publicKemHierarchicalKey,
+          },
           keys.encryptionPrivateKey
         );
         parentKeysClaimWrappedBy = keys.encryptionPublicKey;
@@ -883,7 +942,8 @@ export function useFiles(keys: {
           parentId,
           totalSizeBytes: file.size,
           chunkCount,
-          publicHierarchicalKey: hier.publicKey,
+          publicHierarchicalKey: hier.publicKeys.x25519,
+          publicKemHierarchicalKey: hier.publicKeys.kem,
           encryptedSessionKeyByFile,
           sessionKeyNonce,
           encryptedPrivateHierarchicalKey,
@@ -1301,7 +1361,8 @@ export function useFiles(keys: {
         const privHier = unwrapPrivateHierarchicalKey(
           data.encryptedPrivateHierarchicalKey,
           data.wrappedByPublicKey,
-          keys.encryptionPrivateKey
+          keys.encryptionPrivateKey,
+          keys.kemPrivateKey,
         );
         return unwrapSessionKeyFromFile(
           data.encryptedSessionKeyByFile,
@@ -1318,7 +1379,8 @@ export function useFiles(keys: {
       let currentPrivHier = unwrapPrivateHierarchicalKey(
         data.ancestorKey.encrypted_private_hierarchical_key,
         data.ancestorKey.wrapped_by_public_key,
-        keys.encryptionPrivateKey
+        keys.encryptionPrivateKey,
+        keys.kemPrivateKey,
       );
       // Walk chain from top (closest to ancestor) to bottom (the file)
       for (const link of data.parentChain) {
@@ -1327,7 +1389,7 @@ export function useFiles(keys: {
           link.parentKeysClaimWrappedBy,
           currentPrivHier
         );
-        currentPrivHier = unwrapped.childPrivateHierarchicalKey;
+        currentPrivHier = unwrapped.childPrivateHierarchicalKeys;
         // If this is the target file, unwrapped.sessionKey is what we need
         if (link.fileId === data.parentChain[data.parentChain.length - 1].fileId) {
           return unwrapped.sessionKey;
@@ -1522,12 +1584,12 @@ export function useFiles(keys: {
 
       const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(
         sessionKey,
-        hier.publicKey,
+        hier.publicKeys,
         keys.encryptionPrivateKey
       );
       const encryptedPrivateHierarchicalKey = wrapPrivateHierarchicalKeyForUser(
-        hier.privateKey,
-        keys.encryptionPublicKey,
+        hier.privateKeys,
+        { x25519: keys.encryptionPublicKey, kem: keys.kemPublicKey },
         keys.encryptionPrivateKey
       );
 
@@ -1544,8 +1606,17 @@ export function useFiles(keys: {
               const pd = await pRes.json();
               const pKey = pd.encryptedPrivateHierarchicalKey;
               if (pKey) {
-                const pPrivHier = unwrapPrivateHierarchicalKey(pKey, pd.wrappedByPublicKey, keys.encryptionPrivateKey);
-                parentEntry = { publicHierarchicalKey: pd.publicHierarchicalKey, privateHierarchicalKey: pPrivHier };
+                const pPrivHier = unwrapPrivateHierarchicalKey(
+                  pKey,
+                  pd.wrappedByPublicKey,
+                  keys.encryptionPrivateKey,
+                  keys.kemPrivateKey,
+                );
+                parentEntry = {
+                  publicHierarchicalKey: pd.publicHierarchicalKey,
+                  publicKemHierarchicalKey: pd.publicKemHierarchicalKey,
+                  privateHierarchicalKeys: pPrivHier,
+                };
                 folderPrivHierCache.current.set(parentId, parentEntry);
               }
             }
@@ -1560,8 +1631,11 @@ export function useFiles(keys: {
         }
         parentKeysClaim = wrapParentKeysClaim(
           sessionKey,
-          hier.privateKey,
-          parentEntry.publicHierarchicalKey,
+          hier.privateKeys,
+          {
+            x25519: parentEntry.publicHierarchicalKey,
+            kem: parentEntry.publicKemHierarchicalKey,
+          },
           keys.encryptionPrivateKey
         );
         parentKeysClaimWrappedBy = keys.encryptionPublicKey;
@@ -1573,7 +1647,8 @@ export function useFiles(keys: {
         body: JSON.stringify({
           encryptedMetadata: JSON.stringify(encryptedMetadata),
           parentId,
-          publicHierarchicalKey: hier.publicKey,
+          publicHierarchicalKey: hier.publicKeys.x25519,
+          publicKemHierarchicalKey: hier.publicKeys.kem,
           encryptedSessionKeyByFile,
           sessionKeyNonce,
           encryptedPrivateHierarchicalKey,
@@ -1645,7 +1720,8 @@ export function useFiles(keys: {
           const privHier = unwrapPrivateHierarchicalKey(
             file.encryptedPrivateHierarchicalKey,
             file.wrappedByPublicKey,
-            keys.encryptionPrivateKey
+            keys.encryptionPrivateKey,
+            keys.kemPrivateKey,
           );
           sessionKey = unwrapSessionKeyFromFile(
             file.encryptedSessionKeyByFile,
@@ -1664,8 +1740,17 @@ export function useFiles(keys: {
             if (dlRes.ok) {
               const dlData = await dlRes.json();
               if (dlData.encryptedPrivateHierarchicalKey) {
-                const parentPrivHier = unwrapPrivateHierarchicalKey(dlData.encryptedPrivateHierarchicalKey, dlData.wrappedByPublicKey, keys.encryptionPrivateKey);
-                parentEntry = { publicHierarchicalKey: dlData.publicHierarchicalKey || "", privateHierarchicalKey: parentPrivHier };
+                const parentPrivHier = unwrapPrivateHierarchicalKey(
+                  dlData.encryptedPrivateHierarchicalKey,
+                  dlData.wrappedByPublicKey,
+                  keys.encryptionPrivateKey,
+                  keys.kemPrivateKey,
+                );
+                parentEntry = {
+                  publicHierarchicalKey: dlData.publicHierarchicalKey || "",
+                  publicKemHierarchicalKey: dlData.publicKemHierarchicalKey || "",
+                  privateHierarchicalKeys: parentPrivHier,
+                };
                 folderPrivHierCache.current.set(file.parentId, parentEntry);
               }
             }
@@ -1676,7 +1761,7 @@ export function useFiles(keys: {
           const unwrapped = unwrapParentKeysClaim(
             file.parentKeysClaim,
             file.parentKeysClaimWrappedBy,
-            parentEntry.privateHierarchicalKey
+            parentEntry.privateHierarchicalKeys
           );
           sessionKey = unwrapped.sessionKey;
         } else {
@@ -1752,20 +1837,22 @@ export function useFiles(keys: {
     async (
       file: DecryptedFile,
       newParentId: string | null,
-      destPublicHierarchicalKey: string | null
+      destPublicHierarchicalKey: string | null,
+      destPublicKemHierarchicalKey: string | null,
     ): Promise<{ ok: true } | { ok: false; error: string }> => {
       if (!keys) return { ok: false, error: "Not signed in" };
       if (file.parentId === newParentId) return { ok: true };
 
       let sessionKey: Uint8Array | null = null;
       try {
-        let privHier: string;
+        let privHier: HybridPrivateKeys;
 
         if (file.encryptedPrivateHierarchicalKey) {
           privHier = unwrapPrivateHierarchicalKey(
             file.encryptedPrivateHierarchicalKey,
             file.wrappedByPublicKey,
-            keys.encryptionPrivateKey
+            keys.encryptionPrivateKey,
+            keys.kemPrivateKey,
           );
           sessionKey = unwrapSessionKeyFromFile(
             file.encryptedSessionKeyByFile,
@@ -1784,9 +1871,14 @@ export function useFiles(keys: {
                 const parentPrivHier = unwrapPrivateHierarchicalKey(
                   dlData.encryptedPrivateHierarchicalKey,
                   dlData.wrappedByPublicKey,
-                  keys.encryptionPrivateKey
+                  keys.encryptionPrivateKey,
+                  keys.kemPrivateKey,
                 );
-                parentEntry = { publicHierarchicalKey: dlData.publicHierarchicalKey || "", privateHierarchicalKey: parentPrivHier };
+                parentEntry = {
+                  publicHierarchicalKey: dlData.publicHierarchicalKey || "",
+                  publicKemHierarchicalKey: dlData.publicKemHierarchicalKey || "",
+                  privateHierarchicalKeys: parentPrivHier,
+                };
                 folderPrivHierCache.current.set(file.parentId, parentEntry);
               }
             }
@@ -1797,10 +1889,10 @@ export function useFiles(keys: {
           const unwrapped = unwrapParentKeysClaim(
             file.parentKeysClaim,
             file.parentKeysClaimWrappedBy,
-            parentEntry.privateHierarchicalKey
+            parentEntry.privateHierarchicalKeys
           );
           sessionKey = unwrapped.sessionKey;
-          privHier = unwrapped.childPrivateHierarchicalKey;
+          privHier = unwrapped.childPrivateHierarchicalKeys;
         } else {
           return { ok: false, error: "No decrypt path for this file" };
         }
@@ -1811,10 +1903,13 @@ export function useFiles(keys: {
           if (!destPublicHierarchicalKey) {
             return { ok: false, error: "Destination pub hier key missing" };
           }
+          if (!destPublicKemHierarchicalKey) {
+            return { ok: false, error: "Destination pub kem hier key missing" };
+          }
           parentKeysClaim = wrapParentKeysClaim(
             sessionKey,
             privHier,
-            destPublicHierarchicalKey,
+            { x25519: destPublicHierarchicalKey, kem: destPublicKemHierarchicalKey },
             keys.encryptionPrivateKey
           );
           parentKeysClaimWrappedBy = keys.encryptionPublicKey;
@@ -1914,7 +2009,7 @@ export function useFiles(keys: {
    * how the caller has access.
    */
   const resolvePrivHier = useCallback(
-    async (file: DecryptedFile): Promise<string> => {
+    async (file: DecryptedFile): Promise<HybridPrivateKeys> => {
       if (!keys) throw new Error("Not signed in");
       // Fast path — direct-key file, one local unwrap.
       if (file.encryptedPrivateHierarchicalKey && file.wrappedByPublicKey) {
@@ -1922,6 +2017,7 @@ export function useFiles(keys: {
           file.encryptedPrivateHierarchicalKey,
           file.wrappedByPublicKey,
           keys.encryptionPrivateKey,
+          keys.kemPrivateKey,
         );
       }
       // Inherited path — grab the server's parent-chain payload
@@ -1936,15 +2032,17 @@ export function useFiles(keys: {
           data.encryptedPrivateHierarchicalKey,
           data.wrappedByPublicKey,
           keys.encryptionPrivateKey,
+          keys.kemPrivateKey,
         );
       }
       if (!data.ancestorKey || !data.parentChain?.length) {
         throw new Error("No decryption path available");
       }
-      let currentPrivHier = unwrapPrivateHierarchicalKey(
+      let currentPrivHier: HybridPrivateKeys = unwrapPrivateHierarchicalKey(
         data.ancestorKey.encrypted_private_hierarchical_key,
         data.ancestorKey.wrapped_by_public_key,
         keys.encryptionPrivateKey,
+        keys.kemPrivateKey,
       );
       for (const link of data.parentChain) {
         const unwrapped = unwrapParentKeysClaim(
@@ -1952,7 +2050,7 @@ export function useFiles(keys: {
           link.parentKeysClaimWrappedBy,
           currentPrivHier,
         );
-        currentPrivHier = unwrapped.childPrivateHierarchicalKey;
+        currentPrivHier = unwrapped.childPrivateHierarchicalKeys;
         // The session key is a by-product of the same unwrap. We
         // don't need it here (share/link flows derive their own
         // wrapping of privHier, not the session key directly), but
@@ -1995,7 +2093,7 @@ export function useFiles(keys: {
         //    (passed as `wrappedByPublicKey`) to unwrap.
         const encryptedForRecipient = wrapPrivateHierarchicalKeyForUser(
           privHier,
-          pkData.publicEncryptionKey,
+          { x25519: pkData.publicEncryptionKey, kem: pkData.publicKemKey },
           keys.encryptionPrivateKey
         );
 
@@ -2086,7 +2184,8 @@ export function useFiles(keys: {
         const oldPrivHier = unwrapPrivateHierarchicalKey(
           dlData.encryptedPrivateHierarchicalKey,
           dlData.wrappedByPublicKey,
-          keys.encryptionPrivateKey
+          keys.encryptionPrivateKey,
+          keys.kemPrivateKey,
         );
         const oldSessionKey = unwrapSessionKeyFromFile(
           dlData.encryptedSessionKeyByFile,
@@ -2141,7 +2240,7 @@ export function useFiles(keys: {
 
         const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(
           newSessionKey,
-          newHier.publicKey,
+          newHier.publicKeys,
           keys.encryptionPrivateKey
         );
 
@@ -2156,8 +2255,17 @@ export function useFiles(keys: {
               if (dlRes.ok) {
                 const dlData = await dlRes.json();
                 if (dlData.encryptedPrivateHierarchicalKey) {
-                  const parentPrivHier = unwrapPrivateHierarchicalKey(dlData.encryptedPrivateHierarchicalKey, dlData.wrappedByPublicKey, keys.encryptionPrivateKey);
-                  parentEntry = { publicHierarchicalKey: dlData.publicHierarchicalKey || "", privateHierarchicalKey: parentPrivHier };
+                  const parentPrivHier = unwrapPrivateHierarchicalKey(
+                    dlData.encryptedPrivateHierarchicalKey,
+                    dlData.wrappedByPublicKey,
+                    keys.encryptionPrivateKey,
+                    keys.kemPrivateKey,
+                  );
+                  parentEntry = {
+                    publicHierarchicalKey: dlData.publicHierarchicalKey || "",
+                    publicKemHierarchicalKey: dlData.publicKemHierarchicalKey || "",
+                    privateHierarchicalKeys: parentPrivHier,
+                  };
                   folderPrivHierCache.current.set(file.parentId, parentEntry);
                 }
               }
@@ -2170,8 +2278,11 @@ export function useFiles(keys: {
           }
           parentKeysClaim = wrapParentKeysClaim(
             newSessionKey,
-            newHier.privateKey,
-            parentEntry.publicHierarchicalKey,
+            newHier.privateKeys,
+            {
+              x25519: parentEntry.publicHierarchicalKey,
+              kem: parentEntry.publicKemHierarchicalKey,
+            },
             keys.encryptionPrivateKey
           );
           parentKeysClaimWrappedBy = keys.encryptionPublicKey;
@@ -2182,6 +2293,7 @@ export function useFiles(keys: {
         type RawCollab = {
           userId: string;
           publicEncryptionKey: string;
+          publicKemKey: string;
           permissionLevel: "owner" | "editor" | "viewer";
           isOwner: boolean;
         };
@@ -2194,8 +2306,8 @@ export function useFiles(keys: {
             .map((c) => ({
               userId: c.userId,
               encryptedPrivateHierarchicalKey: wrapPrivateHierarchicalKeyForUser(
-                newHier.privateKey,
-                c.publicEncryptionKey,
+                newHier.privateKeys,
+                { x25519: c.publicEncryptionKey, kem: c.publicKemKey },
                 keys.encryptionPrivateKey
               ),
               wrappedByPublicKey: keys.encryptionPublicKey,
@@ -2258,7 +2370,8 @@ export function useFiles(keys: {
         //    transparently pick up the new member and re-commit.
         const commitPayload = () => ({
           encryptedMetadata: JSON.stringify(encryptedMetadata),
-          publicHierarchicalKey: newHier.publicKey,
+          publicHierarchicalKey: newHier.publicKeys.x25519,
+          publicKemHierarchicalKey: newHier.publicKeys.kem,
           encryptedSessionKeyByFile,
           sessionKeyNonce,
           parentKeysClaim,
@@ -2349,6 +2462,7 @@ export function useFiles(keys: {
         parentId: string | null;
         isFolder: boolean;
         publicHierarchicalKey: string;
+        publicKemHierarchicalKey: string;
         parentKeysClaim: string | null;
         parentKeysClaimWrappedBy: string | null;
         encryptedSessionKeyByFile: string;
@@ -2358,6 +2472,7 @@ export function useFiles(keys: {
         userId: string;
         email: string;
         publicEncryptionKey: string;
+        publicKemKey: string;
         isOwner: boolean;
         permissionLevel: "owner" | "editor" | "viewer";
       };
@@ -2366,6 +2481,7 @@ export function useFiles(keys: {
           id: string;
           parentId: string | null;
           publicHierarchicalKey: string;
+          publicKemHierarchicalKey: string;
           encryptedSessionKeyByFile: string;
           sessionKeyNonce: string;
         };
@@ -2389,12 +2505,13 @@ export function useFiles(keys: {
         //    folder); otherwise re-derive from their file_keys row via
         //    the existing DecryptedFile payload.
         const cachedEntry = folderPrivHierCache.current.get(folder.id);
-        const oldFolderPrivHier =
-          cachedEntry?.privateHierarchicalKey ??
+        const oldFolderPrivHier: HybridPrivateKeys =
+          cachedEntry?.privateHierarchicalKeys ??
           unwrapPrivateHierarchicalKey(
             folder.encryptedPrivateHierarchicalKey,
             folder.wrappedByPublicKey,
-            keys.encryptionPrivateKey
+            keys.encryptionPrivateKey,
+            keys.kemPrivateKey,
           );
 
         // 3. Unwrap each direct child via the OLD folder priv hier.
@@ -2404,7 +2521,7 @@ export function useFiles(keys: {
         type Unwrapped = {
           id: string;
           sessionKey: Uint8Array;
-          childPrivateHierarchicalKey: string;
+          childPrivateHierarchicalKeys: HybridPrivateKeys;
         };
         const unwrapped: Unwrapped[] = [];
         for (const child of ctx.directChildren) {
@@ -2437,7 +2554,7 @@ export function useFiles(keys: {
         // 6. Wrap the new session key to the new folder pub hier.
         const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(
           newFolderSessionKey,
-          newFolderHier.publicKey,
+          newFolderHier.publicKeys,
           keys.encryptionPrivateKey
         );
 
@@ -2454,8 +2571,17 @@ export function useFiles(keys: {
               if (dlRes.ok) {
                 const dlData = await dlRes.json();
                 if (dlData.encryptedPrivateHierarchicalKey) {
-                  const parentPrivHier = unwrapPrivateHierarchicalKey(dlData.encryptedPrivateHierarchicalKey, dlData.wrappedByPublicKey, keys.encryptionPrivateKey);
-                  parentEntry = { publicHierarchicalKey: dlData.publicHierarchicalKey || "", privateHierarchicalKey: parentPrivHier };
+                  const parentPrivHier = unwrapPrivateHierarchicalKey(
+                    dlData.encryptedPrivateHierarchicalKey,
+                    dlData.wrappedByPublicKey,
+                    keys.encryptionPrivateKey,
+                    keys.kemPrivateKey,
+                  );
+                  parentEntry = {
+                    publicHierarchicalKey: dlData.publicHierarchicalKey || "",
+                    publicKemHierarchicalKey: dlData.publicKemHierarchicalKey || "",
+                    privateHierarchicalKeys: parentPrivHier,
+                  };
                   folderPrivHierCache.current.set(folder.parentId, parentEntry);
                 }
               }
@@ -2468,8 +2594,11 @@ export function useFiles(keys: {
           }
           folderParentKeysClaim = wrapParentKeysClaim(
             newFolderSessionKey,
-            newFolderHier.privateKey,
-            parentEntry.publicHierarchicalKey,
+            newFolderHier.privateKeys,
+            {
+              x25519: parentEntry.publicHierarchicalKey,
+              kem: parentEntry.publicKemHierarchicalKey,
+            },
             keys.encryptionPrivateKey
           );
           folderParentKeysClaimWrappedBy = keys.encryptionPublicKey;
@@ -2483,8 +2612,8 @@ export function useFiles(keys: {
           id: u.id,
           parentKeysClaim: wrapParentKeysClaim(
             u.sessionKey,
-            u.childPrivateHierarchicalKey,
-            newFolderHier.publicKey,
+            u.childPrivateHierarchicalKeys,
+            newFolderHier.publicKeys,
             keys.encryptionPrivateKey
           ),
           parentKeysClaimWrappedBy: keys.encryptionPublicKey,
@@ -2501,8 +2630,8 @@ export function useFiles(keys: {
           .map((c) => ({
             userId: c.userId,
             encryptedPrivateHierarchicalKey: wrapPrivateHierarchicalKeyForUser(
-              newFolderHier.privateKey,
-              c.publicEncryptionKey,
+              newFolderHier.privateKeys,
+              { x25519: c.publicEncryptionKey, kem: c.publicKemKey },
               keys.encryptionPrivateKey
             ),
             wrappedByPublicKey: keys.encryptionPublicKey,
@@ -2518,7 +2647,8 @@ export function useFiles(keys: {
             body: JSON.stringify({
               folder: {
                 encryptedMetadata: JSON.stringify(newEncryptedMetadata),
-                publicHierarchicalKey: newFolderHier.publicKey,
+                publicHierarchicalKey: newFolderHier.publicKeys.x25519,
+                publicKemHierarchicalKey: newFolderHier.publicKeys.kem,
                 encryptedSessionKeyByFile,
                 sessionKeyNonce,
                 parentKeysClaim: folderParentKeysClaim,
@@ -2545,8 +2675,9 @@ export function useFiles(keys: {
         // 12. Refresh the cached folder keys so subsequent navigation
         //     uses the new values without a page reload.
         folderPrivHierCache.current.set(folder.id, {
-          publicHierarchicalKey: newFolderHier.publicKey,
-          privateHierarchicalKey: newFolderHier.privateKey,
+          publicHierarchicalKey: newFolderHier.publicKeys.x25519,
+          publicKemHierarchicalKey: newFolderHier.publicKeys.kem,
+          privateHierarchicalKeys: newFolderHier.privateKeys,
         });
         return { ok: true };
       };
@@ -3055,7 +3186,7 @@ export function useFiles(keys: {
     type Raw = Record<string, unknown>;
     const rows: Raw[] = data.files ?? [];
     // Key maps feed both metadata decryption and breadcrumb resolution.
-    const hierMap = new Map<string, string>(); // fileId → priv hier key
+    const hierMap = new Map<string, HybridPrivateKeys>(); // fileId → priv hier key
     const nameById = new Map<string, string>(); // fileId → decrypted name
     const entries: SearchCacheEntry[] = [];
 
@@ -3095,6 +3226,7 @@ export function useFiles(keys: {
           encPrivHier,
           (f.wrapped_by_public_key as string) || "",
           keys.encryptionPrivateKey,
+          keys.kemPrivateKey,
         );
         const sk = unwrapSessionKeyFromFile(
           f.encrypted_session_key_by_file as string,
@@ -3158,7 +3290,7 @@ export function useFiles(keys: {
             typeof meta.type === "string" ? meta.type : "",
             typeof meta.size === "number" ? meta.size : 0,
           );
-          if (f.is_folder) hierMap.set(f.id as string, unwrapped.childPrivateHierarchicalKey);
+          if (f.is_folder) hierMap.set(f.id as string, unwrapped.childPrivateHierarchicalKeys);
           progressed = true;
         } catch {
           stillPending.push(f);
@@ -3423,7 +3555,7 @@ export function useFiles(keys: {
           const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
           if (!encPrivHier) continue;
           try {
-            const privHier = unwrapPrivateHierarchicalKey(encPrivHier, (f.wrapped_by_public_key as string) || "", keys.encryptionPrivateKey);
+            const privHier = unwrapPrivateHierarchicalKey(encPrivHier, (f.wrapped_by_public_key as string) || "", keys.encryptionPrivateKey, keys.kemPrivateKey);
             const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file as string, f.session_key_nonce as string, (f.owner_public_key as string) || "", privHier);
             const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata as string) : f.encrypted_metadata;
             const meta = decryptMetadata(encMeta as { nonce: string; ciphertext: string }, sk);
@@ -3537,20 +3669,27 @@ export function useFiles(keys: {
         const encPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
         if (!encPrivHier) continue;
         try {
-          const privHier = unwrapPrivateHierarchicalKey(encPrivHier, (f.wrapped_by_public_key as string) || "", keys.encryptionPrivateKey);
+          const privHier = unwrapPrivateHierarchicalKey(encPrivHier, (f.wrapped_by_public_key as string) || "", keys.encryptionPrivateKey, keys.kemPrivateKey);
           const sk = unwrapSessionKeyFromFile(f.encrypted_session_key_by_file, f.session_key_nonce, (f.owner_public_key as string) || "", privHier);
           const encMeta = typeof f.encrypted_metadata === "string" ? JSON.parse(f.encrypted_metadata) : f.encrypted_metadata;
           const meta = decryptMetadata(encMeta, sk);
           sk.fill(0);
-          if (f.is_folder && privHier && f.public_hierarchical_key) {
-            folderPrivHierCache.current.set(f.id, { publicHierarchicalKey: f.public_hierarchical_key, privateHierarchicalKey: privHier });
+          if (f.is_folder && privHier && f.public_hierarchical_key && f.public_kem_hierarchical_key) {
+            folderPrivHierCache.current.set(f.id, {
+              publicHierarchicalKey: f.public_hierarchical_key,
+              publicKemHierarchicalKey: f.public_kem_hierarchical_key,
+              privateHierarchicalKeys: privHier,
+            });
           }
           newResults.push({
             id: f.id, name: meta.name, type: meta.type, size: meta.size,
             isFolder: f.is_folder, parentId: f.parent_id ?? null,
             ownerId: f.owner_id || "", ownerEmail: (f as Record<string, unknown>).owner_email as string | null ?? null, ownerDisplayName: (f as Record<string, unknown>).owner_display_name as string | null ?? null, createdAt: f.created_at, updatedAt: f.updated_at,
             encryptedPrivateHierarchicalKey: encPrivHier, wrappedByPublicKey: f.wrapped_by_public_key || "",
-            ownerPublicKey: f.owner_public_key || "", publicHierarchicalKey: f.public_hierarchical_key || "",
+            ownerPublicKey: f.owner_public_key || "",
+            ownerPublicKemKey: f.owner_public_kem_key || "",
+            publicHierarchicalKey: f.public_hierarchical_key || "",
+            publicKemHierarchicalKey: f.public_kem_hierarchical_key || "",
             encryptedSessionKeyByFile: f.encrypted_session_key_by_file, sessionKeyNonce: f.session_key_nonce,
             parentKeysClaim: f.parent_keys_claim ?? null, parentKeysClaimWrappedBy: f.parent_keys_claim_wrapped_by ?? null,
             isStarred: !!(f.is_starred), hasActiveLink: !!(f.has_active_link), fileLabels: f.file_labels ?? [],

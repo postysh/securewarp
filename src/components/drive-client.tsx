@@ -111,6 +111,8 @@ export default function DriveClient() {
       ? {
           encryptionPublicKey: keys.encryptionPublicKey,
           encryptionPrivateKey: keys.encryptionPrivateKey,
+          kemPublicKey: keys.kemPublicKey,
+          kemPrivateKey: keys.kemPrivateKey,
           email: keys.email,
         }
       : null,

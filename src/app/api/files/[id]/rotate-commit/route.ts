@@ -27,8 +27,9 @@ const CollaboratorSchema = z.object({
 const CommitSchema = z.object({
   encryptedMetadata: z.string().min(1),
   publicHierarchicalKey: z.string().min(1),
+  publicKemHierarchicalKey: z.string().min(1),
   encryptedSessionKeyByFile: z.string().min(1),
-  sessionKeyNonce: z.string().min(1),
+  sessionKeyNonce: z.string(),
   parentKeysClaim: z.string().min(1).nullable().optional(),
   parentKeysClaimWrappedBy: z.string().min(1).nullable().optional(),
   newChunks: z.array(NewChunkSchema).min(1),
@@ -154,6 +155,7 @@ export async function POST(
       .update({
         encrypted_metadata: data.encryptedMetadata,
         public_hierarchical_key: data.publicHierarchicalKey,
+        public_kem_hierarchical_key: data.publicKemHierarchicalKey,
         encrypted_session_key_by_file: data.encryptedSessionKeyByFile,
         session_key_nonce: data.sessionKeyNonce,
         parent_keys_claim: data.parentKeysClaim ?? null,

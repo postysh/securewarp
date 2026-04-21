@@ -63,6 +63,7 @@ async function registerUser() {
       argon2_salt: body.argon2Salt,
       encrypted_user_data: JSON.stringify(body.encryptedUserData),
       public_encryption_key: body.publicEncryptionKey,
+      public_kem_key: account.keypairs.kemPublicKey,
       recovery_key_hash: body.recoveryKeyHash,
       recovery_encrypted_data: JSON.stringify(body.recoveryEncryptedData),
     })
@@ -85,12 +86,12 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
     const encMeta = encryptMetadata(metaPlain, sessionKey);
     const sessionWrap = wrapSessionKeyToFile(
       sessionKey,
-      hier.publicKey,
+      hier.publicKeys,
       owner.keypairs.encryptionPrivateKey,
     );
     const ownerRow = wrapPrivateHierarchicalKeyForUser(
-      hier.privateKey,
-      owner.keypairs.encryptionPublicKey,
+      hier.privateKeys,
+      { x25519: owner.keypairs.encryptionPublicKey, kem: owner.keypairs.kemPublicKey },
       owner.keypairs.encryptionPrivateKey,
     );
 
@@ -104,7 +105,8 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
         is_folder: false,
         size_bytes: metaPlain.size,
         storage_key: null,
-        public_hierarchical_key: hier.publicKey,
+        public_hierarchical_key: hier.publicKeys.x25519,
+        public_kem_hierarchical_key: hier.publicKeys.kem,
         encrypted_session_key_by_file: sessionWrap.encryptedSessionKeyByFile,
         session_key_nonce: sessionWrap.sessionKeyNonce,
         upload_complete: true,
@@ -141,6 +143,7 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
       fk!.encrypted_private_hierarchical_key,
       fk!.wrapped_by_public_key,
       owner.keypairs.encryptionPrivateKey,
+      owner.keypairs.kemPrivateKey,
     );
     const recoveredSession = unwrapSessionKeyFromFile(
       row!.encrypted_session_key_by_file,
@@ -163,17 +166,17 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
     const encMeta = encryptMetadata(metaPlain, sessionKey);
     const sessionWrap = wrapSessionKeyToFile(
       sessionKey,
-      hier.publicKey,
+      hier.publicKeys,
       owner.keypairs.encryptionPrivateKey,
     );
     const ownerRow = wrapPrivateHierarchicalKeyForUser(
-      hier.privateKey,
-      owner.keypairs.encryptionPublicKey,
+      hier.privateKeys,
+      { x25519: owner.keypairs.encryptionPublicKey, kem: owner.keypairs.kemPublicKey },
       owner.keypairs.encryptionPrivateKey,
     );
     const bobRow = wrapPrivateHierarchicalKeyForUser(
-      hier.privateKey,
-      bob.keypairs.encryptionPublicKey,
+      hier.privateKeys,
+      { x25519: bob.keypairs.encryptionPublicKey, kem: bob.keypairs.kemPublicKey },
       owner.keypairs.encryptionPrivateKey,
     );
 
@@ -186,7 +189,8 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
         is_folder: false,
         size_bytes: metaPlain.size,
         storage_key: null,
-        public_hierarchical_key: hier.publicKey,
+        public_hierarchical_key: hier.publicKeys.x25519,
+        public_kem_hierarchical_key: hier.publicKeys.kem,
         encrypted_session_key_by_file: sessionWrap.encryptedSessionKeyByFile,
         session_key_nonce: sessionWrap.sessionKeyNonce,
         upload_complete: true,
@@ -235,6 +239,7 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
       fk!.encrypted_private_hierarchical_key,
       fk!.wrapped_by_public_key,
       bob.keypairs.encryptionPrivateKey,
+      bob.keypairs.kemPrivateKey,
     );
     const recoveredSession = unwrapSessionKeyFromFile(
       row!.encrypted_session_key_by_file,
@@ -260,7 +265,7 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
     );
     const folderSessionWrap = wrapSessionKeyToFile(
       folderSessionKey,
-      folderHier.publicKey,
+      folderHier.publicKeys,
       owner.keypairs.encryptionPrivateKey,
     );
     const { data: folder } = await sb
@@ -271,7 +276,8 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
         encrypted_metadata: JSON.stringify(folderMeta),
         is_folder: true,
         size_bytes: 0,
-        public_hierarchical_key: folderHier.publicKey,
+        public_hierarchical_key: folderHier.publicKeys.x25519,
+        public_kem_hierarchical_key: folderHier.publicKeys.kem,
         encrypted_session_key_by_file: folderSessionWrap.encryptedSessionKeyByFile,
         session_key_nonce: folderSessionWrap.sessionKeyNonce,
         upload_complete: true,
@@ -285,8 +291,8 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
         file_id: folder!.id,
         user_id: owner.userId,
         encrypted_private_hierarchical_key: wrapPrivateHierarchicalKeyForUser(
-          folderHier.privateKey,
-          owner.keypairs.encryptionPublicKey,
+          folderHier.privateKeys,
+          { x25519: owner.keypairs.encryptionPublicKey, kem: owner.keypairs.kemPublicKey },
           owner.keypairs.encryptionPrivateKey,
         ),
         wrapped_by_public_key: owner.keypairs.encryptionPublicKey,
@@ -296,8 +302,8 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
         file_id: folder!.id,
         user_id: bob.userId,
         encrypted_private_hierarchical_key: wrapPrivateHierarchicalKeyForUser(
-          folderHier.privateKey,
-          bob.keypairs.encryptionPublicKey,
+          folderHier.privateKeys,
+          { x25519: bob.keypairs.encryptionPublicKey, kem: bob.keypairs.kemPublicKey },
           owner.keypairs.encryptionPrivateKey,
         ),
         wrapped_by_public_key: owner.keypairs.encryptionPublicKey,
@@ -313,13 +319,13 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
     const xMeta = encryptMetadata(xMetaPlain, xSessionKey);
     const xSessionWrap = wrapSessionKeyToFile(
       xSessionKey,
-      xHier.publicKey,
+      xHier.publicKeys,
       owner.keypairs.encryptionPrivateKey,
     );
     const xParentClaim = wrapParentKeysClaim(
       xSessionKey,
-      xHier.privateKey,
-      folderHier.publicKey,
+      xHier.privateKeys,
+      folderHier.publicKeys,
       owner.keypairs.encryptionPrivateKey,
     );
     const { data: x } = await sb
@@ -330,7 +336,8 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
         encrypted_metadata: JSON.stringify(xMeta),
         is_folder: false,
         size_bytes: xMetaPlain.size,
-        public_hierarchical_key: xHier.publicKey,
+        public_hierarchical_key: xHier.publicKeys.x25519,
+        public_kem_hierarchical_key: xHier.publicKeys.kem,
         encrypted_session_key_by_file: xSessionWrap.encryptedSessionKeyByFile,
         session_key_nonce: xSessionWrap.sessionKeyNonce,
         parent_keys_claim: xParentClaim,
@@ -345,8 +352,8 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
       file_id: x!.id,
       user_id: owner.userId,
       encrypted_private_hierarchical_key: wrapPrivateHierarchicalKeyForUser(
-        xHier.privateKey,
-        owner.keypairs.encryptionPublicKey,
+        xHier.privateKeys,
+        { x25519: owner.keypairs.encryptionPublicKey, kem: owner.keypairs.kemPublicKey },
         owner.keypairs.encryptionPrivateKey,
       ),
       wrapped_by_public_key: owner.keypairs.encryptionPublicKey,
@@ -366,6 +373,7 @@ describe("file-crypto integration — owner → share → collaborator decrypt",
       folderKey!.encrypted_private_hierarchical_key,
       folderKey!.wrapped_by_public_key,
       bob.keypairs.encryptionPrivateKey,
+      bob.keypairs.kemPrivateKey,
     );
 
     const { data: xRow } = await sb

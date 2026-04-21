@@ -31,6 +31,7 @@ import {
   unwrapParentKeysClaim,
   unwrapLinkKeyWithPassword,
   decryptMetadata,
+  type HybridPrivateKeys,
 } from "@/lib/crypto/file-crypto";
 import { decryptChunk } from "@/lib/crypto/chunked-encryption";
 
@@ -53,7 +54,7 @@ interface DecryptedChild extends ChildRow {
   name: string;
   type: string;
   size: number;
-  privateHierarchicalKey: string;
+  privateHierarchicalKey: HybridPrivateKeys | null;
 }
 
 interface FileMeta {
@@ -199,7 +200,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
   // private hierarchical key. Seeded with the link's root file at load
   // time and grown as child walks decrypt additional parent_keys_claim
   // payloads. Used by both folder browsing and file downloads.
-  const [folderPrivHier, setFolderPrivHier] = useState<Map<string, string>>(new Map());
+  const [folderPrivHier, setFolderPrivHier] = useState<Map<string, HybridPrivateKeys>>(new Map());
   // Per-file-id download progress, 0..100. A null entry means not
   // downloading; the button/row reads this to render the current
   // chunk-fetch percent so large files don't feel stuck.
@@ -316,7 +317,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
       if (!res.ok) return;
       const data = (await res.json()) as { children: ChildRow[] };
 
-      const newCacheEntries: [string, string][] = [];
+      const newCacheEntries: [string, HybridPrivateKeys][] = [];
       const decrypted: DecryptedChild[] = data.children.map((c) => {
         try {
           if (!c.parentKeysClaim || !c.parentKeysClaimWrappedBy) {
@@ -325,7 +326,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
               name: "[Encrypted]",
               type: "unknown",
               size: 0,
-              privateHierarchicalKey: "",
+              privateHierarchicalKey: null,
             };
           }
           const unwrapped = unwrapParentKeysClaim(
@@ -341,13 +342,13 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
           unwrapped.sessionKey.fill(0);
           // Cache for every child — folders need it to walk deeper,
           // files need it to fetch their chunks without another unwrap.
-          newCacheEntries.push([c.id, unwrapped.childPrivateHierarchicalKey]);
+          newCacheEntries.push([c.id, unwrapped.childPrivateHierarchicalKeys]);
           return {
             ...c,
             name: meta.name,
             type: meta.type,
             size: meta.size,
-            privateHierarchicalKey: unwrapped.childPrivateHierarchicalKey,
+            privateHierarchicalKey: unwrapped.childPrivateHierarchicalKeys,
           };
         } catch {
           return {
@@ -355,7 +356,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
             name: "[Encrypted]",
             type: "unknown",
             size: 0,
-            privateHierarchicalKey: "",
+            privateHierarchicalKey: null,
           };
         }
       });

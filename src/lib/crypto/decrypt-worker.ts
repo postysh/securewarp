@@ -22,6 +22,7 @@ import {
   unwrapPrivateHierarchicalKey,
   unwrapSessionKeyFromFile,
   decryptMetadata,
+  type HybridPrivateKeys,
 } from "@/lib/crypto/file-crypto";
 
 export interface DecryptRequest {
@@ -35,9 +36,11 @@ export interface DecryptRequest {
     sessionKeyNonce: string;
     encryptedMetadata: string;
     publicHierarchicalKey: string;
+    publicKemHierarchicalKey: string;
     isFolder: boolean;
   }[];
   encryptionPrivateKey: string;
+  kemPrivateKey: string;
 }
 
 export interface DecryptResult {
@@ -47,15 +50,16 @@ export interface DecryptResult {
     name: string;
     type: string;
     size: number;
-    privHier?: string;
+    privHier?: HybridPrivateKeys;
     publicHierarchicalKey?: string;
+    publicKemHierarchicalKey?: string;
     isFolder: boolean;
   }[];
 }
 
 // Worker entry point
 self.onmessage = (e: MessageEvent<DecryptRequest>) => {
-  const { id, files, encryptionPrivateKey } = e.data;
+  const { id, files, encryptionPrivateKey, kemPrivateKey } = e.data;
   const results: DecryptResult["results"] = [];
 
   for (const f of files) {
@@ -66,6 +70,7 @@ self.onmessage = (e: MessageEvent<DecryptRequest>) => {
         f.encryptedPrivHier,
         f.wrappedByPublicKey,
         encryptionPrivateKey,
+        kemPrivateKey,
       );
       sk = unwrapSessionKeyFromFile(
         f.encSessionKeyByFile,
@@ -85,6 +90,7 @@ self.onmessage = (e: MessageEvent<DecryptRequest>) => {
         size: meta.size,
         privHier: f.isFolder ? privHier : undefined,
         publicHierarchicalKey: f.isFolder ? f.publicHierarchicalKey : undefined,
+        publicKemHierarchicalKey: f.isFolder ? f.publicKemHierarchicalKey : undefined,
         isFolder: f.isFolder,
       });
     } catch {

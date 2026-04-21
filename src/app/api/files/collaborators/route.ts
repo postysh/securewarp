@@ -44,6 +44,7 @@ export async function GET(request: Request) {
         email: c.email,
         displayName: c.display_name,
         publicEncryptionKey: c.public_encryption_key,
+        publicKemKey: c.public_kem_key,
         isOwner: c.is_owner,
         permissionLevel: c.permission_level,
       })),

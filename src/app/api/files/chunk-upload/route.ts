@@ -24,8 +24,12 @@ const InitSchema = z.object({
   chunkCount: z.number().int().positive(),
   // Phase 2 hierarchical key payload — all client-generated.
   publicHierarchicalKey: z.string().min(1),
+  // Crypto v2 Phase 2b — ML-KEM half of the file's hybrid hier keypair.
+  publicKemHierarchicalKey: z.string().min(1),
   encryptedSessionKeyByFile: z.string().min(1),
-  sessionKeyNonce: z.string().min(1),
+  // v2: nonce is embedded in the hybrid blob; kept on wire+DB for
+  // back-compat but accepted as empty.
+  sessionKeyNonce: z.string(),
   encryptedPrivateHierarchicalKey: z.string().min(1),
   // Sharer's public key at wrap time. For a fresh upload this is always the
   // owner's own public key, but we pass it explicitly so the server never
@@ -138,6 +142,7 @@ export async function POST(request: Request) {
         storageKey: null, // chunks have their own storage keys
         uploadComplete: false,
         publicHierarchicalKey: data.publicHierarchicalKey,
+        publicKemHierarchicalKey: data.publicKemHierarchicalKey,
         encryptedSessionKeyByFile: data.encryptedSessionKeyByFile,
         sessionKeyNonce: data.sessionKeyNonce,
         parentKeysClaim: data.parentKeysClaim ?? null,

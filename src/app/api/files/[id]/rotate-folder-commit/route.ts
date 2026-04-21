@@ -12,8 +12,9 @@ const ParamSchema = z.object({ id: z.string().uuid() });
 const FolderRowSchema = z.object({
   encryptedMetadata: z.string().min(1),
   publicHierarchicalKey: z.string().min(1),
+  publicKemHierarchicalKey: z.string().min(1),
   encryptedSessionKeyByFile: z.string().min(1),
-  sessionKeyNonce: z.string().min(1),
+  sessionKeyNonce: z.string(),
   // F's own parent_keys_claim (re-wrapped if F has a parent, else null).
   parentKeysClaim: z.string().min(1).nullable().optional(),
   parentKeysClaimWrappedBy: z.string().min(1).nullable().optional(),
@@ -193,6 +194,7 @@ export async function POST(
       .update({
         encrypted_metadata: data.folder.encryptedMetadata,
         public_hierarchical_key: data.folder.publicHierarchicalKey,
+        public_kem_hierarchical_key: data.folder.publicKemHierarchicalKey,
         encrypted_session_key_by_file: data.folder.encryptedSessionKeyByFile,
         session_key_nonce: data.folder.sessionKeyNonce,
         parent_keys_claim: data.folder.parentKeysClaim ?? null,

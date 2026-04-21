@@ -18,7 +18,14 @@ export interface FileRow {
   // public encryption key. Adding a collaborator is O(1) regardless of
   // file size.
   public_hierarchical_key: string;
+  // Crypto v2 Phase 2b — ML-KEM-768 public hierarchical key. Paired
+  // with `public_hierarchical_key` (X25519 half) for the hybrid wrap.
+  public_kem_hierarchical_key: string;
   encrypted_session_key_by_file: string;
+  // v2 note: the hybrid blob embeds the nonce, so `session_key_nonce`
+  // is stored as an empty string for v2 writes and ignored by the
+  // unwrap path. A later migration drops this column; kept on the
+  // type + DB for backward compat during the rollout.
   session_key_nonce: string;
   // Phase 3 — folder inheritance. When this file has a parent, the
   // claim wraps {sessionKey, childPrivateHierarchicalKey} under the
@@ -40,12 +47,14 @@ export interface FileRow {
 // it to unwrap `encrypted_session_key_by_file` via box(owner.pub, file.priv).
 export type FileRowWithKey = FileRow & {
   encrypted_private_hierarchical_key: string;
-  // Who wrapped the caller's private-hier-key row. Usually the file owner;
-  // for non-owner re-shares this is the sharer at the time of the grant.
+  // Sharer's X25519 public key at the time of the grant — the ECDH
+  // sender half of the hybrid wrap. ML-KEM half is encapsulated
+  // in-blob, so no sender_public_kem_key is needed.
   wrapped_by_public_key: string;
-  // Owner's current public key, needed for the session-key unwrap step
-  // (session_key is always wrapped by the owner at upload time).
+  // Owner's current X25519 + ML-KEM-768 public keys, needed for
+  // the session-key unwrap step (hybrid wrap pairs both halves).
   owner_public_key: string;
+  owner_public_kem_key: string;
 };
 
 export interface FileKeyRow {
@@ -253,6 +262,7 @@ export async function createFile(data: {
   storageKey: string | null;
   encryptionNonce?: string;
   publicHierarchicalKey: string;
+  publicKemHierarchicalKey: string;
   encryptedSessionKeyByFile: string;
   sessionKeyNonce: string;
   // Phase 3. Required when parentId is non-null; must be null when
@@ -286,6 +296,7 @@ export async function createFile(data: {
       encryption_nonce: data.encryptionNonce || null,
       upload_complete: data.uploadComplete ?? true,
       public_hierarchical_key: data.publicHierarchicalKey,
+      public_kem_hierarchical_key: data.publicKemHierarchicalKey,
       encrypted_session_key_by_file: data.encryptedSessionKeyByFile,
       session_key_nonce: data.sessionKeyNonce,
       parent_keys_claim: data.parentKeysClaim ?? null,
@@ -329,7 +340,7 @@ type FileJoinRow = Record<string, unknown> & {
     encrypted_private_hierarchical_key: string;
     wrapped_by_public_key: string;
   }[];
-  owner: { public_encryption_key: string } | null;
+  owner: { public_encryption_key: string; public_kem_key: string } | null;
 };
 
 function shapeRow(row: FileJoinRow): FileRowWithKey {
@@ -340,12 +351,13 @@ function shapeRow(row: FileJoinRow): FileRowWithKey {
     encrypted_private_hierarchical_key: fk?.encrypted_private_hierarchical_key || "",
     wrapped_by_public_key: fk?.wrapped_by_public_key || "",
     owner_public_key: owner?.public_encryption_key || "",
+    owner_public_kem_key: owner?.public_kem_key || "",
   };
 }
 
 const LIST_SELECT =
   "*, file_keys!inner(encrypted_private_hierarchical_key, wrapped_by_public_key)," +
-  " owner:users!files_owner_id_fkey(public_encryption_key)";
+  " owner:users!files_owner_id_fkey(public_encryption_key, public_kem_key)";
 
 export const PAGE_SIZE = 100;
 
@@ -406,6 +418,7 @@ export async function getSharedWithUser(userId: string): Promise<FileRowWithKey[
     .eq("upload_complete", true)
     .is("deleted_at", null)
     .is("workspace_id", null)
+    .eq("is_workspace_root", false)
     .order("created_at", { ascending: false })
     .limit(100);
 
@@ -438,7 +451,7 @@ export async function getInheritedChildren(
     supabase.from("file_keys").select("user_id").eq("file_id", parentId).eq("user_id", userId).single(),
     supabase
       .from("files")
-      .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+      .select("*, owner:users!files_owner_id_fkey(public_encryption_key, public_kem_key)")
       .eq("parent_id", parentId)
       .eq("upload_complete", true)
       .is("deleted_at", null)
@@ -472,7 +485,7 @@ export async function getInheritedChildren(
     }[]).map((r) => [r.file_id, r])
   );
 
-  return (files as (FileRow & { owner: { public_encryption_key: string } | null })[]).map(
+  return (files as (FileRow & { owner: { public_encryption_key: string; public_kem_key: string } | null })[]).map(
     (f) => {
       const direct = keyByFile.get(f.id);
       const { owner, ...rest } = f;
@@ -481,6 +494,7 @@ export async function getInheritedChildren(
         encrypted_private_hierarchical_key: direct?.encrypted_private_hierarchical_key ?? "",
         wrapped_by_public_key: direct?.wrapped_by_public_key ?? "",
         owner_public_key: owner?.public_encryption_key ?? "",
+        owner_public_kem_key: owner?.public_kem_key ?? "",
       };
     }
   );
@@ -578,6 +592,7 @@ export interface CollaboratorRow {
   email: string;
   display_name: string | null;
   public_encryption_key: string;
+  public_kem_key: string;
   is_owner: boolean;
   permission_level: PermissionLevel;
 }
@@ -602,7 +617,7 @@ export async function getCollaborators(fileId: string): Promise<CollaboratorRow[
   );
   const { data: users, error: usersErr } = await supabase
     .from("users")
-    .select("id, email, display_name, public_encryption_key")
+    .select("id, email, display_name, public_encryption_key, public_kem_key")
     .in("id", userIds);
   if (usersErr) throw new Error(`Failed to load users: ${usersErr.message}`);
 
@@ -614,7 +629,7 @@ export async function getCollaborators(fileId: string): Promise<CollaboratorRow[
   const ownerId = (file as { owner_id: string } | null)?.owner_id ?? null;
 
   const userById = new Map(
-    (users as { id: string; email: string; display_name: string | null; public_encryption_key: string }[]).map((u) => [u.id, u])
+    (users as { id: string; email: string; display_name: string | null; public_encryption_key: string; public_kem_key: string }[]).map((u) => [u.id, u])
   );
 
   return (rows as { user_id: string; permission_level: PermissionLevel }[])
@@ -625,6 +640,7 @@ export async function getCollaborators(fileId: string): Promise<CollaboratorRow[
         email: u?.email ?? "",
         display_name: u?.display_name ?? null,
         public_encryption_key: u?.public_encryption_key ?? "",
+        public_kem_key: u?.public_kem_key ?? "",
         is_owner: r.user_id === ownerId,
         permission_level: r.permission_level ?? "editor",
       };
@@ -655,7 +671,7 @@ export async function getCollaboratorsBulk(
   );
   const { data: users, error: usersErr } = await supabase
     .from("users")
-    .select("id, email, display_name, public_encryption_key")
+    .select("id, email, display_name, public_encryption_key, public_kem_key")
     .in("id", userIds);
   if (usersErr) throw new Error(`Failed to load users: ${usersErr.message}`);
 
@@ -668,7 +684,7 @@ export async function getCollaboratorsBulk(
   );
 
   const userById = new Map(
-    (users as { id: string; email: string; display_name: string | null; public_encryption_key: string }[]).map((u) => [u.id, u])
+    (users as { id: string; email: string; display_name: string | null; public_encryption_key: string; public_kem_key: string }[]).map((u) => [u.id, u])
   );
 
   for (const row of fkRows as {
@@ -683,6 +699,7 @@ export async function getCollaboratorsBulk(
       email: u?.email ?? "",
       display_name: u?.display_name ?? null,
       public_encryption_key: u?.public_encryption_key ?? "",
+      public_kem_key: u?.public_kem_key ?? "",
       is_owner: row.user_id === ownerId,
       permission_level: row.permission_level ?? "editor",
     };
@@ -710,6 +727,7 @@ export interface DirectChildNode {
   parent_id: string | null;
   is_folder: boolean;
   public_hierarchical_key: string;
+  public_kem_hierarchical_key: string;
   parent_keys_claim: string | null;
   parent_keys_claim_wrapped_by: string | null;
   encrypted_session_key_by_file: string;
@@ -730,7 +748,7 @@ export async function getDirectChildrenWithClaims(
   const { data, error } = await supabase
     .from("files")
     .select(
-      "id, parent_id, is_folder, public_hierarchical_key, parent_keys_claim, parent_keys_claim_wrapped_by, encrypted_session_key_by_file, session_key_nonce"
+      "id, parent_id, is_folder, public_hierarchical_key, public_kem_hierarchical_key, parent_keys_claim, parent_keys_claim_wrapped_by, encrypted_session_key_by_file, session_key_nonce"
     )
     .eq("parent_id", folderId)
     .eq("upload_complete", true);
@@ -813,7 +831,7 @@ export async function getTrashedForUser(userId: string, workspaceId?: string | n
     // Use a left-join select since the caller may not have direct file_keys rows.
     const { data: wsTrashed, error: wsErr } = await supabase
       .from("files")
-      .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+      .select("*, owner:users!files_owner_id_fkey(public_encryption_key, public_kem_key)")
       .eq("workspace_id", workspaceId)
       .eq("upload_complete", true)
       .not("deleted_at", "is", null)
@@ -848,7 +866,7 @@ export async function getTrashedForUser(userId: string, workspaceId?: string | n
     });
   }
 
-  query = query.eq("owner_id", userId).is("workspace_id", null);
+  query = query.eq("owner_id", userId).is("workspace_id", null).eq("is_workspace_root", false);
 
   const { data: allTrashed, error } = await query;
   if (error) throw new Error(`Failed to fetch trashed: ${error.message}`);
@@ -1004,14 +1022,14 @@ export async function getAllAccessibleFiles(
     depth++;
     const { data: children, error: cErr } = await supabase
       .from("files")
-      .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+      .select("*, owner:users!files_owner_id_fkey(public_encryption_key, public_kem_key)")
       .in("parent_id", frontier)
       .eq("upload_complete", true)
       .is("deleted_at", null)
       .limit(1000);
     if (cErr) throw new Error(`Failed to fetch inherited children: ${cErr.message}`);
     const rawRows = (children ?? []) as unknown as (FileRow & {
-      owner: { public_encryption_key: string } | null;
+      owner: { public_encryption_key: string; public_kem_key: string } | null;
     })[];
     const newIds: string[] = [];
     for (const raw of rawRows) {
@@ -1038,13 +1056,14 @@ export async function getAllAccessibleFiles(
       accessibleIds.add(raw.id);
       const fk = keyByFile.get(raw.id);
       const { owner, ...rest } = raw as unknown as Record<string, unknown> & {
-        owner: { public_encryption_key: string } | null;
+        owner: { public_encryption_key: string; public_kem_key: string } | null;
       };
       const shaped: FileRowWithKey = {
         ...(rest as unknown as FileRow),
         encrypted_private_hierarchical_key: fk?.encrypted_private_hierarchical_key ?? "",
         wrapped_by_public_key: fk?.wrapped_by_public_key ?? "",
         owner_public_key: owner?.public_encryption_key ?? "",
+        owner_public_kem_key: owner?.public_kem_key ?? "",
       };
       combined.push(shaped);
       if (shaped.is_folder) nextFrontier.push(shaped.id);
@@ -1112,29 +1131,36 @@ export async function getFileForDownload(
   fileId: string,
   userId: string
 ): Promise<{
-  file: FileRow & { owner_public_key: string };
+  file: FileRow & { owner_public_key: string; owner_public_kem_key: string };
   directKey: { encrypted_private_hierarchical_key: string; wrapped_by_public_key: string } | null;
   parentChain: {
     fileId: string;
     parentKeysClaim: string;
     parentKeysClaimWrappedBy: string;
     publicHierarchicalKey: string;
+    publicKemHierarchicalKey: string;
   }[];
-  ancestorKey: { encrypted_private_hierarchical_key: string; wrapped_by_public_key: string; owner_public_key: string } | null;
+  ancestorKey: { encrypted_private_hierarchical_key: string; wrapped_by_public_key: string; owner_public_key: string; owner_public_kem_key: string } | null;
 } | null> {
   // 1. Fetch the file itself
   const { data: fileRow, error: fileErr } = await supabase
     .from("files")
-    .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+    .select("*, owner:users!files_owner_id_fkey(public_encryption_key, public_kem_key)")
     .eq("id", fileId)
     .eq("upload_complete", true)
     .is("deleted_at", null)
     .single();
   if (fileErr || !fileRow) return null;
 
-  const ownerPub = (fileRow.owner as { public_encryption_key: string } | null)?.public_encryption_key || "";
+  const ownerRow = fileRow.owner as { public_encryption_key: string; public_kem_key: string } | null;
+  const ownerPub = ownerRow?.public_encryption_key || "";
+  const ownerKemPub = ownerRow?.public_kem_key || "";
   const { owner: _o, ...fileData } = fileRow;
-  const file = { ...fileData, owner_public_key: ownerPub } as FileRow & { owner_public_key: string };
+  const file = {
+    ...fileData,
+    owner_public_key: ownerPub,
+    owner_public_kem_key: ownerKemPub,
+  } as FileRow & { owner_public_key: string; owner_public_kem_key: string };
 
   // 2. Check for direct file_keys row
   const { data: directFk } = await supabase
@@ -1155,6 +1181,7 @@ export async function getFileForDownload(
     parentKeysClaim: string;
     parentKeysClaimWrappedBy: string;
     publicHierarchicalKey: string;
+    publicKemHierarchicalKey: string;
   }[] = [];
 
   let current = file;
@@ -1169,6 +1196,7 @@ export async function getFileForDownload(
       parentKeysClaim: current.parent_keys_claim,
       parentKeysClaimWrappedBy: current.parent_keys_claim_wrapped_by,
       publicHierarchicalKey: current.public_hierarchical_key,
+      publicKemHierarchicalKey: current.public_kem_hierarchical_key,
     });
 
     // Check if user has a key on the parent
@@ -1183,10 +1211,10 @@ export async function getFileForDownload(
       // Also get the parent file's owner pub key and pub hier key
       const { data: parentFile } = await supabase
         .from("files")
-        .select("public_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, owner:users!files_owner_id_fkey(public_encryption_key)")
+        .select("public_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, owner:users!files_owner_id_fkey(public_encryption_key, public_kem_key)")
         .eq("id", current.parent_id)
         .single();
-      const parentOwnerPub = ((parentFile?.owner as unknown) as { public_encryption_key: string } | null)?.public_encryption_key || "";
+      const parentOwnerRow = (parentFile?.owner as unknown) as { public_encryption_key: string; public_kem_key: string } | null;
       return {
         file,
         directKey: null,
@@ -1194,7 +1222,8 @@ export async function getFileForDownload(
         ancestorKey: {
           encrypted_private_hierarchical_key: parentFk.encrypted_private_hierarchical_key,
           wrapped_by_public_key: parentFk.wrapped_by_public_key,
-          owner_public_key: parentOwnerPub,
+          owner_public_key: parentOwnerRow?.public_encryption_key || "",
+          owner_public_kem_key: parentOwnerRow?.public_kem_key || "",
         },
       };
     }
@@ -1202,14 +1231,18 @@ export async function getFileForDownload(
     // Move up to the parent — must also be live (not trashed)
     const { data: parentRow } = await supabase
       .from("files")
-      .select("*, owner:users!files_owner_id_fkey(public_encryption_key)")
+      .select("*, owner:users!files_owner_id_fkey(public_encryption_key, public_kem_key)")
       .eq("id", current.parent_id)
       .is("deleted_at", null)
       .single();
     if (!parentRow) return null;
-    const pOwner = (parentRow.owner as { public_encryption_key: string } | null)?.public_encryption_key || "";
+    const pOwnerRow = parentRow.owner as { public_encryption_key: string; public_kem_key: string } | null;
     const { owner: _po, ...pData } = parentRow;
-    current = { ...pData, owner_public_key: pOwner } as FileRow & { owner_public_key: string };
+    current = {
+      ...pData,
+      owner_public_key: pOwnerRow?.public_encryption_key || "",
+      owner_public_kem_key: pOwnerRow?.public_kem_key || "",
+    } as FileRow & { owner_public_key: string; owner_public_kem_key: string };
   }
 
   return null; // depth limit
@@ -1338,6 +1371,7 @@ export async function createFolder(data: {
   parentId: string | null;
   encryptedMetadata: string;
   publicHierarchicalKey: string;
+  publicKemHierarchicalKey: string;
   encryptedSessionKeyByFile: string;
   sessionKeyNonce: string;
   parentKeysClaim?: string | null;
@@ -1351,6 +1385,7 @@ export async function createFolder(data: {
     sizeBytes: 0,
     storageKey: null,
     publicHierarchicalKey: data.publicHierarchicalKey,
+    publicKemHierarchicalKey: data.publicKemHierarchicalKey,
     encryptedSessionKeyByFile: data.encryptedSessionKeyByFile,
     sessionKeyNonce: data.sessionKeyNonce,
     parentKeysClaim: data.parentKeysClaim ?? null,
@@ -1455,7 +1490,7 @@ export async function getLinkById(linkId: string): Promise<AnonymousLinkPayload 
   const { data: file, error: fileErr } = await supabase
     .from("files")
     .select(
-      "id, owner_id, parent_id, encrypted_metadata, is_folder, size_bytes, storage_key, encryption_nonce, chunk_count, public_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, owner:users!files_owner_id_fkey(public_encryption_key, display_name)"
+      "id, owner_id, parent_id, encrypted_metadata, is_folder, size_bytes, storage_key, encryption_nonce, chunk_count, public_hierarchical_key, public_kem_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, owner:users!files_owner_id_fkey(public_encryption_key, public_kem_key, display_name)"
     )
     .eq("id", link.file_id)
     .eq("upload_complete", true)

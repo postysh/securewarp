@@ -54,14 +54,28 @@ export function WorkspaceInviteModal({ open, onClose, workspaceId, rootFolderId,
 
       const keysStr = sessionStorage.getItem("securewarp_keys");
       if (!keysStr) { setError("Not signed in"); setBusy(false); return; }
-      const keys = JSON.parse(keysStr) as { encryptionPublicKey: string; encryptionPrivateKey: string };
+      const keys = JSON.parse(keysStr) as {
+        encryptionPublicKey: string;
+        encryptionPrivateKey: string;
+        kemPublicKey: string;
+        kemPrivateKey: string;
+      };
 
       const dlRes = await fetch(`/api/files/chunk-download?fileId=${rootFolderId}`);
       const dlData = await dlRes.json();
       if (!dlRes.ok) { setError("Failed to load workspace keys"); setBusy(false); return; }
 
-      const privHier = unwrapPrivateHierarchicalKey(dlData.encryptedPrivateHierarchicalKey, dlData.wrappedByPublicKey, keys.encryptionPrivateKey);
-      const wrapped = wrapPrivateHierarchicalKeyForUser(privHier, lookupData.publicEncryptionKey, keys.encryptionPrivateKey);
+      const privHier = unwrapPrivateHierarchicalKey(
+        dlData.encryptedPrivateHierarchicalKey,
+        dlData.wrappedByPublicKey,
+        keys.encryptionPrivateKey,
+        keys.kemPrivateKey,
+      );
+      const wrapped = wrapPrivateHierarchicalKeyForUser(
+        privHier,
+        { x25519: lookupData.publicEncryptionKey, kem: lookupData.publicKemKey },
+        keys.encryptionPrivateKey,
+      );
 
       const res = await fetch("/api/workspaces/invite", {
         method: "POST",

@@ -103,7 +103,7 @@ async function decryptFileNames(
   try {
     const keysStr = sessionStorage.getItem("securewarp_keys");
     if (!keysStr) return nameMap;
-    const keys = JSON.parse(keysStr) as { encryptionPrivateKey: string };
+    const keys = JSON.parse(keysStr) as { encryptionPrivateKey: string; kemPrivateKey: string };
 
     const { unwrapPrivateHierarchicalKey, unwrapSessionKeyFromFile, decryptMetadata } = await import("@/lib/crypto/file-crypto");
 
@@ -132,7 +132,8 @@ async function decryptFileNames(
         const privHier = unwrapPrivateHierarchicalKey(
           dlData.encryptedPrivateHierarchicalKey,
           dlData.wrappedByPublicKey,
-          keys.encryptionPrivateKey
+          keys.encryptionPrivateKey,
+          keys.kemPrivateKey,
         );
         const sessionKey = unwrapSessionKeyFromFile(
           e.encryptedSessionKeyByFile,

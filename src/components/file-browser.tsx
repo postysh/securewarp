@@ -879,12 +879,17 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                             const res = await fetch(`/api/files/chunk-download?fileId=${destId}`);
                             if (res.ok) {
                               const data = await res.json();
-                              await fileOps.moveFile(source, destId, data.publicHierarchicalKey || null);
+                              await fileOps.moveFile(
+                                source,
+                                destId,
+                                data.publicHierarchicalKey || null,
+                                data.publicKemHierarchicalKey || null,
+                              );
                             }
                           } catch { /* */ }
                         } else {
                           // Moving to root (null parent)
-                          await fileOps.moveFile(source, null, null);
+                          await fileOps.moveFile(source, null, null, null);
                         }
                       }}
                       className="text-text-secondary hover:text-text-primary cursor-pointer transition-colors bg-transparent border-none p-0 text-[13px] rounded px-1 -mx-1"
@@ -1389,7 +1394,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 const dest = fileOps.files.find((f) => f.id === file.id);
                 if (!source || !dest) return;
                 setDragFileId(null);
-                await fileOps.moveFile(source, dest.id, dest.publicHierarchicalKey);
+                await fileOps.moveFile(
+                  source,
+                  dest.id,
+                  dest.publicHierarchicalKey,
+                  dest.publicKemHierarchicalKey,
+                );
               }}
               onMouseEnter={() => {
                 if (file.isFolder && fileOps.viewMode === "own") {
@@ -1500,7 +1510,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 const dest = fileOps.files.find((f) => f.id === file.id);
                 if (!source || !dest) return;
                 setDragFileId(null);
-                await fileOps.moveFile(source, dest.id, dest.publicHierarchicalKey);
+                await fileOps.moveFile(
+                  source,
+                  dest.id,
+                  dest.publicHierarchicalKey,
+                  dest.publicKemHierarchicalKey,
+                );
               }}
               onMouseEnter={() => {
                 if (file.isFolder && fileOps.viewMode === "own") {

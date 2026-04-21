@@ -149,6 +149,7 @@ export function VersionHistoryModal({
         file.encryptedPrivateHierarchicalKey,
         file.wrappedByPublicKey,
         userKeys.encryptionPrivateKey,
+        userKeys.kemPrivateKey,
       );
       sessionKey = unwrapSessionKeyFromFile(
         file.encryptedSessionKeyByFile,

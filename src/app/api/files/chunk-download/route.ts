@@ -41,9 +41,11 @@ export async function GET(request: Request) {
     const base = {
       encryptedMetadata: file.encrypted_metadata,
       publicHierarchicalKey: file.public_hierarchical_key,
+      publicKemHierarchicalKey: file.public_kem_hierarchical_key,
       encryptedSessionKeyByFile: file.encrypted_session_key_by_file,
       sessionKeyNonce: file.session_key_nonce,
       ownerPublicKey: file.owner_public_key,
+      ownerPublicKemKey: file.owner_public_kem_key,
       // Direct key path (non-empty when user has a file_keys row)
       encryptedPrivateHierarchicalKey: directKey?.encrypted_private_hierarchical_key || "",
       wrappedByPublicKey: directKey?.wrapped_by_public_key || "",

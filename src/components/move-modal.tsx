@@ -17,6 +17,7 @@ import {
   unwrapSessionKeyFromFile,
   unwrapParentKeysClaim,
   decryptMetadata,
+  type HybridPrivateKeys,
 } from "@/lib/crypto/file-crypto";
 
 interface MoveModalProps {
@@ -28,21 +29,23 @@ interface FolderEntry {
   id: string;
   name: string;
   publicHierarchicalKey: string;
+  publicKemHierarchicalKey: string;
   // Kept so navigating INTO this folder can populate the path's
   // privateHierarchicalKey — which is what makes subsequent
   // inheritance-fallback decrypts work for grandchildren.
-  privateHierarchicalKey: string;
+  privateHierarchicalKey: HybridPrivateKeys | null;
 }
 
 interface PathEntry {
   id: string | null;
   name: string;
   publicHierarchicalKey: string | null;
+  publicKemHierarchicalKey: string | null;
   // Present for every non-root path entry. Used as the fallback
   // parent key when a child folder has no direct file_keys row
   // (inherited access, e.g. workspace subtrees the user can see
   // but wasn't individually granted on).
-  privateHierarchicalKey: string | null;
+  privateHierarchicalKey: HybridPrivateKeys | null;
 }
 
 export function MoveModal({ file, onClose }: MoveModalProps) {
@@ -52,7 +55,7 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [path, setPath] = useState<PathEntry[]>([
-    { id: null, name: "My Drive", publicHierarchicalKey: null, privateHierarchicalKey: null },
+    { id: null, name: "My Drive", publicHierarchicalKey: null, publicKemHierarchicalKey: null, privateHierarchicalKey: null },
   ]);
   // Client-side filter — scoped to the currently-viewed folder, not
   // a recursive search. Keeps the crypto boundary clean: no server
@@ -106,7 +109,7 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
   }, [folders, query]);
 
   const fetchFolders = useCallback(
-    async (parentId: string | null, parentPrivHier: string | null) => {
+    async (parentId: string | null, parentPrivHier: HybridPrivateKeys | null) => {
       setLoading(true);
       setError(null);
       try {
@@ -123,7 +126,10 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
 
         const keysStr = sessionStorage.getItem("securewarp_keys");
         if (!keysStr) { setError("Not signed in"); return; }
-        const { encryptionPrivateKey } = JSON.parse(keysStr) as { encryptionPrivateKey: string };
+        const { encryptionPrivateKey, kemPrivateKey } = JSON.parse(keysStr) as {
+          encryptionPrivateKey: string;
+          kemPrivateKey: string;
+        };
 
         const result: FolderEntry[] = [];
         for (const f of data.files) {
@@ -133,7 +139,7 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
           const wrappedBy = f.wrapped_by_public_key || "";
           const ownerPub = f.owner_public_key || "";
           let sessionKey: Uint8Array | null = null;
-          let folderPrivHier = "";
+          let folderPrivHier: HybridPrivateKeys | null = null;
 
           try {
             if (encPrivHier) {
@@ -142,6 +148,7 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
                 encPrivHier,
                 wrappedBy,
                 encryptionPrivateKey,
+                kemPrivateKey,
               );
               sessionKey = unwrapSessionKeyFromFile(
                 f.encrypted_session_key_by_file,
@@ -165,7 +172,7 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
                 parentPrivHier,
               );
               sessionKey = unwrapped.sessionKey;
-              folderPrivHier = unwrapped.childPrivateHierarchicalKey;
+              folderPrivHier = unwrapped.childPrivateHierarchicalKeys;
             } else {
               // Can't decrypt either way — skip silently, don't block
               // the whole list render on one bad row.
@@ -181,6 +188,7 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
               id: f.id,
               name: meta.name,
               publicHierarchicalKey: f.public_hierarchical_key,
+              publicKemHierarchicalKey: f.public_kem_hierarchical_key,
               privateHierarchicalKey: folderPrivHier,
             });
           } catch {
@@ -216,17 +224,19 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
       fetch(`/api/files/chunk-download?fileId=${fileOps.activeWorkspace.rootFolderId}`)
         .then((r) => r.json())
         .then((d) => {
-          let rootPrivHier: string | null = null;
+          let rootPrivHier: HybridPrivateKeys | null = null;
           try {
             const keysStr = sessionStorage.getItem("securewarp_keys");
             if (keysStr && d.encryptedPrivateHierarchicalKey) {
-              const { encryptionPrivateKey } = JSON.parse(keysStr) as {
+              const { encryptionPrivateKey, kemPrivateKey } = JSON.parse(keysStr) as {
                 encryptionPrivateKey: string;
+                kemPrivateKey: string;
               };
               rootPrivHier = unwrapPrivateHierarchicalKey(
                 d.encryptedPrivateHierarchicalKey,
                 d.wrappedByPublicKey,
                 encryptionPrivateKey,
+                kemPrivateKey,
               );
             }
           } catch { /* leave null; children without direct keys won't decrypt */ }
@@ -234,6 +244,7 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
             id: fileOps.activeWorkspace!.rootFolderId,
             name: fileOps.activeWorkspace!.name,
             publicHierarchicalKey: d.publicHierarchicalKey || null,
+            publicKemHierarchicalKey: d.publicKemHierarchicalKey || null,
             privateHierarchicalKey: rootPrivHier,
           }]);
           fetchFolders(fileOps.activeWorkspace!.rootFolderId, rootPrivHier);
@@ -243,12 +254,13 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
             id: fileOps.activeWorkspace!.rootFolderId,
             name: fileOps.activeWorkspace!.name,
             publicHierarchicalKey: null,
+            publicKemHierarchicalKey: null,
             privateHierarchicalKey: null,
           }]);
           fetchFolders(fileOps.activeWorkspace!.rootFolderId, null);
         });
     } else {
-      setPath([{ id: null, name: "My Drive", publicHierarchicalKey: null, privateHierarchicalKey: null }]);
+      setPath([{ id: null, name: "My Drive", publicHierarchicalKey: null, publicKemHierarchicalKey: null, privateHierarchicalKey: null }]);
       fetchFolders(null, null);
     }
   }, [file]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -282,6 +294,7 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
         id: folder.id,
         name: folder.name,
         publicHierarchicalKey: folder.publicHierarchicalKey,
+        publicKemHierarchicalKey: folder.publicKemHierarchicalKey,
         privateHierarchicalKey: folder.privateHierarchicalKey,
       },
     ]);
@@ -314,7 +327,12 @@ export function MoveModal({ file, onClose }: MoveModalProps) {
     if (!file) return;
     setBusy(true);
     setError(null);
-    const result = await fileOps.moveFile(file, current.id, current.publicHierarchicalKey);
+    const result = await fileOps.moveFile(
+      file,
+      current.id,
+      current.publicHierarchicalKey,
+      current.publicKemHierarchicalKey,
+    );
     setBusy(false);
     if (result.ok) {
       onClose();

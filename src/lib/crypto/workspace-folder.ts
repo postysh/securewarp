@@ -18,6 +18,8 @@ export async function buildWorkspaceFolder(name: string) {
   const keys = JSON.parse(keysStr) as {
     encryptionPublicKey: string;
     encryptionPrivateKey: string;
+    kemPublicKey: string;
+    kemPrivateKey: string;
   };
 
   const sessionKey = generateSessionKey();
@@ -29,19 +31,20 @@ export async function buildWorkspaceFolder(name: string) {
     );
     const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(
       sessionKey,
-      hier.publicKey,
+      hier.publicKeys,
       keys.encryptionPrivateKey
     );
     const encryptedPrivateHierarchicalKey = wrapPrivateHierarchicalKeyForUser(
-      hier.privateKey,
-      keys.encryptionPublicKey,
+      hier.privateKeys,
+      { x25519: keys.encryptionPublicKey, kem: keys.kemPublicKey },
       keys.encryptionPrivateKey
     );
 
     return {
       encryptedMetadata: JSON.stringify(encryptedMetadata),
       parentId: null,
-      publicHierarchicalKey: hier.publicKey,
+      publicHierarchicalKey: hier.publicKeys.x25519,
+      publicKemHierarchicalKey: hier.publicKeys.kem,
       encryptedSessionKeyByFile,
       sessionKeyNonce,
       encryptedPrivateHierarchicalKey,
