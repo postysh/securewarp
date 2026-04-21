@@ -25,6 +25,11 @@ jobs:
   secrets:
     name: Gitleaks (secret scanning)
     runs-on: ubuntu-latest
+    # Skip on Dependabot PRs — gitleaks-action calls GitHub's PR API with
+    # the Dependabot-scoped token, which GitHub restricts to read-only,
+    # and the action errors with HTTP 403 on every run. The main-branch
+    # push still scans the merged commit, so coverage is preserved.
+    if: github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,18 +70,18 @@ jobs:
   dependency-review:
     name: Dependency review (PR only)
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    # Requires GitHub Advanced Security on private repos (paid add-on).
+    # Without GHAS the action exits with "Dependency review is not
+    # supported on this repository." We still catch vuln deps via the
+    # `npm audit` job above which runs on every push + PR. Flip this on
+    # when GHAS becomes available.
+    if: false
     steps:
       - uses: actions/checkout@v4
-      # Blocks the PR if it introduces a dependency (or new version) with
-      # a known high/critical CVE or an incompatible license. Runs only
-      # on PRs because the diff-vs-base comparison is the point.
       - name: Review PR dependency diff
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
-          # Deny license families that would conflict with a future
-          # paid plan or closed-source distribution.
           deny-licenses: AGPL-3.0, GPL-3.0
 
   sbom:

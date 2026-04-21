@@ -98,14 +98,16 @@ export function RecoveryKeyModal({ open, onClose, recoveryKey }: RecoveryKeyModa
         </div>
 
         <div className="px-6 py-6">
-          {/* Warning card — warm amber, the single loudest element in the modal. */}
-          <div className="flex items-start gap-3 p-3.5 rounded-[10px] bg-accent-yellow-bg border border-accent-yellow/15 text-[12px] text-accent-yellow mb-5">
-            <div className="w-6 h-6 rounded-[6px] bg-accent-yellow/20 flex items-center justify-center shrink-0 mt-0.5">
+          {/* Warning card — warm amber tint on the surface + icon, but
+              the copy stays on text-primary for readable contrast in
+              both themes. Light-mode amber-on-amber was washing out. */}
+          <div className="flex items-start gap-3 p-3.5 rounded-[10px] bg-accent-yellow-bg border border-accent-yellow/15 text-[12px] text-text-primary mb-5">
+            <div className="w-6 h-6 rounded-[6px] bg-accent-yellow/20 flex items-center justify-center shrink-0 mt-0.5 text-accent-yellow">
               <HugeiconsIcon icon={Alert01Icon} size={13} />
             </div>
             <div>
               <p className="font-medium">Store this somewhere offline</p>
-              <p className="opacity-75 mt-0.5 leading-relaxed">
+              <p className="text-text-secondary mt-0.5 leading-relaxed">
                 We never see it and cannot reset it. Lose this and your
                 password, and your encrypted files are gone for good.
               </p>

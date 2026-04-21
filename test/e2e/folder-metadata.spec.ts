@@ -77,11 +77,14 @@ test("folder names are encrypted at rest", async ({ page }) => {
   expect(folderRow!.encrypted_metadata).toBeTruthy();
   expect(folderRow!.encrypted_metadata).not.toContain(folderName);
 
-  // ── ASSERTION 3: The Phase 2 hierarchical crypto columns are all
-  //                populated (no NULL shortcut). An attacker can't
-  //                pick a metadata-only file and find a shortcut to
-  //                the session key.
+  // ── ASSERTION 3: The hierarchical crypto columns are all populated
+  //                (no NULL shortcut). An attacker can't pick a
+  //                metadata-only file and find a shortcut to the
+  //                session key. Crypto v2 Phase 2b added the ML-KEM
+  //                half; session_key_nonce is empty for v2 wraps
+  //                (the hybrid blob embeds its own nonce) so we
+  //                check the hybrid pair instead.
   expect(folderRow!.public_hierarchical_key).toBeTruthy();
+  expect(folderRow!.public_kem_hierarchical_key).toBeTruthy();
   expect(folderRow!.encrypted_session_key_by_file).toBeTruthy();
-  expect(folderRow!.session_key_nonce).toBeTruthy();
 });
