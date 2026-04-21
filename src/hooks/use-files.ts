@@ -716,23 +716,55 @@ export function useFiles(keys: {
           for (const pid of missingParentIds) {
             try {
               const parentRes = await fetch(`/api/files/chunk-download?fileId=${pid}`);
-              if (parentRes.ok) {
-                const pd = await parentRes.json();
-                if (pd.encryptedPrivateHierarchicalKey) {
-                  const pPrivHier = unwrapPrivateHierarchicalKey(
-                    pd.encryptedPrivateHierarchicalKey,
-                    pd.wrappedByPublicKey,
-                    keys.encryptionPrivateKey,
-                    keys.kemPrivateKey,
+              if (!parentRes.ok) continue;
+              const pd = await parentRes.json();
+              if (!pd.publicHierarchicalKey || !pd.publicKemHierarchicalKey) continue;
+
+              // Three code paths to recover the parent folder's
+              // priv hier — they parallel resolvePrivHier:
+              //   1. Direct: caller has their own file_keys row on
+              //      the parent.
+              //   2. Inherited: caller has a row on an ANCESTOR of
+              //      the parent (e.g., workspace root) and walks
+              //      parent_keys_claim down through intermediate
+              //      folders. This is the bug we're fixing — the
+              //      previous version only handled (1) and left
+              //      mixed-owner workspace trees showing
+              //      "[Encrypted]" for inherited viewers.
+              //   3. No path — skip this parent.
+              let pPrivHier: HybridPrivateKeys | null = null;
+              if (pd.encryptedPrivateHierarchicalKey && pd.wrappedByPublicKey) {
+                pPrivHier = unwrapPrivateHierarchicalKey(
+                  pd.encryptedPrivateHierarchicalKey,
+                  pd.wrappedByPublicKey,
+                  keys.encryptionPrivateKey,
+                  keys.kemPrivateKey,
+                );
+              } else if (pd.ancestorKey && pd.parentChain?.length) {
+                let current: HybridPrivateKeys = unwrapPrivateHierarchicalKey(
+                  pd.ancestorKey.encrypted_private_hierarchical_key,
+                  pd.ancestorKey.wrapped_by_public_key,
+                  keys.encryptionPrivateKey,
+                  keys.kemPrivateKey,
+                );
+                for (const link of pd.parentChain) {
+                  const unwrapped = unwrapParentKeysClaim(
+                    link.parentKeysClaim,
+                    link.parentKeysClaimWrappedBy,
+                    current,
                   );
-                  if (pd.publicHierarchicalKey && pd.publicKemHierarchicalKey) {
-                    folderPrivHierCache.current.set(pid, {
-                      publicHierarchicalKey: pd.publicHierarchicalKey,
-                      publicKemHierarchicalKey: pd.publicKemHierarchicalKey,
-                      privateHierarchicalKeys: pPrivHier,
-                    });
-                  }
+                  current = unwrapped.childPrivateHierarchicalKeys;
+                  unwrapped.sessionKey.fill(0);
                 }
+                pPrivHier = current;
+              }
+
+              if (pPrivHier) {
+                folderPrivHierCache.current.set(pid, {
+                  publicHierarchicalKey: pd.publicHierarchicalKey,
+                  publicKemHierarchicalKey: pd.publicKemHierarchicalKey,
+                  privateHierarchicalKeys: pPrivHier,
+                });
               }
             } catch {
               // Parent fetch failed — child will fall through to error entry
