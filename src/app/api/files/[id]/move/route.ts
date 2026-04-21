@@ -69,21 +69,30 @@ export async function POST(
 
     // 1. Caller must have editor+ access to the file being moved.
     //    Try ownership first, fall back to inherited workspace permission.
-    let file: { id: string; parent_id: string | null; is_folder: boolean; deleted_at: string | null } | null = await getOwnedFile(fileId, session.userId);
-    if (!file) {
-      const perm = await getEffectivePermission(fileId, session.userId);
-      if (!perm || perm === "viewer") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
+    let file: {
+      id: string;
+      owner_id: string;
+      parent_id: string | null;
+      is_folder: boolean;
+      deleted_at: string | null;
+      workspace_id: string | null;
+    } | null = null;
+    {
       const { data } = await supabase
         .from("files")
-        .select("id, parent_id, is_folder, deleted_at")
+        .select("id, owner_id, parent_id, is_folder, deleted_at, workspace_id")
         .eq("id", fileId)
         .single();
       if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
       file = data;
     }
-    if (!file) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const isOwner = file.owner_id === session.userId;
+    if (!isOwner) {
+      const perm = await getEffectivePermission(fileId, session.userId);
+      if (!perm || perm === "viewer") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+    }
     if (file.deleted_at) {
       return NextResponse.json({ error: "File is in trash" }, { status: 400 });
     }
@@ -94,8 +103,18 @@ export async function POST(
     }
 
     // 2. Destination must be a folder the caller can write to (or null for root).
+    let destWorkspaceId: string | null = null;
     if (newParentId !== null) {
-      let dest: { id: string; is_folder: boolean; deleted_at: string | null } | null = await getOwnedFile(newParentId, session.userId);
+      let dest: { id: string; is_folder: boolean; deleted_at: string | null; workspace_id: string | null } | null = await (async () => {
+        const owned = await getOwnedFile(newParentId, session.userId);
+        if (!owned) return null;
+        const { data } = await supabase
+          .from("files")
+          .select("id, is_folder, deleted_at, workspace_id")
+          .eq("id", newParentId)
+          .single();
+        return data;
+      })();
       if (!dest) {
         const destPerm = await getEffectivePermission(newParentId, session.userId);
         if (!destPerm || destPerm === "viewer") {
@@ -103,7 +122,7 @@ export async function POST(
         }
         const { data } = await supabase
           .from("files")
-          .select("id, is_folder, deleted_at")
+          .select("id, is_folder, deleted_at, workspace_id")
           .eq("id", newParentId)
           .single();
         if (!data) return NextResponse.json({ error: "Destination not found" }, { status: 404 });
@@ -116,6 +135,7 @@ export async function POST(
       if (dest.deleted_at) {
         return NextResponse.json({ error: "Destination is in trash" }, { status: 400 });
       }
+      destWorkspaceId = (dest.workspace_id as string | null) ?? null;
 
       // 3. Cycle check — can't move a folder into itself or any descendant.
       if (file.is_folder) {
@@ -129,16 +149,19 @@ export async function POST(
       }
     }
 
-    // Resolve workspace_id from destination folder so moved files
-    // stay correctly associated with the workspace (or personal).
-    let destWorkspaceId: string | null = null;
-    if (newParentId) {
-      const { data: destFile } = await supabase
-        .from("files")
-        .select("workspace_id")
-        .eq("id", newParentId)
-        .single();
-      destWorkspaceId = (destFile?.workspace_id as string | null) ?? null;
+    // 4. Workspace-boundary guard. Only the owner may move a file
+    //    across workspace_id. A non-owner editor yanking a workspace
+    //    file into their personal drive (destWorkspaceId=null) would
+    //    orphan it from every other collaborator's view — no workspace
+    //    listing would surface it and the file's new parent is in a
+    //    folder only the mover can navigate to. Covers all three
+    //    cross-boundary shapes: workspace→personal, personal→workspace,
+    //    and workspace→different-workspace.
+    if (!isOwner && file.workspace_id !== destWorkspaceId) {
+      return NextResponse.json(
+        { error: "Only the file owner can move this file out of its workspace" },
+        { status: 403 }
+      );
     }
 
     await moveFile(
