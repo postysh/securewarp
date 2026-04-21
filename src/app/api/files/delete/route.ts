@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { trashSubtree, getOwnedFile, getEffectivePermission } from "@/lib/db/files";
+import {
+  trashSubtree,
+  trashSubtreeUnscoped,
+  getOwnedFile,
+  getEffectivePermission,
+} from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
@@ -38,29 +43,34 @@ export async function POST(request: Request) {
     const fileId = parsed.data.fileId;
 
     // Access gate: owner can trash directly. In workspaces, editors+
-    // can also trash files they don't own.
+    // can also trash files they don't own — we use an unscoped RPC
+    // so mixed-owner subtrees get trashed atomically instead of
+    // partial-trashing only the named owner's rows.
     const owned = await getOwnedFile(fileId, session.userId);
     if (!owned) {
       const perm = await getEffectivePermission(fileId, session.userId);
       if (!perm || perm === "viewer") {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      // Verify the file exists and isn't a workspace root
       const { data: fileRow } = await supabase
         .from("files")
-        .select("id, is_workspace_root, owner_id")
+        .select("id, is_workspace_root, workspace_id")
         .eq("id", fileId)
         .single();
       if (!fileRow) return NextResponse.json({ error: "Not found" }, { status: 404 });
       if (fileRow.is_workspace_root) {
         return NextResponse.json({ error: "Cannot delete a workspace folder. Delete the workspace instead." }, { status: 400 });
       }
-      // Trash using the file's actual owner so the RPC works
-      await trashSubtree(fileId, fileRow.owner_id as string);
+      // Workspace subtree trash: permission was validated above; the
+      // RPC flips every descendant regardless of per-row owner.
+      await trashSubtreeUnscoped(fileId);
     } else {
       if (owned.is_workspace_root) {
         return NextResponse.json({ error: "Cannot delete a workspace folder. Delete the workspace instead." }, { status: 400 });
       }
+      // Personal-drive subtree: scoped to caller's owned rows. Since
+      // the caller owns the root and personal-drive descendants are
+      // always caller-owned, scoped is sufficient and tighter.
       await trashSubtree(fileId, session.userId);
     }
 

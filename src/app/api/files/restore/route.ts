@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { restoreSubtree, getEffectivePermission } from "@/lib/db/files";
+import {
+  restoreSubtree,
+  restoreSubtreeUnscoped,
+  getEffectivePermission,
+} from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
@@ -53,9 +57,12 @@ export async function POST(request: Request) {
       if (!perm || perm === "viewer") {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
+      // Workspace restore: unscoped so mixed-owner subtrees are
+      // reversed as a unit.
+      await restoreSubtreeUnscoped(fileId);
+    } else {
+      await restoreSubtree(fileId, row.owner_id as string);
     }
-
-    await restoreSubtree(fileId, row.owner_id as string);
 
     auditEvent({
       event: "files.restore",

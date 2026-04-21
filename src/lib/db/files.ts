@@ -808,11 +808,14 @@ export async function setCollaboratorPermission(
 // ──────────────────────────────────────────────────────────────────────
 
 /**
- * Owner-only soft delete. Calls the `soft_delete_subtree` recursive
- * CTE so trashing a folder marks every descendant in one statement.
- * Returns the number of rows touched (0 means the file wasn't found
- * or wasn't owned by the caller — the route handler treats this as
- * 404 to match the "don't reveal existence" convention).
+ * Personal-drive soft delete. Scopes the recursive CTE to files the
+ * caller owns — so a user can only trash rows they own, even when
+ * operating on a subtree. Fine for personal drive where every file
+ * under a folder is owned by the folder owner.
+ *
+ * For WORKSPACE files (mixed-owner subtrees), use
+ * `trashSubtreeUnscoped` — the caller's permission is checked at
+ * the route layer and the RPC just flips the whole subtree.
  */
 export async function trashSubtree(fileId: string, ownerId: string): Promise<void> {
   const { error } = await supabase.rpc("soft_delete_subtree", {
@@ -823,15 +826,28 @@ export async function trashSubtree(fileId: string, ownerId: string): Promise<voi
 }
 
 /**
- * Owner-only restore. Uses the matching `restore_subtree` CTE which
- * only reverses rows whose `deleted_at` matches the root's — so a
- * file the user individually trashed earlier stays trashed when
- * their parent folder is restored later.
+ * Workspace soft delete — trashes the entire subtree regardless of
+ * per-row owner. Caller MUST have already verified permission at the
+ * route layer (`getEffectivePermission` for the root).
  */
+export async function trashSubtreeUnscoped(fileId: string): Promise<void> {
+  const { error } = await supabase.rpc("soft_delete_subtree_unscoped", {
+    p_root: fileId,
+  });
+  if (error) throw new Error(`Failed to trash: ${error.message}`);
+}
+
 export async function restoreSubtree(fileId: string, ownerId: string): Promise<void> {
   const { error } = await supabase.rpc("restore_subtree", {
     p_root: fileId,
     p_owner: ownerId,
+  });
+  if (error) throw new Error(`Failed to restore: ${error.message}`);
+}
+
+export async function restoreSubtreeUnscoped(fileId: string): Promise<void> {
+  const { error } = await supabase.rpc("restore_subtree_unscoped", {
+    p_root: fileId,
   });
   if (error) throw new Error(`Failed to restore: ${error.message}`);
 }

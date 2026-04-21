@@ -132,9 +132,10 @@ export async function POST(
       );
     }
 
-    // Fetch OLD chunk storage keys so we can delete their R2 blobs
-    // *after* the DB transaction commits — if anything fails before
-    // commit, the old blobs stay in place and the file remains readable.
+    // Fetch OLD chunk storage keys + version rows so we can clean
+    // them up AFTER the new state commits. If anything fails mid-
+    // sequence, the old state stays readable until the files row
+    // flips (step 5 below).
     const { data: oldChunks } = await supabase
       .from("file_chunks")
       .select("storage_key")
@@ -144,12 +145,73 @@ export async function POST(
       .filter((k): k is string => !!k);
 
     // ── mutation sequence ───────────────────────────────────────────
-    // Supabase service-role client doesn't expose real transactions
-    // from JS; we sequence carefully and log partial failures. For
-    // Phase 5 v1 this is acceptable — the read path continues to
-    // work on the old state until the files row flips, and the new
-    // file_keys rows are idempotent upserts.
+    // Rotation wipes the past: a revoked collaborator's cached
+    // session key / priv hier can still decrypt whatever they
+    // already downloaded, but the file server-side is now a fresh
+    // era. Historical file_versions rows were wrapped under the OLD
+    // hier keypair which no longer exists on the files row — they
+    // would be un-decryptable going forward, so we delete them
+    // rather than leave a trail of corrupt version history.
+    //
+    // Order matters for idempotent retry if any step crashes:
+    //   1. Figure out the next version number (max + 1, monotonic).
+    //   2. Insert a fresh file_versions row for the rotated content.
+    //   3. Insert new file_chunks linked to that version_id. At
+    //      this point both old and new chunk sets exist — readers
+    //      still see the old state because files.current_version_number
+    //      hasn't been flipped yet.
+    //   4. Flip files.current_version_number + all rotated fields.
+    //      Readers now resolve to the new version.
+    //   5. Clean up: delete old file_versions rows (NOT the new one)
+    //      and old file_chunks rows (not the new ones).
+    //   6. Delete the revoked user's file_keys row.
+    //   7. Upsert the remaining collaborators' new priv-hier wraps.
 
+    // 1. Next monotonic version number.
+    const { data: maxRow } = await supabase
+      .from("file_versions")
+      .select("version_number")
+      .eq("file_id", file.id)
+      .order("version_number", { ascending: false })
+      .limit(1)
+      .single();
+    const nextVersionNumber =
+      ((maxRow?.version_number as number | undefined) ?? 0) + 1;
+
+    // 2. Fresh file_versions row.
+    const { data: newVersion, error: insVersionErr } = await supabase
+      .from("file_versions")
+      .insert({
+        file_id: file.id,
+        version_number: nextVersionNumber,
+        encrypted_metadata: data.encryptedMetadata,
+        size_bytes: data.newChunks.reduce((n, c) => n + c.sizeBytes, 0),
+        chunk_count: data.newChunks.length,
+        created_by_user_id: session.userId,
+        encrypted_session_key_by_file: data.encryptedSessionKeyByFile,
+        session_key_nonce: data.sessionKeyNonce,
+      })
+      .select("id")
+      .single();
+    if (insVersionErr || !newVersion) throw insVersionErr ?? new Error("Failed to insert version row");
+
+    const newVersionId = newVersion.id as string;
+
+    // 3. Insert new chunks linked to the new version.
+    const { error: insChunksErr } = await supabase.from("file_chunks").insert(
+      data.newChunks.map((c) => ({
+        file_id: file.id,
+        version_id: newVersionId,
+        sequence: c.sequence,
+        is_final: c.isFinal,
+        size_bytes: c.sizeBytes,
+        storage_key: c.storageKey,
+        encryption_nonce: c.encryptionNonce,
+      }))
+    );
+    if (insChunksErr) throw insChunksErr;
+
+    // 4. Flip files row — readers now see the new state.
     const { error: filesErr } = await supabase
       .from("files")
       .update({
@@ -160,29 +222,35 @@ export async function POST(
         session_key_nonce: data.sessionKeyNonce,
         parent_keys_claim: data.parentKeysClaim ?? null,
         parent_keys_claim_wrapped_by: data.parentKeysClaimWrappedBy ?? null,
+        current_version_number: nextVersionNumber,
+        version_count: 1,
+        chunk_count: data.newChunks.length,
+        size_bytes: data.newChunks.reduce((n, c) => n + c.sizeBytes, 0),
         updated_at: new Date().toISOString(),
       })
       .eq("id", file.id);
     if (filesErr) throw filesErr;
 
+    // 5a. Delete old chunks (all rows for this file_id except the
+    //     new ones we just inserted).
     const { error: delChunksErr } = await supabase
       .from("file_chunks")
       .delete()
-      .eq("file_id", file.id);
+      .eq("file_id", file.id)
+      .neq("version_id", newVersionId);
     if (delChunksErr) throw delChunksErr;
 
-    const { error: insChunksErr } = await supabase.from("file_chunks").insert(
-      data.newChunks.map((c) => ({
-        file_id: file.id,
-        sequence: c.sequence,
-        is_final: c.isFinal,
-        size_bytes: c.sizeBytes,
-        storage_key: c.storageKey,
-        encryption_nonce: c.encryptionNonce,
-      }))
-    );
-    if (insChunksErr) throw insChunksErr;
+    // 5b. Delete old file_versions rows. Historical wraps are now
+    //     un-decryptable (they used the discarded hier keypair) so
+    //     retaining them would just be noise.
+    const { error: delVersionsErr } = await supabase
+      .from("file_versions")
+      .delete()
+      .eq("file_id", file.id)
+      .neq("id", newVersionId);
+    if (delVersionsErr) throw delVersionsErr;
 
+    // 6. Delete revoked user.
     const { error: revokeErr } = await supabase
       .from("file_keys")
       .delete()
@@ -190,6 +258,7 @@ export async function POST(
       .eq("user_id", data.revokedUserId);
     if (revokeErr) throw revokeErr;
 
+    // 7. Upsert remaining collaborators' new priv-hier wraps.
     const { error: upsertErr } = await supabase.from("file_keys").upsert(
       data.remainingCollaborators.map((c) => ({
         file_id: file.id,
