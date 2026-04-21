@@ -11,8 +11,8 @@ import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
 import { decryptMetadata } from "@/lib/crypto/file-crypto";
 import { fromBase64 } from "@/lib/crypto/utils";
 import {
-  unwrapPrivateHierarchicalKey,
   unwrapSessionKeyFromFile,
+  type HybridPrivateKeys,
 } from "@/lib/crypto/file-crypto";
 import { useUserKeys } from "@/hooks/use-user-keys";
 
@@ -31,8 +31,10 @@ type FileForVersions = {
   name: string;
   isOwner: boolean;
   currentVersionNumber?: number;
-  // Crypto material needed to unwrap the shared session key once per
-  // modal open. Mirrors the DecryptedFile shape from use-files.ts.
+  // The caller's wrap is used to verify access for direct-row holders,
+  // but the modal no longer unwraps it locally — priv hier recovery
+  // goes through `resolvePrivHier` so workspace members with inherited
+  // access (no direct file_keys row) also work.
   encryptedPrivateHierarchicalKey: string;
   wrappedByPublicKey: string;
   ownerPublicKey: string;
@@ -73,6 +75,10 @@ interface VersionHistoryModalProps {
     fileId: string,
     versionId: string,
   ) => Promise<{ ok: boolean; orphanedStorageKeys: number }>;
+  // Recover the file's private hierarchical keys. Caller supplies this
+  // because the hook owns the direct-vs-inherited resolution (workspace
+  // members access via parent_keys_claim, not a direct file_keys row).
+  resolvePrivHier: () => Promise<HybridPrivateKeys>;
   // Upload a new version. Optional — when present the modal renders
   // an "Upload new version" button in the header that opens a native
   // file picker and pipes the result here.
@@ -126,6 +132,7 @@ export function VersionHistoryModal({
   listVersions,
   restoreVersion,
   deleteVersion,
+  resolvePrivHier,
   replaceFile,
   onActionComplete,
 }: VersionHistoryModalProps) {
@@ -149,16 +156,14 @@ export function VersionHistoryModal({
     if (!opts?.silent) setLoading(true);
     setError(null);
     try {
-      // Phase 4 — unwrap the file's hier private key ONCE, then
+      // Phase 4 — recover the file's hier private key ONCE, then
       // per-version unwrap each version's own session-key wrap.
       // Every version's wrap is under the same pub hier keypair so
-      // one hier unwrap serves all versions.
-      const privHier = unwrapPrivateHierarchicalKey(
-        file.encryptedPrivateHierarchicalKey,
-        file.wrappedByPublicKey,
-        userKeys.encryptionPrivateKey,
-        userKeys.kemPrivateKey,
-      );
+      // one hier recovery serves all versions. `resolvePrivHier`
+      // handles both the direct-key path (owner / direct collaborator
+      // with a file_keys row) and the inherited path (workspace
+      // members whose access comes through parent_keys_claim).
+      const privHier = await resolvePrivHier();
 
       const raw = await listVersions(file.id);
       const decrypted: VersionRow[] = raw.map((v) => {
@@ -189,7 +194,7 @@ export function VersionHistoryModal({
       if (!opts?.silent) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file?.id, userKeys, listVersions]);
+  }, [file?.id, userKeys, listVersions, resolvePrivHier]);
 
   useEffect(() => {
     if (file) fetchAndDecrypt();

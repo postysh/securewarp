@@ -125,10 +125,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Root folder not found" }, { status: 404 });
     }
 
-    // Mark the folder as a workspace root (hidden from personal, protected from delete)
-    await supabase.from("files").update({ is_workspace_root: true }).eq("id", parsed.data.rootFolderId);
-
-    // Create workspace
+    // Create workspace first so we have the id to stamp onto the root
+    // folder. Backfilling `workspace_id` on the root is what makes
+    // descendant inheritance (via createFile) pick up the right
+    // workspace for every file uploaded inside it.
     const { data: ws, error: wsErr } = await supabase
       .from("workspaces")
       .insert({
@@ -139,6 +139,14 @@ export async function POST(request: Request) {
       .select("id")
       .single();
     if (wsErr) throw wsErr;
+
+    // Mark the folder as a workspace root AND tag it with workspace_id.
+    // Without the tag, the trash query (which filters by workspace_id)
+    // would miss files uploaded directly to the root.
+    await supabase
+      .from("files")
+      .update({ is_workspace_root: true, workspace_id: ws.id })
+      .eq("id", parsed.data.rootFolderId);
 
     // Add owner as first member
     const { error: memErr } = await supabase

@@ -2167,6 +2167,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         listVersions={fileOps.listVersions}
         restoreVersion={fileOps.restoreVersion}
         deleteVersion={fileOps.deleteVersion}
+        resolvePrivHier={() => fileOps.resolvePrivHier(versionHistoryTarget!)}
         replaceFile={fileOps.replaceFile}
         onActionComplete={() => {
           void fileOps.fetchFiles(fileOps.currentFolder);

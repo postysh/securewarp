@@ -3737,6 +3737,7 @@ export function useFiles(keys: {
     listVersions,
     restoreVersion,
     deleteVersion,
+    resolvePrivHier,
     downloadFile,
     previewFile,
     createFolder,
