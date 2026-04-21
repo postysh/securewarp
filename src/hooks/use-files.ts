@@ -29,6 +29,7 @@ import {
 } from "@/lib/crypto/chunked-encryption";
 import { decryptFileContent } from "@/lib/crypto/file-crypto";
 import { toBase64, fromBase64 } from "@/lib/crypto/utils";
+import { friendlyError } from "@/lib/ui/errors";
 import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
 import {
   loadAll as loadSearchCache,
@@ -1738,7 +1739,8 @@ export function useFiles(keys: {
         const blob = new Blob([new Uint8Array(decryptedContent)], { type: safeMime });
         return { ok: true, blobUrl: URL.createObjectURL(blob), name: meta.name, type: meta.type };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Preview failed";
+        console.error("previewFile", err);
+        const message = friendlyError(err, "Preview failed");
         return { ok: false, error: message };
       } finally {
         if (sessionKey) sessionKey.fill(0);
@@ -1945,7 +1947,8 @@ export function useFiles(keys: {
         }));
         return { ok: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Rename failed";
+        console.error("renameFile", err);
+        const message = friendlyError(err, "Rename failed");
         return { ok: false, error: message };
       } finally {
         if (sessionKey) sessionKey.fill(0);
@@ -2038,7 +2041,8 @@ export function useFiles(keys: {
         await fetchFiles(state.currentFolder, state.viewMode);
         return { ok: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Move failed";
+        console.error("moveFile", err);
+        const message = friendlyError(err, "Move failed");
         return { ok: false, error: message };
       } finally {
         if (sessionKey) sessionKey.fill(0);
@@ -2500,8 +2504,7 @@ export function useFiles(keys: {
         return { ok: true };
       } catch (err) {
         console.error("rotateAndRevoke", err);
-        const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, error: `Revoke rotation failed: ${message}` };
+        return { ok: false, error: friendlyError(err, "Revoke rotation failed") };
       }
     },
     [keys, fetchFiles, state.currentFolder, state.viewMode]
@@ -2762,8 +2765,7 @@ export function useFiles(keys: {
         return { ok: false, error: result.error };
       } catch (err) {
         console.error("rotateAndRevokeFolder", err);
-        const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, error: `Folder rotation failed: ${message}` };
+        return { ok: false, error: friendlyError(err, "Folder rotation failed") };
       }
     },
     [keys, fetchFiles, state.currentFolder, state.viewMode]
@@ -3709,7 +3711,8 @@ export function useFiles(keys: {
         onProgress?.(100, "Done");
         return { ok: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Export failed";
+        console.error("exportAll", err);
+        const message = friendlyError(err, "Export failed");
         return { ok: false, error: message };
       }
     },
