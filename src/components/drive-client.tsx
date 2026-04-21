@@ -45,6 +45,43 @@ export default function DriveClient() {
     return () => window.removeEventListener("securewarp-keys-updated", refresh);
   }, []);
 
+  // Zombie-session guard. `middleware.ts` trusts the JWT signature alone
+  // (no DB lookup per request, by design), while `getSession()` in route
+  // handlers requires a matching `sessions` row. After a data wipe or a
+  // revoked session, the cookie's signature still validates → middleware
+  // redirects /login and /signup back to /drive → drive-client sees
+  // empty sessionStorage → renders AuthScreen inline → user clicks
+  // "Sign up" or "Sign in" and nothing appears to happen because the
+  // URL snaps straight back. We detect the zombie state by probing
+  // /api/auth/profile (which uses getSession) — a 401 means the cookie
+  // is dead. Clear it via /api/auth/logout so the next nav attempt is
+  // treated as an unauthenticated request and actually lands.
+  //
+  // Only runs when we're about to fall back to the inline AuthScreen.
+  // If keys are present in sessionStorage we skip entirely — nothing
+  // to guard against, and profile-probing that path runs in the
+  // onboarding gate below already.
+  useEffect(() => {
+    if (!hydrated || keys) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/profile", { cache: "no-store" });
+        if (cancelled) return;
+        if (res.status === 401) {
+          // Zombie cookie. Clear it so auth-route middleware stops
+          // redirecting /login ↔ /signup back to /drive.
+          await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+        }
+      } catch {
+        // Network flake — leave cookie in place; user can still
+        // attempt login, and the server will reject the duplicate
+        // session if need be.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [hydrated, keys]);
+
   // Gate: returning users who never onboarded (pre-wizard accounts, or
   // anyone who closed the tab mid-wizard) get bounced to /welcome. We
   // only check once keys are present — an unlock-needed state shows
