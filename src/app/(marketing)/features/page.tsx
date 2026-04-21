@@ -294,13 +294,13 @@ function CategoryBlock({
 
 function PrimitivesStrip() {
   const primitives = [
-    "XSalsa20-Poly1305",
+    "XChaCha20-Poly1305",
+    "X25519",
+    "ML-KEM-768",
     "Argon2id",
     "SRP-6a",
     "HKDF-SHA256",
     "BIP39",
-    "nacl.box",
-    "nacl.secretbox",
   ];
   return (
     <section style={{ padding: "40px 32px", textAlign: "center" }}>
@@ -441,7 +441,13 @@ const ENCRYPTION_FEATURES: FeatureItem[] = [
     icon: LockIcon,
     title: "Zero knowledge encryption",
     body:
-      "Files, folder names, and shares are encrypted in your browser with xsalsa20-poly1305 before upload.",
+      "Files, folder names, and shares are encrypted in your browser with XChaCha20-Poly1305 before upload.",
+  },
+  {
+    icon: Shield01Icon,
+    title: "Post quantum ready",
+    body:
+      "Every key wrap runs a hybrid of X25519 and ML-KEM-768. Ciphertext stays private even against an adversary who stores it now and decrypts on a future quantum computer.",
   },
   {
     icon: Key01Icon,
@@ -454,6 +460,12 @@ const ENCRYPTION_FEATURES: FeatureItem[] = [
     title: "SRP-6a authentication",
     body:
       "Login uses the Secure Remote Password protocol, so we verify you without ever receiving your password.",
+  },
+  {
+    icon: Key01Icon,
+    title: "Forward secrecy per version",
+    body:
+      "Every new version of a file gets a fresh session key. Someone who had access before and cached an old key cannot read newer versions.",
   },
   {
     icon: Key01Icon,

@@ -2595,7 +2595,7 @@ function HighlightIllustrationKeys() {
         <NodePill left={110} top="50%" label="Argon2id" />
         <NodePill left={200} top={25} label="SRP" small />
         <NodePill left={200} top="50%" label="Encrypt" small />
-        <NodePill left={200} top={114} label="Signing" small />
+        <NodePill left={200} top={114} label="Unlock" small />
       </div>
     </div>
   );
@@ -2981,11 +2981,11 @@ function StandardsSection() {
   const labels = [
     "Argon2id",
     "SRP-6a",
-    "xsalsa20",
+    "XChaCha20-Poly1305",
+    "X25519",
+    "ML-KEM-768",
     "HKDF-SHA256",
     "BIP39",
-    "Web Crypto",
-    "Noble",
   ];
   return (
     <section

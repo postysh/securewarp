@@ -344,12 +344,13 @@ function WhyBlock() {
 
 function TeamBlock() {
   const primitives = [
-    "XSalsa20-Poly1305",
+    "XChaCha20-Poly1305",
+    "X25519",
+    "ML-KEM-768",
     "Argon2id",
     "SRP-6a",
-    "BIP39",
     "HKDF-SHA256",
-    "nacl.box / nacl.secretbox",
+    "BIP39",
   ];
   return (
     <section style={{ padding: "64px 32px" }}>
