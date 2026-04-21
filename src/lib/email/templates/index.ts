@@ -13,11 +13,23 @@
 import { welcomeTemplate, type WelcomeData } from "./welcome";
 import { supportReceivedTemplate, type SupportReceivedData } from "./support-received";
 import { supportAckTemplate, type SupportAckData } from "./support-ack";
+import { billingReceiptTemplate, type BillingReceiptData } from "./billing-receipt";
+import {
+  billingPaymentFailedTemplate,
+  type BillingPaymentFailedData,
+} from "./billing-payment-failed";
+import {
+  billingRenewalReminderTemplate,
+  type BillingRenewalReminderData,
+} from "./billing-renewal-reminder";
 
 export const Templates = {
   welcome: welcomeTemplate,
   "support-received": supportReceivedTemplate,
   "support-ack": supportAckTemplate,
+  "billing-receipt": billingReceiptTemplate,
+  "billing-payment-failed": billingPaymentFailedTemplate,
+  "billing-renewal-reminder": billingRenewalReminderTemplate,
 } as const;
 
 export type TemplateName = keyof typeof Templates;
@@ -26,4 +38,7 @@ export type TemplateData = {
   welcome: WelcomeData;
   "support-received": SupportReceivedData;
   "support-ack": SupportAckData;
+  "billing-receipt": BillingReceiptData;
+  "billing-payment-failed": BillingPaymentFailedData;
+  "billing-renewal-reminder": BillingRenewalReminderData;
 };

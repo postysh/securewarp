@@ -167,6 +167,8 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
     permission_changed: true,
     collaborator_joined: true,
     workspace_transferred: true,
+    billing_receipts: true,
+    billing_renewal_reminder: true,
   });
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [sidebarDefault, setSidebarDefault] = useState(() =>
@@ -714,6 +716,18 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
             <SettingRow label="Workspace transferred" description="When ownership of a workspace is transferred to you">
               <Toggle checked={notifPrefs.workspace_transferred !== false} onChange={() => togglePref("workspace_transferred")} />
             </SettingRow>
+            <div className="mt-6 mb-3">
+              <p className="text-[11px] font-mono uppercase text-text-disabled tracking-wider">Billing</p>
+            </div>
+            <SettingRow label="Billing receipts" description="Receipt by email each time your plan renews">
+              <Toggle checked={notifPrefs.billing_receipts !== false} onChange={() => togglePref("billing_receipts")} />
+            </SettingRow>
+            <SettingRow label="Renewal reminders" description="Heads-up email a few days before your plan renews">
+              <Toggle checked={notifPrefs.billing_renewal_reminder !== false} onChange={() => togglePref("billing_renewal_reminder")} />
+            </SettingRow>
+            <p className="text-[11px] text-text-tertiary mt-3 leading-relaxed">
+              Payment failure alerts are always sent. A silent failed charge would silently downgrade your plan, so we send those regardless of preferences.
+            </p>
           </div>
         );
       }

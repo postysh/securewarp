@@ -6,11 +6,18 @@ import { logError } from "@/lib/log";
 
 const UpdateSchema = z.object({
   displayName: z.string().max(100).optional(),
+  // All known notification keys. Zod strips unknown fields by default,
+  // so any new pref added in the UI MUST be added here too — otherwise
+  // the toggle silently no-ops.
   notificationPrefs: z
     .object({
       file_shared: z.boolean().optional(),
       file_unshared: z.boolean().optional(),
       permission_changed: z.boolean().optional(),
+      collaborator_joined: z.boolean().optional(),
+      workspace_transferred: z.boolean().optional(),
+      billing_receipts: z.boolean().optional(),
+      billing_renewal_reminder: z.boolean().optional(),
     })
     .optional(),
 });
@@ -33,6 +40,10 @@ export async function GET() {
         file_shared: true,
         file_unshared: true,
         permission_changed: true,
+        collaborator_joined: true,
+        workspace_transferred: true,
+        billing_receipts: true,
+        billing_renewal_reminder: true,
       },
       onboarded: data?.onboarded_at != null,
       totpEnabled: Boolean(data?.totp_secret),
