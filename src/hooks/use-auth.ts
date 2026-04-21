@@ -156,7 +156,7 @@ export function useAuth() {
     }
   }
 
-  async function login(email: string, password: string, turnstileToken?: string) {
+  async function login(email: string, password: string) {
     setState({ loading: true, error: null, step: "Initializing...", recoveryKey: null, userKeys: null, suspended: null, pending2FA: null });
 
     try {
@@ -169,7 +169,7 @@ export function useAuth() {
       const initRes = await fetch("/api/auth/login/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, clientPublicEphemeral, turnstileToken }),
+        body: JSON.stringify({ email, clientPublicEphemeral }),
       });
 
       const initData = await initRes.json();
@@ -361,7 +361,7 @@ export function useAuth() {
     }
   }
 
-  async function recover(email: string, recoveryWordsRaw: string, newPassword: string, turnstileToken?: string) {
+  async function recover(email: string, recoveryWordsRaw: string, newPassword: string) {
     setState({ loading: true, error: null, step: "Verifying recovery key...", recoveryKey: null, userKeys: null, suspended: null, pending2FA: null });
 
     try {
@@ -382,7 +382,7 @@ export function useAuth() {
       const verifyRes = await fetch("/api/auth/recover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "verify", email, recoveryKeyHash, turnstileToken }),
+        body: JSON.stringify({ action: "verify", email, recoveryKeyHash }),
       });
 
       const verifyResult = await verifyRes.json();

@@ -7,7 +7,6 @@ import { createSession } from "@/lib/auth/session";
 import { checkRateLimit, resetRateLimit } from "@/lib/auth/rate-limit";
 import { consumeRecoveryToken } from "@/lib/auth/used-tokens";
 import { normalizeEmail } from "@/lib/auth/email";
-import { verifyTurnstile } from "@/lib/auth/turnstile";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -24,7 +23,6 @@ const VerifySchema = z.object({
   action: z.literal("verify"),
   email: z.string().email(),
   recoveryKeyHash: z.string().min(1),
-  turnstileToken: z.string().optional(),
 });
 
 // Step 2: Update credentials — requires valid recovery token
@@ -50,17 +48,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Invalid data" }, { status: 400 });
       }
 
-      const { recoveryKeyHash, turnstileToken } = parsed.data;
+      const { recoveryKeyHash } = parsed.data;
       // Normalize so rate-limit keys + user lookups never vary by case.
       const email = normalizeEmail(parsed.data.email);
-
-      const turnstile = await verifyTurnstile(turnstileToken, request);
-      if (!turnstile.ok) {
-        return NextResponse.json(
-          { error: "Verification required", reason: turnstile.reason },
-          { status: 403 }
-        );
-      }
 
       // Rate limit — 5 attempts per hour per normalized email
       if (!(await checkRateLimit(`recover:${email}`, 5))) {

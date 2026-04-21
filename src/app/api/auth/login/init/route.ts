@@ -5,7 +5,6 @@ import { generateServerEphemeral } from "@/lib/srp/server";
 import { createSrpSession } from "@/lib/db/srp-sessions";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { normalizeEmail } from "@/lib/auth/email";
-import { verifyTurnstile } from "@/lib/auth/turnstile";
 import { logError } from "@/lib/log";
 
 export async function POST(request: Request) {
@@ -20,19 +19,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const { clientPublicEphemeral, turnstileToken } = parsed.data;
+    const { clientPublicEphemeral } = parsed.data;
     // Normalize so rate-limit keys and user lookups never vary by case.
     const email = normalizeEmail(parsed.data.email);
-
-    // Turnstile challenge (no-op if not provisioned). Check BEFORE the
-    // rate limit so bots don't fill rate-limit buckets either.
-    const turnstile = await verifyTurnstile(turnstileToken, request);
-    if (!turnstile.ok) {
-      return NextResponse.json(
-        { error: "Verification required", reason: turnstile.reason },
-        { status: 403 }
-      );
-    }
 
     // Rate limit by normalized email
     if (!(await checkRateLimit(`login:${email}`, 10))) {

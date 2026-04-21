@@ -24,7 +24,6 @@ export const RegisterSchema = z.object({
 export const LoginInitSchema = z.object({
   email: z.string().email(),
   clientPublicEphemeral: z.string().min(1),
-  turnstileToken: z.string().optional(),
 });
 
 export const LoginVerifySchema = z.object({

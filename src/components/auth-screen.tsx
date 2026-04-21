@@ -91,17 +91,14 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
     if (meta) setLockCache(meta);
   }, [mode]);
 
-  // Turnstile token for the main (login/signup) form. A second slot
-  // exists for the recovery form below so the two widgets don't share
-  // state across tabs.
-  const [primaryTurnstileToken, setPrimaryTurnstileToken] = useState<string | null>(null);
-  const [recoveryTurnstileToken, setRecoveryTurnstileToken] = useState<string | null>(null);
-  const primaryTurnstileResetRef = useRef<(() => void) | null>(null);
-  const recoveryTurnstileResetRef = useRef<(() => void) | null>(null);
+  // Turnstile token for signup only. Login + recovery are already
+  // protected by SRP + Argon2id + rate limiter, which make automated
+  // attacks expensive enough that Turnstile would be cosmetic there.
+  const [signupTurnstileToken, setSignupTurnstileToken] = useState<string | null>(null);
+  const signupTurnstileResetRef = useRef<(() => void) | null>(null);
 
   const turnstileRequired = isTurnstileEnabled();
-  const primaryReady = !turnstileRequired || primaryTurnstileToken !== null;
-  const recoveryReady = !turnstileRequired || recoveryTurnstileToken !== null;
+  const signupReady = mode !== "signup" || !turnstileRequired || signupTurnstileToken !== null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,14 +118,14 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
       if (password.length < 8) {
         return;
       }
-      await auth.signup(email, password, primaryTurnstileToken ?? undefined);
+      await auth.signup(email, password, signupTurnstileToken ?? undefined);
+      // Turnstile tokens are single-use. Reset on submit so the user
+      // can retry after an error without page refresh.
+      setSignupTurnstileToken(null);
+      signupTurnstileResetRef.current?.();
     } else {
-      await auth.login(email, password, primaryTurnstileToken ?? undefined);
+      await auth.login(email, password);
     }
-    // Turnstile tokens are single-use. Reset on submit so the user
-    // can retry after an error without page refresh.
-    setPrimaryTurnstileToken(null);
-    primaryTurnstileResetRef.current?.();
   };
 
   // "Use a different account" — wipes the lock cache and returns to
@@ -415,11 +412,11 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                 </div>
               )}
 
-              {!lockCache && (
+              {!lockCache && mode === "signup" && (
                 <TurnstileChallenge
-                  onToken={(t) => setPrimaryTurnstileToken(t)}
-                  onExpire={() => setPrimaryTurnstileToken(null)}
-                  resetRef={primaryTurnstileResetRef}
+                  onToken={(t) => setSignupTurnstileToken(t)}
+                  onExpire={() => setSignupTurnstileToken(null)}
+                  resetRef={signupTurnstileResetRef}
                 />
               )}
 
@@ -427,13 +424,13 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                 type="submit"
                 disabled={
                   auth.loading ||
-                  (lockCache ? unlockPassword.length === 0 : !primaryReady || (mode === "signup" && password !== confirmPassword))
+                  (lockCache ? unlockPassword.length === 0 : !signupReady || (mode === "signup" && password !== confirmPassword))
                 }
                 className="w-full flex items-center justify-center gap-2 h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {auth.loading ? (
                   <span className="text-[12px]">{auth.step || "Processing..."}</span>
-                ) : !lockCache && !primaryReady ? (
+                ) : !lockCache && !signupReady ? (
                   <span className="text-[12px]">Verifying human…</span>
                 ) : (
                   <>
@@ -506,10 +503,7 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                   recoveryEmail,
                   recoveryWords,
                   newPassword,
-                  recoveryTurnstileToken ?? undefined
                 );
-                setRecoveryTurnstileToken(null);
-                recoveryTurnstileResetRef.current?.();
               }}
               className="px-5 py-5 space-y-4"
             >
@@ -576,12 +570,6 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                 )}
               </div>
 
-              <TurnstileChallenge
-                onToken={(t) => setRecoveryTurnstileToken(t)}
-                onExpire={() => setRecoveryTurnstileToken(null)}
-                resetRef={recoveryTurnstileResetRef}
-              />
-
               <div className="flex items-center justify-end gap-2 pt-2 flex-wrap">
                 <button
                   type="button"
@@ -595,7 +583,6 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                   type="submit"
                   disabled={
                     auth.loading ||
-                    !recoveryReady ||
                     (newPassword !== confirmNewPassword) ||
                     !recoveryWords.trim()
                   }
@@ -603,9 +590,7 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                 >
                   {auth.loading
                     ? (auth.step || "Processing...")
-                    : !recoveryReady
-                      ? "Verifying human…"
-                      : "Recover account"}
+                    : "Recover account"}
                 </button>
               </div>
             </form>
