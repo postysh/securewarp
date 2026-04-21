@@ -30,6 +30,18 @@ const chillax = localFont({
 export const metadata: Metadata = {
   title: "Securewarp | Cloud storage, not cloud surveillance",
   description: "Zero-knowledge encrypted cloud storage",
+  // Explicit icon URLs with a version query so browsers that cache
+  // favicons outside the HTTP cache (Safari's dedicated favicon
+  // store, Chrome's SQLite DB) get a fresh fetch on any version
+  // bump. Change the `v=` value when the logo changes.
+  icons: {
+    icon: [
+      { url: "/icon.svg?v=2", type: "image/svg+xml" },
+    ],
+    apple: [
+      { url: "/apple-icon?v=2", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 export const viewport: Viewport = {

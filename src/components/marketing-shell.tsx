@@ -198,22 +198,21 @@ export function HeaderBar() {
   }, [menuOpen]);
 
   const linkStyle: React.CSSProperties = {
-    padding: "8px 16px",
+    padding: "6px 12px",
     fontSize: 11,
     color: TEXT,
     textDecoration: "none",
     fontWeight: 500,
-    fontFamily: BRAND_MONO,
+    // System monospace (SF Mono on Mac, Consolas on Windows) so the
+    // letterforms render tight and condensed rather than Geist Mono's
+    // wider geometric shapes.
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     textTransform: "uppercase",
     letterSpacing: "0.1em",
     borderRadius: 8,
-    // Base border + transition live on inline `style` so they're
-    // present in the SSR'd HTML — otherwise the styled-jsx `:hover`
-    // rule animates in from "no border" on first paint and flashes.
-    // `:hover` / `:active` CSS below uses `!important` to override
-    // the inline `border-color: transparent`.
     border: "1px solid transparent",
-    transition: "border-color 160ms ease, background-color 160ms ease",
+    opacity: 0.6,
+    transition: "opacity 160ms ease, border-color 160ms ease, background-color 160ms ease",
   };
 
   const drawerLinkStyle: React.CSSProperties = {
@@ -288,7 +287,7 @@ export function HeaderBar() {
         </div>
         <nav
           className="nav-bar header-nav-desktop"
-          style={{ display: "flex", alignItems: "center", gap: 0 }}
+          style={{ display: "flex", alignItems: "center", gap: 4 }}
         >
           <Link href="/about" className="nav-link" style={linkStyle}>
             About
@@ -399,6 +398,7 @@ export function HeaderBar() {
       )}
       <style jsx global>{`
         .nav-bar .nav-link:hover {
+          opacity: 1 !important;
           border-color: ${BORDER} !important;
         }
         .nav-bar .nav-link:active {
