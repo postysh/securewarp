@@ -225,8 +225,14 @@ export async function restoreFileVersion(params: {
   // so forward-secrecy against the source version is not preserved
   // for restored content. Acceptable because restore is a rare,
   // user-initiated action and the alternative (client download +
-  // fresh re-upload) doubles R2 egress on every restore. Documented
-  // in AGENTS.md.
+  // fresh re-upload) doubles R2 egress on every restore.
+  //
+  // parent_keys_claim is ALSO copied from the source so inherited-
+  // access readers stay consistent. The claim bundles {sessionKey,
+  // childPrivHier}; if we only copied the session-key wrap, the
+  // files-row PKC would still point at whatever claim was current
+  // pre-restore (i.e. v2's) and workspace members would pull the
+  // wrong session key via inheritance. See AGENTS.md §22.
   const newVersion = await createFileVersion({
     fileId: params.fileId,
     versionNumber: nextNumber,
@@ -236,6 +242,8 @@ export async function restoreFileVersion(params: {
     createdByUserId: params.actorUserId,
     encryptedSessionKeyByFile: source.encrypted_session_key_by_file as string,
     sessionKeyNonce: (source.session_key_nonce as string | null) ?? "",
+    parentKeysClaim: (source.parent_keys_claim as string | null) ?? null,
+    parentKeysClaimWrappedBy: (source.parent_keys_claim_wrapped_by as string | null) ?? null,
   });
 
   if (sourceChunks && sourceChunks.length > 0) {

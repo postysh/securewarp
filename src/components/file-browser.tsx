@@ -951,7 +951,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               </button>
             </>
           )}
-          {fileOps.viewMode === "trash" && fileOps.files.length > 0 && (
+          {fileOps.viewMode === "trash" &&
+            fileOps.files.length > 0 &&
+            // Workspace trash: only admins can empty (editors can't
+            // purge even their own items there, to keep the rule
+            // consistent — editors trash, admins purge). Personal
+            // trash: always available to the caller (own files).
+            (!fileOps.activeWorkspace || fileOps.activeWorkspace.role === "admin") && (
             <button
               onClick={() => setEmptyTrashOpen(true)}
               className="flex items-center gap-1.5 h-[30px] px-3 rounded-[8px] text-[12px] font-medium text-accent-red border border-accent-red/30 hover:bg-accent-red/10 transition-colors cursor-pointer"
@@ -2018,17 +2024,39 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           )}
           <div className="h-px bg-border-tertiary my-1" />
           {fileOps.viewMode === "trash" ? (
-            <button
-              onClick={() => {
-                if (!contextMenu) return;
-                const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
-                if (full) setPurgeTarget(full);
-                setContextMenu(null);
-              }}
-              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
-            >
-              <HugeiconsIcon icon={Delete02Icon} size={14} /> Delete forever
-            </button>
+            (() => {
+              // Owner + workspace admin only. Editors can trash/restore
+              // but not purge — matches Google Drive / Dropbox / Box
+              // where purge is elevated because it's irreversible and
+              // destroys the original owner's content.
+              const full = contextMenu
+                ? fileOps.files.find((f) => f.id === contextMenu.fileId!)
+                : null;
+              const isFileOwner = !!keys && full?.ownerEmail === keys.email;
+              const isWorkspaceAdmin = fileOps.activeWorkspace?.role === "admin";
+              const canPurge = isFileOwner || isWorkspaceAdmin;
+              return canPurge ? (
+                <button
+                  onClick={() => {
+                    if (full) setPurgeTarget(full);
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
+                >
+                  <HugeiconsIcon icon={Delete02Icon} size={14} /> Delete forever
+                </button>
+              ) : (
+                <div
+                  className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-disabled cursor-not-allowed"
+                  title="Only the file owner or a workspace admin can permanently delete shared files."
+                >
+                  <HugeiconsIcon icon={Delete02Icon} size={14} /> Delete forever
+                  <span className="ml-auto text-[10px] text-text-disabled font-mono uppercase tracking-wider">
+                    owner
+                  </span>
+                </div>
+              );
+            })()
           ) : fileOps.viewMode === "shared" ? (
             <button
               onClick={async () => {

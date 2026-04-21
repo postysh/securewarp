@@ -185,6 +185,12 @@ export async function POST(request: Request) {
         createdByUserId: session.userId,
         encryptedSessionKeyByFile: data.encryptedSessionKeyByFile,
         sessionKeyNonce: data.sessionKeyNonce,
+        // Store PKC on the version row too so a future restore can
+        // copy it back to the files row — restore needs the claim
+        // wrapped under THIS version's session key to keep inherited
+        // readers in sync after the session key rotates.
+        parentKeysClaim: data.parentKeysClaim ?? null,
+        parentKeysClaimWrappedBy: data.parentKeysClaimWrappedBy ?? null,
       });
 
       // Generate presigned URLs for all chunks. Storage keys now

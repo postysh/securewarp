@@ -55,21 +55,32 @@ export async function POST(
 
     // Point `files` at the new version so lists render the restored
     // metadata immediately.
+    const filesUpdate: Record<string, unknown> = {
+      current_version_number: newVersion.version_number,
+      version_count: newVersion.version_number,
+      encrypted_metadata: newVersion.encrypted_metadata,
+      size_bytes: newVersion.size_bytes,
+      chunk_count: newVersion.chunk_count,
+      // Phase 4: mirror the restored version's session-key wrap up
+      // to the files row so list + download flows resolve without
+      // an extra query.
+      encrypted_session_key_by_file: newVersion.encrypted_session_key_by_file,
+      session_key_nonce: newVersion.session_key_nonce,
+      updated_at: new Date().toISOString(),
+    };
+    // parent_keys_claim ALSO has to come along when the source
+    // version has one — inherited-access readers pull the session
+    // key out of the claim, so leaving the pre-restore claim in
+    // place would have workspace members decrypt with the wrong key.
+    // Only overwrite when the source had a claim: restoring a pre-
+    // PKC-tracking version shouldn't blank a non-null files PKC.
+    if (newVersion.parent_keys_claim && newVersion.parent_keys_claim_wrapped_by) {
+      filesUpdate.parent_keys_claim = newVersion.parent_keys_claim;
+      filesUpdate.parent_keys_claim_wrapped_by = newVersion.parent_keys_claim_wrapped_by;
+    }
     const { error: updateErr } = await supabase
       .from("files")
-      .update({
-        current_version_number: newVersion.version_number,
-        version_count: newVersion.version_number,
-        encrypted_metadata: newVersion.encrypted_metadata,
-        size_bytes: newVersion.size_bytes,
-        chunk_count: newVersion.chunk_count,
-        // Phase 4: mirror the restored version's session-key wrap up
-        // to the files row so list + download flows resolve without
-        // an extra query.
-        encrypted_session_key_by_file: newVersion.encrypted_session_key_by_file,
-        session_key_nonce: newVersion.session_key_nonce,
-        updated_at: new Date().toISOString(),
-      })
+      .update(filesUpdate)
       .eq("id", parsed.data.id)
       .eq("owner_id", session.userId);
     if (updateErr) throw updateErr;

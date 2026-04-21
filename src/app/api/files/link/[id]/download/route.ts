@@ -50,7 +50,7 @@ export async function GET(
     const { data: file, error } = await supabase
       .from("files")
       .select(
-        "id, owner_id, is_folder, encrypted_metadata, storage_key, encryption_nonce, public_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, owner:users!files_owner_id_fkey(public_encryption_key)"
+        "id, owner_id, is_folder, encrypted_metadata, storage_key, encryption_nonce, public_hierarchical_key, encrypted_session_key_by_file, session_key_nonce, current_version_number, owner:users!files_owner_id_fkey(public_encryption_key)"
       )
       .eq("id", parsedQuery.data.fileId)
       .eq("upload_complete", true)
@@ -69,6 +69,7 @@ export async function GET(
       public_hierarchical_key: string;
       encrypted_session_key_by_file: string;
       session_key_nonce: string;
+      current_version_number: number;
       owner: { public_encryption_key: string } | null;
     };
     const row = file as unknown as FileRow;
@@ -76,11 +77,26 @@ export async function GET(
       return NextResponse.json({ error: "Folders aren't downloadable" }, { status: 400 });
     }
 
-    const { data: chunks } = await supabase
+    // Phase 4: resolve the current version so we only return ITS
+    // chunks. Without this filter, a file with multiple versions
+    // returns every version's chunks and the client tries to decrypt
+    // old ciphertext with the current session key → "invalid tag."
+    // Same fix as authenticated chunk-download.
+    const { data: currentVersion } = await supabase
+      .from("file_versions")
+      .select("id")
+      .eq("file_id", row.id)
+      .eq("version_number", row.current_version_number)
+      .single();
+
+    const chunksQuery = supabase
       .from("file_chunks")
       .select("sequence, storage_key, encryption_nonce, is_final")
       .eq("file_id", row.id)
       .order("sequence");
+    const { data: chunks } = currentVersion?.id
+      ? await chunksQuery.eq("version_id", currentVersion.id)
+      : await chunksQuery;
 
     type Chunk = {
       sequence: number;

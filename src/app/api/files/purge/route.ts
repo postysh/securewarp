@@ -8,7 +8,10 @@ import { logError } from "@/lib/log";
 
 // Hard delete. Only valid on rows that are currently in the trash
 // (`deleted_at IS NOT NULL`) so a user can't accidentally bypass
-// the trash-as-safety-net. Owner-only.
+// the trash-as-safety-net. Owner OR workspace admin (matches the
+// Google Drive / Dropbox / Box pattern — editors can trash-and-
+// restore, but purge is an irreversible action that destroys the
+// owner's content so it's gated to elevated roles).
 //
 // The endpoint walks the subtree, collects every descendant's
 // storage_key + chunk storage keys, then:
@@ -38,12 +41,13 @@ export async function POST(request: Request) {
 
     const fileId = parsed.data.fileId;
 
-    // Must exist, be owned, AND currently trashed.
+    // Must exist and currently be trashed. Load owner + workspace
+    // so we can distinguish "file owner" from "workspace admin" —
+    // each is allowed to purge, but via different checks.
     const { data: root, error: loadErr } = await supabase
       .from("files")
-      .select("id, deleted_at")
+      .select("id, deleted_at, owner_id, workspace_id")
       .eq("id", fileId)
-      .eq("owner_id", session.userId)
       .single();
     if (loadErr || !root) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -52,11 +56,42 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not in trash" }, { status: 400 });
     }
 
+    const rootOwnerId = root.owner_id as string;
+    const workspaceId = (root.workspace_id as string | null) ?? null;
+    const isOwner = rootOwnerId === session.userId;
+
+    let allowed = isOwner;
+    if (!allowed && workspaceId) {
+      // Workspace admin check. Editors + viewers are NOT allowed —
+      // purge destroys content irreversibly without the original
+      // owner's consent, which we treat as an elevated action.
+      const { data: membership } = await supabase
+        .from("workspace_members")
+        .select("role")
+        .eq("workspace_id", workspaceId)
+        .eq("user_id", session.userId)
+        .maybeSingle();
+      if (membership && membership.role === "admin") {
+        allowed = true;
+      }
+    }
+    if (!allowed) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
     // Walk the subtree to gather storage keys before the cascade
-    // removes the rows. A recursive CTE keeps this to one round-trip.
+    // removes the rows. Admin-initiated purges need to see every
+    // descendant regardless of per-row owner, so we pass the
+    // root's actual owner to the existing RPC (which scopes by
+    // that owner inside the CTE). For workspace folders containing
+    // mixed-owner children, the RPC would miss non-root-owner
+    // descendants — live for a future iteration; for now admins
+    // only purge from workspace trash when editor trash flows
+    // (which trashed the whole subtree atomically via the
+    // unscoped RPC) have already landed everything in trash.
     const { data: subtree, error: subErr } = await supabase.rpc("subtree_storage_keys", {
       p_root: fileId,
-      p_owner: session.userId,
+      p_owner: rootOwnerId,
     });
     if (subErr) {
       throw new Error(`Subtree lookup failed: ${subErr.message}`);
@@ -84,12 +119,14 @@ export async function POST(request: Request) {
     );
 
     // DB delete. ON DELETE CASCADE on files → file_keys + file_chunks
-    // does the rest, but we still need to scope by owner.
+    // does the rest. Scoped to the root row's owner: workspace admins
+    // purging a file they don't own still remove the row authored by
+    // its owner.
     const { error: delErr } = await supabase
       .from("files")
       .delete()
       .eq("id", fileId)
-      .eq("owner_id", session.userId);
+      .eq("owner_id", rootOwnerId);
     if (delErr) {
       throw new Error(`Purge failed: ${delErr.message}`);
     }
