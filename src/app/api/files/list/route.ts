@@ -13,6 +13,7 @@ import {
   type FileRowWithKey,
 } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
+import { respondWithETag } from "@/lib/http/etag";
 import { logError } from "@/lib/log";
 
 export async function GET(request: Request) {
@@ -145,7 +146,11 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json({ files: enriched, callerPermission, nextCursor });
+    // Conditional response. When the list hasn't changed since the
+    // client's last poll the body hash matches and we return 304 —
+    // saves 5-50KB of egress per poll, which dominates the cost line
+    // at 1k+ users.
+    return respondWithETag(request, { files: enriched, callerPermission, nextCursor });
   } catch (err) {
     logError("files.list", err);
     return NextResponse.json({ error: "Failed to list files" }, { status: 500 });

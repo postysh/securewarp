@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
 import { getEntitlements } from "@/lib/billing/customers";
+import { respondWithETag } from "@/lib/http/etag";
 import { logError } from "@/lib/log";
 
 const CreateSchema = z.object({
@@ -12,7 +13,7 @@ const CreateSchema = z.object({
   rootFolderId: z.string().uuid(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -72,7 +73,10 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ workspaces });
+    // Conditional response — the polling layer re-hits this every
+    // 20s per user. Most calls return "nothing changed" so a 304
+    // saves the full workspace-list payload each time.
+    return respondWithETag(request, { workspaces });
   } catch (err) {
     logError("workspaces.list", err);
     return NextResponse.json({ error: "Failed" }, { status: 500 });
