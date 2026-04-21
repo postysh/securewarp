@@ -21,6 +21,23 @@ export default function DriveClient() {
   });
   const [keys, setKeys] = useState<UserKeys | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [removedFromWorkspace, setRemovedFromWorkspace] = useState<string | null>(null);
+
+  // The workspace-switcher polling detects when the active workspace
+  // disappears from the caller's membership list (kicked out, workspace
+  // deleted, role changed to revoked). It dispatches this custom event
+  // so we can surface a banner BEFORE the user tries another workspace-
+  // scoped action and hits a cascade of 404s.
+  useEffect(() => {
+    const onRemoved = (e: Event) => {
+      const name = (e as CustomEvent<{ workspaceName?: string }>).detail
+        ?.workspaceName;
+      setRemovedFromWorkspace(name ?? "that workspace");
+    };
+    window.addEventListener("securewarp-workspace-removed", onRemoved);
+    return () =>
+      window.removeEventListener("securewarp-workspace-removed", onRemoved);
+  }, []);
 
   useEffect(() => {
     // Decrypted private keys live only in sessionStorage — per-tab,
@@ -169,6 +186,37 @@ export default function DriveClient() {
                 overflow: "hidden",
               }}
             />
+          )}
+          {removedFromWorkspace && (
+            <div
+              role="alertdialog"
+              aria-modal="true"
+              className="fixed inset-0 z-[9999] flex items-center justify-center"
+            >
+              <div className="absolute inset-0 bg-bg-scrim backdrop-blur-sm animate-fade-in" />
+              <div
+                className="relative w-full max-w-[420px] mx-4 rounded-2xl bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
+                style={{ boxShadow: "var(--shadow-l2)" }}
+              >
+                <div className="px-6 pt-6 pb-4">
+                  <div className="text-[16px] font-semibold text-text-primary">
+                    Removed from workspace
+                  </div>
+                  <p className="mt-2 text-[13px] text-text-secondary leading-relaxed">
+                    Your access to <strong>{removedFromWorkspace}</strong> was
+                    revoked. You&apos;ve been returned to your personal drive.
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2 px-6 py-4 border-t border-border-tertiary bg-bg-side">
+                  <button
+                    onClick={() => setRemovedFromWorkspace(null)}
+                    className="h-9 px-4 rounded-lg bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer"
+                  >
+                    Got it
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
           <div className="flex h-full bg-bg-side">
             {/* Desktop sidebar — inline */}

@@ -11,6 +11,7 @@ import { Tooltip } from "./tooltip";
 import { useFilesContext } from "@/hooks/use-files";
 import { WorkspaceSettings } from "./workspace-settings";
 import { buildWorkspaceFolder } from "@/lib/crypto/workspace-folder";
+import { usePolling } from "@/hooks/use-polling";
 
 interface Workspace {
   id: string;
@@ -56,24 +57,58 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
-  useEffect(() => {
-    fetch("/api/workspaces").then((r) => r.json()).then((d) => {
-      if (d.workspaces) {
-        setWorkspaces(d.workspaces);
-        // Validate the saved workspace still exists
-        try {
-          const savedStr = sessionStorage.getItem("securewarp_active_workspace");
-          if (savedStr) {
-            const saved = JSON.parse(savedStr);
-            const ws = d.workspaces.find((w: Workspace) => w.id === saved.id);
-            if (!ws) sessionStorage.removeItem("securewarp_active_workspace");
-          }
-        } catch {
+  // Initial load + polling refresh. Polling catches three events
+  // without WebSockets:
+  //   - A new invite landed → workspace appears in the dropdown.
+  //   - The user got removed from their active workspace → we kick
+  //     them back to personal drive with a toast.
+  //   - Role changed (admin demoted to editor) → UI gating updates
+  //     on next poll tick.
+  // 20s interval is a reasonable latency/traffic tradeoff for events
+  // that a user doesn't expect to feel "instant."
+  const refreshWorkspaceList = useCallback(async () => {
+    try {
+      const res = await fetch("/api/workspaces");
+      if (!res.ok) return;
+      const d = await res.json();
+      if (!d.workspaces) return;
+      setWorkspaces(d.workspaces);
+
+      // Detect: the user's active workspace is no longer in the list
+      // (member was removed, workspace deleted, etc.). Bounce them
+      // out before they try another workspace-scoped action and hit
+      // a 404 cascade.
+      try {
+        const savedStr = sessionStorage.getItem("securewarp_active_workspace");
+        if (!savedStr) return;
+        const saved = JSON.parse(savedStr);
+        const stillMember = (d.workspaces as Workspace[]).find(
+          (w) => w.id === saved.id,
+        );
+        if (!stillMember) {
           sessionStorage.removeItem("securewarp_active_workspace");
+          setActiveId(null);
+          fileOps.leaveWorkspace();
+          // Fire a window event so any listener (e.g. a toast/banner)
+          // can surface the reason. Keeps this component free of
+          // toast-library coupling.
+          window.dispatchEvent(
+            new CustomEvent("securewarp-workspace-removed", {
+              detail: { workspaceName: saved.name },
+            }),
+          );
         }
+      } catch {
+        sessionStorage.removeItem("securewarp_active_workspace");
       }
-    }).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    } catch { /* silent — next poll retries */ }
+  }, [fileOps]);
+
+  useEffect(() => {
+    void refreshWorkspaceList();
+  }, [refreshWorkspaceList]);
+
+  usePolling(refreshWorkspaceList, 20_000);
 
   const updatePos = useCallback(() => {
     if (!btnRef.current) return;

@@ -49,6 +49,7 @@ import { WorkspaceActivityPage } from "./workspace-activity-modal";
 import { FileDetailsModal } from "./file-details-modal";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
+import { usePolling } from "@/hooks/use-polling";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { userLabel, userInitials, userColor } from "@/lib/display";
 import { useUserKeys } from "@/hooks/use-user-keys";
@@ -454,6 +455,39 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     setContextMenu(null);
     setFilterLabel(null);
   }, [fileOps.viewMode, fileOps.currentFolder]);
+
+  // Background poll for the current folder so new uploads from other
+  // workspace members appear without a manual refresh. fetchFiles
+  // already has stale-while-revalidate semantics (cache hit returns
+  // instantly, network response silently updates state), so this
+  // produces no loading spinner or flicker. 20s is a reasonable
+  // balance between latency and request volume at scale.
+  //
+  // We intentionally skip polling when a context menu is open (user
+  // is mid-action) and when a modal is front-and-center, to avoid
+  // the list mutating under the user's hover.
+  const anyModalOpen =
+    !!previewFileId ||
+    !!versionHistoryTarget ||
+    !!renameTarget ||
+    !!purgeTarget ||
+    !!shareTarget ||
+    !!moveTarget ||
+    !!detailsTarget ||
+    emptyTrashOpen ||
+    newFolderOpen ||
+    workspaceInviteOpen ||
+    workspaceSettingsOpen ||
+    membersOpen ||
+    commandPaletteOpen;
+  const pollEnabled = !!keys && !contextMenu && !anyModalOpen;
+  usePolling(
+    useCallback(() => {
+      void fileOps.fetchFiles(fileOps.currentFolder, fileOps.viewMode);
+    }, [fileOps]),
+    20_000,
+    { enabled: pollEnabled },
+  );
 
 
   // Fetch pinned IDs on mount
