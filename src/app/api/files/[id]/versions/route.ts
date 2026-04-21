@@ -6,13 +6,18 @@ import { logError } from "@/lib/log";
 
 /**
  * GET /api/files/[id]/versions — list every version of a file in
- * newest-first order. Gated by the caller's effective permission on
- * the file (owner, editor, viewer — anyone with access can browse
- * versions they could read when each version existed).
+ * newest-first order. Owner + editors only: viewers can't see edit
+ * history because a file shared with them at vN may have carried
+ * sensitive content in vN-1 that the owner redacted.
  *
- * The response ships encrypted_metadata as-is: the client decrypts
- * locally with the shared session key (same key across all versions),
- * so the server never learns old filenames.
+ * Crypto v2 Phase 4: each version now has its own session-key wrap
+ * (fresh key per new-version upload). The response ships each
+ * version's `encryptedSessionKeyByFile` + `sessionKeyNonce` so the
+ * client can unwrap per-version and decrypt that version's
+ * `encryptedMetadata`. Historical versions' wraps are cryptographically
+ * reachable from the file's hier private key (which the caller has
+ * via their `file_keys` row); forward secrecy applies to revoked
+ * users, not current collaborators browsing history.
  */
 
 const PARAMS = z.object({ id: z.string().uuid() });
@@ -33,11 +38,11 @@ export async function GET(
       return NextResponse.json({ error: "Invalid id" }, { status: 400 });
     }
 
-    // Access check: any permission level can read versions. If the
-    // user has no row on this file at all, return 404 so we don't
-    // leak existence.
+    // Access gate: owner or editor only. Viewers lose access (404 to
+    // avoid leaking version-history existence to a user who can read
+    // the current file but nothing behind it).
     const perm = await getEffectivePermission(parsed.data.id, session.userId);
-    if (!perm) {
+    if (!perm || perm === "viewer") {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
@@ -48,6 +53,8 @@ export async function GET(
         id: v.id,
         versionNumber: v.version_number,
         encryptedMetadata: v.encrypted_metadata,
+        encryptedSessionKeyByFile: v.encrypted_session_key_by_file,
+        sessionKeyNonce: v.session_key_nonce ?? "",
         sizeBytes: v.size_bytes,
         chunkCount: v.chunk_count,
         createdAt: v.created_at,

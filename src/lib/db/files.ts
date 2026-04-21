@@ -37,6 +37,12 @@ export interface FileRow {
   deleted_at: string | null;
   is_workspace_root: boolean;
   workspace_id: string | null;
+  // Monotonic version pointer. Bumped on every new-version finalize
+  // and on restore. Phase 4 — used by chunk-download to filter
+  // file_chunks to the current version's rows only.
+  current_version_number: number;
+  version_count: number;
+  chunk_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +79,13 @@ export interface FileVersionRow {
   chunk_count: number;
   created_at: string;
   created_by_user_id: string | null;
+  // Crypto v2 Phase 4 — per-version session key. Every new-version
+  // upload generates a fresh session key, wrapped to the file's
+  // existing pub hier keys. Old versions keep their historical wraps
+  // so listVersions still resolves. `session_key_nonce` is empty for
+  // v2 wraps (hybrid blob embeds its own nonce).
+  encrypted_session_key_by_file: string;
+  session_key_nonce: string | null;
 }
 
 /**
@@ -80,10 +93,12 @@ export interface FileVersionRow {
  * part of the initial upload flow; v2+ are created when a user uploads
  * a replacement of existing content.
  *
- * Shared session key model: every version reuses the file's existing
- * session_key + public_hierarchical_key, so file_keys rows stay valid
- * across all versions. Only the ciphertext chunks and the metadata
- * snapshot differ from version to version.
+ * Crypto v2 Phase 4: every version carries its own session-key wrap.
+ * v1 reuses the wrap the upload flow already wrote to the files row;
+ * v2+ generate a fresh session key on the client and ship its wrap
+ * here. The file's hierarchical keypair is unchanged across versions
+ * (so file_keys rows stay valid), only the symmetric session key
+ * rotates.
  */
 export async function createFileVersion(data: {
   fileId: string;
@@ -92,6 +107,8 @@ export async function createFileVersion(data: {
   sizeBytes: number;
   chunkCount: number;
   createdByUserId: string;
+  encryptedSessionKeyByFile: string;
+  sessionKeyNonce: string;
 }): Promise<FileVersionRow> {
   const { data: row, error } = await supabase
     .from("file_versions")
@@ -102,6 +119,8 @@ export async function createFileVersion(data: {
       size_bytes: data.sizeBytes,
       chunk_count: data.chunkCount,
       created_by_user_id: data.createdByUserId,
+      encrypted_session_key_by_file: data.encryptedSessionKeyByFile,
+      session_key_nonce: data.sessionKeyNonce,
     })
     .select()
     .single();
@@ -187,6 +206,14 @@ export async function restoreFileVersion(params: {
   const nextNumber =
     ((maxRow?.version_number as number | undefined) ?? 0) + 1;
 
+  // Phase 4 — restore copies the source version's session-key wrap
+  // along with the metadata + chunks. This is a deliberate tradeoff:
+  // the "restored" version reuses the source version's session key,
+  // so forward-secrecy against the source version is not preserved
+  // for restored content. Acceptable because restore is a rare,
+  // user-initiated action and the alternative (client download +
+  // fresh re-upload) doubles R2 egress on every restore. Documented
+  // in AGENTS.md.
   const newVersion = await createFileVersion({
     fileId: params.fileId,
     versionNumber: nextNumber,
@@ -194,6 +221,8 @@ export async function restoreFileVersion(params: {
     sizeBytes: source.size_bytes as number,
     chunkCount: source.chunk_count as number,
     createdByUserId: params.actorUserId,
+    encryptedSessionKeyByFile: source.encrypted_session_key_by_file as string,
+    sessionKeyNonce: (source.session_key_nonce as string | null) ?? "",
   });
 
   if (sourceChunks && sourceChunks.length > 0) {

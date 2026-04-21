@@ -1979,11 +1979,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <HugeiconsIcon icon={Share01Icon} size={14} color="var(--icon-tertiary)" /> Share
             </button>
           )}
-          {/* Version history — non-folder files only. Available to anyone
-              with access; restore/delete/upload-new-version all gate
-              on ownership inside the modal. Replaces both the old
-              "Download" and "Replace file..." menu entries. */}
-          {fileOps.viewMode !== "trash" && !contextMenu?.isFolder && (
+          {/* Version history — non-folder files only, owner + editors
+              only (viewers don't see edit history because a file
+              shared with them at vN may have carried sensitive
+              content in vN-1 that the owner has since redacted).
+              Restore/delete/upload-new-version all gate on ownership
+              inside the modal. */}
+          {fileOps.viewMode !== "trash" && !contextMenu?.isFolder && fileOps.callerPermission !== "viewer" && (
             <button
               onClick={() => {
                 if (contextMenu) {

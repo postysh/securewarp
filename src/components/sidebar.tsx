@@ -249,7 +249,19 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         </button>
       </div>
       <div className="py-1 border-t border-border-tertiary">
-        <button onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; }} className="w-full flex items-center gap-2.5 px-3 h-[32px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer">
+        <button onClick={async () => {
+          // Logout = lock this session, NOT forget this device. Keep
+          // the lock cache so unlock-vault works on next visit.
+          // Mirrors logout() in use-auth.ts — if you add another
+          // persisted-but-session-scoped key there, mirror it here.
+          try {
+            sessionStorage.removeItem("securewarp_keys");
+            sessionStorage.removeItem("securewarp_active_workspace");
+            sessionStorage.removeItem("securewarp_view_state");
+          } catch { /* best-effort */ }
+          await fetch("/api/auth/logout", { method: "POST" });
+          window.location.href = "/login";
+        }} className="w-full flex items-center gap-2.5 px-3 h-[32px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer">
           <HugeiconsIcon icon={Logout01Icon} size={15} />
           Sign out
         </button>

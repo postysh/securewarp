@@ -63,6 +63,11 @@ export async function POST(
         encrypted_metadata: newVersion.encrypted_metadata,
         size_bytes: newVersion.size_bytes,
         chunk_count: newVersion.chunk_count,
+        // Phase 4: mirror the restored version's session-key wrap up
+        // to the files row so list + download flows resolve without
+        // an extra query.
+        encrypted_session_key_by_file: newVersion.encrypted_session_key_by_file,
+        session_key_nonce: newVersion.session_key_nonce,
         updated_at: new Date().toISOString(),
       })
       .eq("id", parsed.data.id)

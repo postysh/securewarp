@@ -745,12 +745,19 @@ export function useAuth() {
   }
 
   async function logout() {
+    // Logout is "lock this session," not "forget this device." We
+    // clear in-memory tab state (keys, workspace, view) so the next
+    // login lands clean, but we deliberately DO NOT wipe the local
+    // lock cache or metadata cache — the unlock-vault screen needs
+    // the cache to survive so a returning user can re-enter their
+    // password without a full SRP round-trip. Tab-close still clears
+    // sessionStorage per-browser.
+    //
+    // For "forget this device" semantics, see the separate
+    // device-wipe flow (settings → security).
     sessionStorage.removeItem("securewarp_keys");
-    // Wipe the local lock cache too — otherwise the next visit would
-    // silently unlock without a fresh login. "Log out" means
-    // log out, not "lock."
-    clearLockCache();
-    clearMetadataCache();
+    sessionStorage.removeItem("securewarp_active_workspace");
+    sessionStorage.removeItem("securewarp_view_state");
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
   }

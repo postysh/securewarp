@@ -29,12 +29,27 @@ export async function GET(request: Request) {
 
     const { file, directKey, parentChain, ancestorKey } = result;
 
-    // Get chunks
-    const { data: chunks, error } = await supabase
+    // Resolve the current version's id so we return ONLY its chunks.
+    // Phase 4: file_chunks now holds rows for every historical version,
+    // keyed by version_id. Without this filter, a file with v1 + v2
+    // returns both sets of chunks and the client decrypts v1's chunk 0
+    // with v2's session key (forward-secret by design = incompatible).
+    const { data: currentVersion } = await supabase
+      .from("file_versions")
+      .select("id")
+      .eq("file_id", fileId)
+      .eq("version_number", file.current_version_number)
+      .single();
+
+    // Get chunks for the current version only.
+    const chunksQuery = supabase
       .from("file_chunks")
       .select("*")
       .eq("file_id", fileId)
       .order("sequence");
+    const { data: chunks, error } = currentVersion?.id
+      ? await chunksQuery.eq("version_id", currentVersion.id)
+      : await chunksQuery; // fallback for very old rows without version_id
 
     if (error) throw error;
 

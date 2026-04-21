@@ -240,6 +240,57 @@ server.
     server-side witness is the salt (which is random and useless
     alone) and the wrapped ciphertext.
 
+## Crypto v2 Phase 4 — per-version forward secrecy
+
+Every new-version upload generates a fresh session key. The file's
+hierarchical keypair is unchanged across versions (so `file_keys` rows
+stay valid and collaborators keep read access automatically); only the
+symmetric session key rotates. A collaborator who cached vN's session
+key cannot decrypt vN+1 — the new key was never reachable from the old.
+
+Columns:
+
+- `file_versions.encrypted_session_key_by_file` (NOT NULL) —
+  per-version wrap, set at version create time.
+- `file_versions.session_key_nonce` (nullable) — v2 hybrid blob
+  embeds its own nonce, so this column stays empty going forward.
+- `files.encrypted_session_key_by_file` mirrors the CURRENT version's
+  wrap. Bumped on finalize (new-version) and on restore (server-side
+  copy of the source version's wrap). List + download endpoints read
+  from `files` for speed; version-history reads from `file_versions`.
+
+Invariants:
+
+21. **Every `new-version-init` request carries a fresh
+    `encryptedSessionKeyByFile`.** The client generates a fresh 32-
+    byte session key, encrypts the new metadata + chunks under it,
+    wraps it to the file's existing pub hier keys, and ships the
+    wrap in the init body. The server stores it on the version row.
+    Never reuse the prior version's session key — that's the exact
+    forward-secrecy regression.
+
+22. **On finalize of a new version, `files.encrypted_session_key_by_file`
+    is overwritten with the new version's wrap.** List endpoints
+    decrypt metadata using the `files`-row wrap, so this is what
+    makes subsequent list loads show the new filename.
+
+23. **Restore is deliberately NOT forward-secret.** Server-side
+    `restoreFileVersion` copies the source version's
+    `encrypted_session_key_by_file` + chunks into the new version
+    row and bumps the `files` row to match. A collaborator who had
+    the source version's session key can read the restored content.
+    Accepted tradeoff: restore is rare and user-initiated; the
+    forward-secret alternative (client download + fresh re-upload)
+    doubles R2 egress on every restore. If a user needs
+    forward-secret restore, they can manually upload a new version
+    with the old content — the upload path IS forward-secret.
+
+24. **Rotate-and-revoke (Phase 5) still rotates both the hier
+    keypair AND the session key in one step.** Phase 4's per-version
+    rotation is the *natural* forward-secrecy path (on every version
+    upload); Phase 5's rotate is the *revocation* path (on a
+    collaborator removal). Don't conflate them.
+
 ## Touching the sharing surface — checklist
 
 Before changing any of `src/lib/crypto/file-crypto.ts`,
@@ -277,13 +328,20 @@ the password alone — no SRP, no server round-trip.
     the email is visible on the unlock screen anyway. The four key
     strings are inside a `nacl.secretbox` under `unlockCacheKey`.
 
-18. **Lifecycle: save on login/signup/recover, clear on logout/change.**
-    `use-auth.ts` calls `saveLockCache` after every successful key
-    derivation (login, signup, recover, changePassword) and
-    `clearLockCache` on logout and before re-sealing under a new
-    password. If you add a new auth path, you MUST wire both sides.
-    Missing a `clearLockCache` on password change leaves a blob
-    that unlocks with the OLD password.
+18. **Lifecycle: save on login/signup/recover, clear on password
+    change, KEEP on logout.** `use-auth.ts` calls `saveLockCache`
+    after every successful key derivation (login, signup, recover,
+    changePassword) and `clearLockCache` only before re-sealing
+    under a new password. Logout is "lock this session," not
+    "forget this device" — the cache survives so the next visit
+    shows the unlock-vault form instead of the full login screen.
+    Matches user mental model: logging out should not require
+    re-typing the full password + re-running Argon2id on next
+    visit. For "forget this device" semantics, point the user at
+    the device-wipe flow in settings. If you add a new auth path,
+    you MUST wire `saveLockCache` on key derivation and
+    `clearLockCache` on password rotation; do NOT wire it on
+    simple logout.
 
 19. **`unlockCacheKey` is zeroed in `finally`.** `use-auth.ts`'s
     `unlock(password)` and all the save-site callers hoist

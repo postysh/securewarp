@@ -72,15 +72,19 @@ const FinalizeSchema = z.object({
 });
 
 // New-version init — uploading replacement content for an existing
-// file. Reuses the file's existing session_key + public_hierarchical_key
-// (no new crypto material on the wire), so file_keys rows stay valid
-// for every collaborator across every version.
+// file. Crypto v2 Phase 4: each version now carries its own fresh
+// session key (wrapped to the file's unchanged hierarchical pub keys).
+// file_keys rows still stay valid across versions because the hier
+// keypair doesn't rotate — only the symmetric session key does. A
+// revoked collaborator who cached vN's session key cannot read vN+1.
 const NewVersionInitSchema = z.object({
   action: z.literal("new-version-init"),
   fileId: z.string().uuid(),
   encryptedMetadata: z.string().min(1),
   totalSizeBytes: z.number().positive(),
   chunkCount: z.number().int().positive(),
+  encryptedSessionKeyByFile: z.string().min(1),
+  sessionKeyNonce: z.string(),
 });
 
 export async function POST(request: Request) {
@@ -173,6 +177,8 @@ export async function POST(request: Request) {
         sizeBytes: data.totalSizeBytes,
         chunkCount: data.chunkCount,
         createdByUserId: session.userId,
+        encryptedSessionKeyByFile: data.encryptedSessionKeyByFile,
+        sessionKeyNonce: data.sessionKeyNonce,
       });
 
       // Generate presigned URLs for all chunks. Storage keys now
@@ -243,6 +249,8 @@ export async function POST(request: Request) {
         sizeBytes: data.totalSizeBytes,
         chunkCount: data.chunkCount,
         createdByUserId: session.userId,
+        encryptedSessionKeyByFile: data.encryptedSessionKeyByFile,
+        sessionKeyNonce: data.sessionKeyNonce,
       });
 
       const chunkUrls: { sequence: number; storageKey: string; uploadUrl: string }[] = [];
@@ -349,7 +357,7 @@ export async function POST(request: Request) {
       if (versionId) {
         const { data: version } = await supabase
           .from("file_versions")
-          .select("chunk_count, version_number, size_bytes, encrypted_metadata")
+          .select("chunk_count, version_number, size_bytes, encrypted_metadata, encrypted_session_key_by_file, session_key_nonce")
           .eq("id", versionId)
           .eq("file_id", fileId)
           .single();
@@ -382,6 +390,11 @@ export async function POST(request: Request) {
             encrypted_metadata: version.encrypted_metadata,
             size_bytes: version.size_bytes,
             chunk_count: version.chunk_count,
+            // Phase 4: mirror the new version's session-key wrap up
+            // to the files row so list/download flows decrypt with
+            // the CURRENT version's key (not the stale v1 one).
+            encrypted_session_key_by_file: version.encrypted_session_key_by_file,
+            session_key_nonce: version.session_key_nonce,
             updated_at: new Date().toISOString(),
           })
           .eq("id", fileId)

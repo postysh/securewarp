@@ -1159,10 +1159,11 @@ export function useFiles(keys: {
 
       try {
         bumpQueue(10);
-        // 1. Recover the session key from the server's view of the file.
-        //    chunk-download returns everything needed to reverse the
-        //    two-layer wrap: the caller's file_keys row + the owner's
-        //    public key.
+        // 1. Fetch the file's pub hier keys (unchanged across versions)
+        //    so we can wrap the fresh session key to them. chunk-download
+        //    is the existing endpoint that returns them plus access
+        //    proof — we ignore the returned session-key wrap because
+        //    Phase 4 rotates to a fresh key on every new version.
         const dlRes = await fetch(
           `/api/files/chunk-download?fileId=${existingFileId}`,
         );
@@ -1171,11 +1172,18 @@ export function useFiles(keys: {
           return;
         }
         const dlData = await dlRes.json();
-        sessionKey = unwrapSessionKeyFromDownload(dlData);
+        if (!dlData.publicHierarchicalKey || !dlData.publicKemHierarchicalKey) {
+          setState((s) => ({ ...s, error: "Missing file hier keys" }));
+          return;
+        }
 
-        // 2. Encrypt the new metadata with the SAME session key.
-        //    Captures the new filename + size at this version so the
-        //    history can show when things changed.
+        // 2. Generate a fresh session key for this version. Forward
+        //    secrecy: a revoked collaborator who cached vN's key
+        //    cannot decrypt vN+1, because this key was never
+        //    reachable from vN.
+        sessionKey = generateSessionKey();
+
+        // 3. Encrypt the new metadata with the fresh session key.
         const encryptedMetadata = encryptMetadata(
           {
             name: newFile.name,
@@ -1185,7 +1193,17 @@ export function useFiles(keys: {
           sessionKey,
         );
 
-        // 3. Ask the server to create the next version row + signed URLs.
+        // 4. Wrap the fresh session key to the file's existing pub
+        //    hier keys. All collaborators keep their file_keys rows
+        //    (the hier keypair is unchanged across versions) and
+        //    automatically gain read access to the new version.
+        const { encryptedSessionKeyByFile, sessionKeyNonce } = wrapSessionKeyToFile(
+          sessionKey,
+          { x25519: dlData.publicHierarchicalKey, kem: dlData.publicKemHierarchicalKey },
+          keys.encryptionPrivateKey,
+        );
+
+        // 5. Ask the server to create the next version row + signed URLs.
         const initRes = await fetch("/api/files/chunk-upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1195,6 +1213,8 @@ export function useFiles(keys: {
             encryptedMetadata: JSON.stringify(encryptedMetadata),
             totalSizeBytes: newFile.size,
             chunkCount,
+            encryptedSessionKeyByFile,
+            sessionKeyNonce,
           }),
         });
         const initData = await initRes.json();
@@ -1305,6 +1325,8 @@ export function useFiles(keys: {
       id: string;
       versionNumber: number;
       encryptedMetadata: string;
+      encryptedSessionKeyByFile: string;
+      sessionKeyNonce: string;
       sizeBytes: number;
       chunkCount: number;
       createdAt: string;

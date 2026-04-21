@@ -355,7 +355,18 @@ function AdminUserMenu({ me, collapsed }: { me: Me; collapsed: boolean }) {
           </div>
           <div className="py-1 border-t border-border-tertiary">
             <button
-              onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; }}
+              onClick={async () => {
+                // Logout = lock this session. Keep the lock cache so
+                // unlock-vault works on next visit. Mirrors logout()
+                // in use-auth.ts.
+                try {
+                  sessionStorage.removeItem("securewarp_keys");
+                  sessionStorage.removeItem("securewarp_active_workspace");
+                  sessionStorage.removeItem("securewarp_view_state");
+                } catch { /* best-effort */ }
+                await fetch("/api/auth/logout", { method: "POST" });
+                window.location.href = "/login";
+              }}
               className="w-full flex items-center gap-2.5 px-3 h-[32px] text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
             >
               <HugeiconsIcon icon={Logout01Icon} size={15} />

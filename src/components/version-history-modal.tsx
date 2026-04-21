@@ -44,6 +44,12 @@ interface VersionRaw {
   id: string;
   versionNumber: number;
   encryptedMetadata: string;
+  // Phase 4 — each version has its own session-key wrap (fresh key
+  // per new-version upload). Historical versions were stored with
+  // different session keys than the current one; the client must
+  // unwrap per-version to decrypt each version's metadata.
+  encryptedSessionKeyByFile: string;
+  sessionKeyNonce: string;
   sizeBytes: number;
   chunkCount: number;
   createdAt: string;
@@ -142,40 +148,44 @@ export function VersionHistoryModal({
     // whole list. Initial open still uses the normal loading path.
     if (!opts?.silent) setLoading(true);
     setError(null);
-    let sessionKey: Uint8Array | null = null;
     try {
-      // Recover the shared session key once — every version uses it.
+      // Phase 4 — unwrap the file's hier private key ONCE, then
+      // per-version unwrap each version's own session-key wrap.
+      // Every version's wrap is under the same pub hier keypair so
+      // one hier unwrap serves all versions.
       const privHier = unwrapPrivateHierarchicalKey(
         file.encryptedPrivateHierarchicalKey,
         file.wrappedByPublicKey,
         userKeys.encryptionPrivateKey,
         userKeys.kemPrivateKey,
       );
-      sessionKey = unwrapSessionKeyFromFile(
-        file.encryptedSessionKeyByFile,
-        file.sessionKeyNonce,
-        file.ownerPublicKey,
-        privHier,
-      );
 
       const raw = await listVersions(file.id);
       const decrypted: VersionRow[] = raw.map((v) => {
+        let versionKey: Uint8Array | null = null;
         try {
+          versionKey = unwrapSessionKeyFromFile(
+            v.encryptedSessionKeyByFile,
+            v.sessionKeyNonce,
+            file.ownerPublicKey,
+            privHier,
+          );
           const encMeta =
             typeof v.encryptedMetadata === "string"
               ? JSON.parse(v.encryptedMetadata)
               : v.encryptedMetadata;
-          const meta = decryptMetadata(encMeta, sessionKey!);
+          const meta = decryptMetadata(encMeta, versionKey);
           return { ...v, decryptedName: meta.name };
         } catch {
           return { ...v, decryptedName: "(name unavailable)" };
+        } finally {
+          if (versionKey) versionKey.fill(0);
         }
       });
       setVersions(decrypted);
     } catch {
       setError("Failed to load version history");
     } finally {
-      if (sessionKey) sessionKey.fill(0);
       if (!opts?.silent) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
