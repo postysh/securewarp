@@ -37,6 +37,12 @@ jobs:
     # Cuts feedback time: a broken unit test shouldn't waste integration
     # minutes too.
     needs: unit
+    # Skip on Dependabot events. GitHub does not pass secrets to
+    # workflows triggered by dependabot[bot], so TEST_SUPABASE_URL etc.
+    # resolve to empty strings and the integration harness aborts on
+    # "SUPABASE_URL=MISSING." Unit + build + npm audit still run and
+    # are sufficient signal for a dep-bump PR.
+    if: github.actor != 'dependabot[bot]'
     # Secrets for the dedicated test Supabase project live in the
     # `SecureWarp-test` environment — opt into it so ${{ secrets.* }}
     # resolves. Without this line, env-scoped secrets are invisible.
@@ -67,6 +73,9 @@ jobs:
     # 6 tests with real Argon2 adds up. 15m is comfortable.
     timeout-minutes: 15
     needs: unit
+    # Skip on Dependabot — same secrets-unavailable limitation as the
+    # integration job. Main-branch push still runs the full suite.
+    if: github.actor != 'dependabot[bot]'
     # Same environment gate as integration — secrets live here.
     environment: SecureWarp-test
     steps:
