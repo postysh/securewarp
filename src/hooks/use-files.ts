@@ -1867,13 +1867,32 @@ export function useFiles(keys: {
       }
 
       try {
+        // Pipelined download: maintain a sliding window of N parallel
+        // fetch+decrypt tasks, but drain them to the sink in sequence
+        // order. The serial version (fetch → decrypt → write → repeat)
+        // ran at single-stream R2 throughput (~10 MB/s) because the
+        // network idled during decrypt+write and the write idled during
+        // the next chunk's network fetch. With this pipeline the 5
+        // configured in-flight slots stay saturated — expected ~5× on
+        // large downloads.
         const chunks = data.chunks as { sequence: number; downloadUrl: string; encryptionNonce: string; isFinal: boolean }[];
-        for (let i = 0; i < chunks.length; i++) {
+        const startFetch = (i: number): Promise<Uint8Array> => {
           const chunk = chunks[i];
-          const r2Res = await fetch(chunk.downloadUrl);
-          const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-          const decrypted = decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey);
+          return (async () => {
+            const r2Res = await fetch(chunk.downloadUrl);
+            const encrypted = new Uint8Array(await r2Res.arrayBuffer());
+            return decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey!);
+          })();
+        };
+        const inflight: (Promise<Uint8Array> | undefined)[] = new Array(chunks.length);
+        const windowSize = Math.min(CONCURRENT_CHUNK_UPLOADS, chunks.length);
+        for (let i = 0; i < windowSize; i++) inflight[i] = startFetch(i);
+        for (let i = 0; i < chunks.length; i++) {
+          const decrypted = await inflight[i]!;
+          inflight[i] = undefined;
           await sink.write(decrypted);
+          const next = i + CONCURRENT_CHUNK_UPLOADS;
+          if (next < chunks.length) inflight[next] = startFetch(next);
           updateProgress(5 + Math.floor(((i + 1) / chunks.length) * 90));
         }
         await sink.close();
@@ -1992,20 +2011,28 @@ export function useFiles(keys: {
             encryptionNonce: string;
             isFinal: boolean;
           }[];
-          const decryptedChunks: Uint8Array[] = [];
+          // Pipelined download (same pattern as downloadFile): keep 5
+          // fetch+decrypt tasks in flight, drain in order, pre-allocate
+          // the output buffer so writes are O(1) index assignment
+          // instead of array append + final reassemble.
+          const sessionKeyRef = sessionKey;
+          const startFetch = (idx: number): Promise<Uint8Array> => {
+            const c = chunks[idx];
+            return (async () => {
+              const r2Res = await fetch(c.downloadUrl);
+              const encrypted = new Uint8Array(await r2Res.arrayBuffer());
+              return decryptChunk(encrypted, c.encryptionNonce, c.sequence, c.isFinal, sessionKeyRef);
+            })();
+          };
+          const inflightPreview: (Promise<Uint8Array> | undefined)[] = new Array(chunks.length);
+          const windowSize = Math.min(CONCURRENT_CHUNK_UPLOADS, chunks.length);
+          for (let i = 0; i < windowSize; i++) inflightPreview[i] = startFetch(i);
+          const decryptedChunks: Uint8Array[] = new Array(chunks.length);
           for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const r2Res = await fetch(chunk.downloadUrl);
-            const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-            decryptedChunks.push(
-              decryptChunk(
-                encrypted,
-                chunk.encryptionNonce,
-                chunk.sequence,
-                chunk.isFinal,
-                sessionKey
-              )
-            );
+            decryptedChunks[i] = await inflightPreview[i]!;
+            inflightPreview[i] = undefined;
+            const next = i + CONCURRENT_CHUNK_UPLOADS;
+            if (next < chunks.length) inflightPreview[next] = startFetch(next);
             const pct = Math.round(((i + 1) / chunks.length) * 100);
             slot.lastPct = pct;
             slot.notify(pct);
