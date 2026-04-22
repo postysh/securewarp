@@ -317,6 +317,29 @@ export function useFiles(keys: {
   // per-file on new version / rotate / restore / delete.
   const previewCache = useRef(createPreviewCache());
 
+  // Dedup concurrent preview requests for the same fileId. When a
+  // user opens a large file, closes the preview mid-decrypt, and
+  // reopens it, the second open must NOT spawn a second pipeline —
+  // two concurrent decrypts racing on the same onProgress setter
+  // made the loading % jump around (50 → 3 → 51 → 4…), and doubled
+  // the network + CPU work. Joiners snap their onProgress to the
+  // current % and take over the live update channel so the stranded
+  // first caller's callback is never invoked again. Slot is removed
+  // in the pipeline's `finally`. Wiped on key change below.
+  type PreviewResult =
+    | { ok: true; blobUrl: string; name: string; type: string }
+    | { ok: false; error: string };
+  const previewInflight = useRef(
+    new Map<
+      string,
+      {
+        promise: Promise<PreviewResult>;
+        notify: (pct: number) => void;
+        lastPct: number;
+      }
+    >(),
+  );
+
   // Per-file upload cap for the current plan. Lazy-fetched on the first
   // upload so the dashboard render path doesn't pay a round-trip. The
   // server enforces authoritatively — this is a UX nicety so the user
@@ -424,10 +447,12 @@ export function useFiles(keys: {
     folderPrivHierCache.current.clear();
     fileListCache.current.clear();
     previewCache.current.clear();
+    previewInflight.current.clear();
     return () => {
       folderPrivHierCache.current.clear();
       fileListCache.current.clear();
       previewCache.current.clear();
+      previewInflight.current.clear();
     };
   }, [keys]);
 
@@ -1877,9 +1902,7 @@ export function useFiles(keys: {
     async (
       fileId: string,
       onProgress?: (pct: number) => void
-    ): Promise<
-      { ok: true; blobUrl: string; name: string; type: string } | { ok: false; error: string }
-    > => {
+    ): Promise<PreviewResult> => {
       if (!keys) return { ok: false, error: "Not signed in" };
 
       // Cache hit: skip the R2 round-trip + re-decrypt entirely.
@@ -1899,75 +1922,112 @@ export function useFiles(keys: {
         };
       }
 
-      let sessionKey: Uint8Array | null = null;
-      try {
-        const res = await fetch(`/api/files/chunk-download?fileId=${fileId}`);
-        const data = await res.json();
-        if (!res.ok) return { ok: false, error: data.error || "Download failed" };
-
-        sessionKey = unwrapSessionKeyFromDownload(data);
-
-        const encMeta =
-          typeof data.encryptedMetadata === "string"
-            ? JSON.parse(data.encryptedMetadata)
-            : data.encryptedMetadata;
-        const meta = decryptMetadata(encMeta, sessionKey);
-
-        const chunks = data.chunks as {
-          sequence: number;
-          downloadUrl: string;
-          encryptionNonce: string;
-          isFinal: boolean;
-        }[];
-        const decryptedChunks: Uint8Array[] = [];
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
-          const r2Res = await fetch(chunk.downloadUrl);
-          const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-          decryptedChunks.push(
-            decryptChunk(
-              encrypted,
-              chunk.encryptionNonce,
-              chunk.sequence,
-              chunk.isFinal,
-              sessionKey
-            )
-          );
-          onProgress?.(Math.round(((i + 1) / chunks.length) * 100));
+      // Join an in-flight decrypt for this fileId instead of starting
+      // a second pipeline. Snap the joining caller's progress UI to
+      // the current % so it doesn't restart at 0, then swap the slot's
+      // notify channel to the new callback — live updates now flow to
+      // the reopened UI and the original (closed) UI's setter goes
+      // quiet. Prevents the "progress jumps 50 → 3 → 51 → 4" effect
+      // from two pipelines racing on the same state setter.
+      const existing = previewInflight.current.get(fileId);
+      if (existing) {
+        if (onProgress) {
+          onProgress(existing.lastPct);
+          existing.notify = onProgress;
         }
-        const totalSize = decryptedChunks.reduce((s, c) => s + c.length, 0);
-        const decryptedContent = new Uint8Array(totalSize);
-        let offset = 0;
-        for (const c of decryptedChunks) {
-          decryptedContent.set(c, offset);
-          offset += c.length;
-        }
-
-        // Defense in depth: the MIME inside encrypted metadata is
-        // uploader-supplied. safeMimeForBlob coerces unrecognized or
-        // dangerous types (text/html, SVG, etc.) to octet-stream so
-        // the preview pipeline can never render uploaded HTML as
-        // same-origin script. We keep the original `type` in the
-        // returned object so callers can still branch on it for the
-        // correct render path.
-        const safeMime = safeMimeForBlob(meta.type);
-        const blob = new Blob([new Uint8Array(decryptedContent)], { type: safeMime });
-        // Cache the Blob for instant re-open within the session.
-        // The preview cache enforces its own size budget + LRU
-        // eviction; entries larger than the budget silently skip.
-        previewCache.current.set(fileId, {
-          blob,
-          name: meta.name,
-          mime: meta.type,
-        });
-        return { ok: true, blobUrl: URL.createObjectURL(blob), name: meta.name, type: meta.type };
-      } catch (err) {
-        console.error("previewFile", err);
-        const message = friendlyError(err, "Preview failed");
-        return { ok: false, error: message };
-      } finally {
-        if (sessionKey) sessionKey.fill(0);
+        return existing.promise;
       }
+
+      const slot: {
+        promise: Promise<PreviewResult>;
+        notify: (pct: number) => void;
+        lastPct: number;
+      } = {
+        notify: onProgress ?? (() => {}),
+        lastPct: 0,
+        // Assigned synchronously before `set()` so joiners always see
+        // a valid promise.
+        promise: undefined as unknown as Promise<PreviewResult>,
+      };
+
+      const promise = (async (): Promise<PreviewResult> => {
+        let sessionKey: Uint8Array | null = null;
+        try {
+          const res = await fetch(`/api/files/chunk-download?fileId=${fileId}`);
+          const data = await res.json();
+          if (!res.ok) return { ok: false, error: data.error || "Download failed" };
+
+          sessionKey = unwrapSessionKeyFromDownload(data);
+
+          const encMeta =
+            typeof data.encryptedMetadata === "string"
+              ? JSON.parse(data.encryptedMetadata)
+              : data.encryptedMetadata;
+          const meta = decryptMetadata(encMeta, sessionKey);
+
+          const chunks = data.chunks as {
+            sequence: number;
+            downloadUrl: string;
+            encryptionNonce: string;
+            isFinal: boolean;
+          }[];
+          const decryptedChunks: Uint8Array[] = [];
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const r2Res = await fetch(chunk.downloadUrl);
+            const encrypted = new Uint8Array(await r2Res.arrayBuffer());
+            decryptedChunks.push(
+              decryptChunk(
+                encrypted,
+                chunk.encryptionNonce,
+                chunk.sequence,
+                chunk.isFinal,
+                sessionKey
+              )
+            );
+            const pct = Math.round(((i + 1) / chunks.length) * 100);
+            slot.lastPct = pct;
+            slot.notify(pct);
+          }
+          const totalSize = decryptedChunks.reduce((s, c) => s + c.length, 0);
+          const decryptedContent = new Uint8Array(totalSize);
+          let offset = 0;
+          for (const c of decryptedChunks) {
+            decryptedContent.set(c, offset);
+            offset += c.length;
+          }
+
+          // Defense in depth: the MIME inside encrypted metadata is
+          // uploader-supplied. safeMimeForBlob coerces unrecognized or
+          // dangerous types (text/html, SVG, etc.) to octet-stream so
+          // the preview pipeline can never render uploaded HTML as
+          // same-origin script. We keep the original `type` in the
+          // returned object so callers can still branch on it for the
+          // correct render path.
+          const safeMime = safeMimeForBlob(meta.type);
+          const blob = new Blob([new Uint8Array(decryptedContent)], { type: safeMime });
+          // Cache the Blob for instant re-open within the session.
+          // The preview cache enforces its own size budget + LRU
+          // eviction; entries larger than the budget silently skip.
+          previewCache.current.set(fileId, {
+            blob,
+            name: meta.name,
+            mime: meta.type,
+          });
+          return { ok: true, blobUrl: URL.createObjectURL(blob), name: meta.name, type: meta.type };
+        } catch (err) {
+          console.error("previewFile", err);
+          const message = friendlyError(err, "Preview failed");
+          return { ok: false, error: message };
+        } finally {
+          if (sessionKey) sessionKey.fill(0);
+          previewInflight.current.delete(fileId);
+        }
+      })();
+
+      slot.promise = promise;
+      previewInflight.current.set(fileId, slot);
+      return promise;
     },
     [keys, unwrapSessionKeyFromDownload]
   );
