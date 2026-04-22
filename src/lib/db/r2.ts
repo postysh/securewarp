@@ -41,6 +41,13 @@ function buildUrl(storageKey: string): string {
   return `${base}/${bucket}/${encodedKey}`;
 }
 
+// Presigned URL expiry. 6 hours comfortably covers a 25 GB upload on
+// a slow home uplink (~60 min wall time) and a chunked download of a
+// multi-GB video (sequential R2 fetches over a slow link can take
+// 30+ min). URLs are capability tokens for a single object, not
+// credentials; 6h is well within S3/R2 norms (S3 allows up to 7d).
+const PRESIGNED_URL_TTL_SECONDS = "21600";
+
 /**
  * Generate a presigned URL for uploading an encrypted blob.
  * Client uploads directly to R2 — the server never touches the ciphertext.
@@ -50,7 +57,7 @@ export async function getUploadUrl(storageKey: string): Promise<string> {
   // query string, so mutating it after sign() invalidates the signature.
   // aws4fetch defaults to 3600s if we don't specify.
   const url = new URL(buildUrl(storageKey));
-  url.searchParams.set("X-Amz-Expires", "600");
+  url.searchParams.set("X-Amz-Expires", PRESIGNED_URL_TTL_SECONDS);
   const signed = await getClient().sign(
     new Request(url.toString(), { method: "PUT" }),
     { aws: { signQuery: true } }
@@ -63,7 +70,7 @@ export async function getUploadUrl(storageKey: string): Promise<string> {
  */
 export async function getDownloadUrl(storageKey: string): Promise<string> {
   const url = new URL(buildUrl(storageKey));
-  url.searchParams.set("X-Amz-Expires", "600");
+  url.searchParams.set("X-Amz-Expires", PRESIGNED_URL_TTL_SECONDS);
   const signed = await getClient().sign(
     new Request(url.toString(), { method: "GET" }),
     { aws: { signQuery: true } }

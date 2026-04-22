@@ -5,24 +5,13 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import ArrowUp01Icon from "@hugeicons/core-free-icons/ArrowUp01Icon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
-import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
+import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
-import type { UploadRecord } from "@/hooks/use-files";
+import type { DownloadRecord } from "@/hooks/use-files";
 
-/**
- * Floating bottom-right upload panel. Mirrors the pattern used by
- * Dropbox / Google Drive / OneDrive: a fixed-position pill that
- * lists every in-flight + recently-finished upload with a progress
- * bar. Persists across folder navigation because its state lives on
- * the useFiles hook, not on the current file-browser render.
- *
- * Collapsible header; auto-collapses itself when every item is done
- * and the list is empty.
- */
-
-interface UploadPanelProps {
-  queue: UploadRecord[];
+interface DownloadPanelProps {
+  queue: DownloadRecord[];
   onDismiss: (id: string) => void;
 }
 
@@ -38,39 +27,37 @@ function formatBytes(bytes: number): string {
   return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
+export function DownloadPanel({ queue, onDismiss }: DownloadPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
 
-  // Auto-open when a new upload starts so users see it without hunting.
   useEffect(() => {
-    if (queue.some((r) => r.status === "uploading")) {
+    if (queue.some((r) => r.status === "downloading")) {
       setCollapsed(false);
     }
   }, [queue.length, queue]);
 
   if (queue.length === 0) return null;
 
-  const inFlight = queue.filter((r) => r.status === "uploading").length;
+  const inFlight = queue.filter((r) => r.status === "downloading").length;
   const headerLabel =
     inFlight > 0
-      ? `Uploading ${inFlight} ${inFlight === 1 ? "file" : "files"}`
-      : `${queue.length} ${queue.length === 1 ? "upload" : "uploads"} complete`;
+      ? `Downloading ${inFlight} ${inFlight === 1 ? "file" : "files"}`
+      : `${queue.length} ${queue.length === 1 ? "download" : "downloads"} complete`;
 
   return (
     <div
       className="w-[320px] max-w-[calc(100vw-32px)] rounded-[12px] bg-bg-l3 border border-border-primary overflow-hidden animate-fade-in"
       style={{ boxShadow: "var(--shadow-l2)" }}
     >
-      {/* Header */}
       <button
         onClick={() => setCollapsed((c) => !c)}
         className="w-full flex items-center justify-between gap-3 px-3.5 py-2.5 border-b border-border-tertiary hover:bg-cta-nav-hover transition-colors cursor-pointer text-left"
       >
         <div className="flex items-center gap-2 min-w-0">
           <HugeiconsIcon
-            icon={Upload04Icon}
+            icon={Download04Icon}
             size={14}
-            color="var(--accent-green-primary)"
+            color="var(--text-link)"
           />
           <span className="text-[12px] font-medium text-text-primary truncate">
             {headerLabel}
@@ -83,11 +70,10 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
         />
       </button>
 
-      {/* Body */}
       {!collapsed && (
         <div className="max-h-[280px] overflow-y-auto">
           {queue.map((r) => (
-            <UploadPanelRow key={r.id} record={r} onDismiss={onDismiss} />
+            <DownloadPanelRow key={r.id} record={r} onDismiss={onDismiss} />
           ))}
         </div>
       )}
@@ -95,16 +81,16 @@ export function UploadPanel({ queue, onDismiss }: UploadPanelProps) {
   );
 }
 
-function UploadPanelRow({
+function DownloadPanelRow({
   record,
   onDismiss,
 }: {
-  record: UploadRecord;
+  record: DownloadRecord;
   onDismiss: (id: string) => void;
 }) {
   const isDone = record.status === "done";
   const isError = record.status === "error";
-  const icon = isError ? Alert02Icon : isDone ? Tick01Icon : Upload04Icon;
+  const icon = isError ? Alert02Icon : isDone ? Tick01Icon : Download04Icon;
   const iconColor = isError
     ? "var(--accent-red-primary)"
     : isDone
@@ -126,17 +112,6 @@ function UploadPanelRow({
               <span className="text-[12px] text-text-primary truncate">
                 {record.name}
               </span>
-              {record.kind === "version" && (
-                <span
-                  className="text-[9px] font-mono font-semibold uppercase tracking-wider px-1 py-[1px] rounded shrink-0"
-                  style={{
-                    background: "rgba(125,148,179,0.15)",
-                    color: "var(--text-tertiary)",
-                  }}
-                >
-                  New version
-                </span>
-              )}
             </div>
             <div className="text-[10px] text-text-disabled mt-0.5 font-mono">
               {isError ? (
@@ -167,7 +142,7 @@ function UploadPanelRow({
             className="h-full rounded-full transition-all duration-200"
             style={{
               width: `${record.progress}%`,
-              background: "var(--accent-green-primary)",
+              background: "var(--text-link)",
             }}
           />
         </div>

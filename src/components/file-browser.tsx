@@ -42,6 +42,7 @@ const FilePreview = dynamic(() => import("./file-preview").then((m) => ({ defaul
 const StorageQuotaModal = dynamic(() => import("./storage-quota-modal").then((m) => ({ default: m.StorageQuotaModal })), { ssr: false });
 const VersionHistoryModal = dynamic(() => import("./version-history-modal").then((m) => ({ default: m.VersionHistoryModal })), { ssr: false });
 const UploadPanel = dynamic(() => import("./upload-panel").then((m) => ({ default: m.UploadPanel })), { ssr: false });
+const DownloadPanel = dynamic(() => import("./download-panel").then((m) => ({ default: m.DownloadPanel })), { ssr: false });
 import { ConfirmDialog } from "./confirm-dialog";
 import { WorkspaceSettings } from "./workspace-settings";
 import { WorkspaceInviteModal } from "./workspace-invite-modal";
@@ -2278,7 +2279,17 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       <StorageQuotaModal open={quotaModalOpen} onClose={() => setQuotaModalOpen(false)} />
       <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
-      <UploadPanel queue={fileOps.uploadQueue} onDismiss={fileOps.dismissUpload} />
+      {/* Transfer tray — floats in the bottom-right corner. Both panels
+          live in the same fixed wrapper so they stack vertically
+          (downloads on top, uploads below) when both are active. The
+          flex-col-reverse ordering keeps uploads anchored to the
+          bottom edge regardless of whether downloads are showing. */}
+      {(fileOps.uploadQueue.length > 0 || fileOps.downloadQueue.length > 0) && (
+        <div className="fixed bottom-4 right-4 z-[60] flex flex-col-reverse gap-2">
+          <UploadPanel queue={fileOps.uploadQueue} onDismiss={fileOps.dismissUpload} />
+          <DownloadPanel queue={fileOps.downloadQueue} onDismiss={fileOps.dismissDownload} />
+        </div>
+      )}
       <VersionHistoryModal
         file={
           versionHistoryTarget

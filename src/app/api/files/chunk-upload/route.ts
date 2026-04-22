@@ -73,6 +73,22 @@ const FinalizeSchema = z.object({
   versionId: z.string().uuid().optional(),
 });
 
+// Client calls this when a chunk PUT returns 403 mid-upload (the
+// original URL expired — possible on multi-hour uploads or if the
+// upload is resumed in a later session). Returns a fresh presigned
+// URL under the SAME storage key, so the already-registered chunk
+// rows and the client's inflight state stay consistent.
+//
+// Cap of 64 per call bounds CPU spend on Workers (each URL ≈ 0.5 ms
+// HMAC signing) and keeps the response body small. Callers asking
+// for more can issue multiple requests.
+const RefreshUrlsSchema = z.object({
+  action: z.literal("refresh-urls"),
+  fileId: z.string().uuid(),
+  versionId: z.string().uuid().optional(),
+  chunkIndexes: z.array(z.number().int().min(0)).min(1).max(64),
+});
+
 // New-version init — uploading replacement content for an existing
 // file. Crypto v2 Phase 4: each version now carries its own fresh
 // session key (wrapped to the file's unchanged hierarchical pub keys).
@@ -289,6 +305,57 @@ export async function POST(request: Request) {
         versionNumber: nextVersionNumber,
         chunkUrls,
       });
+    }
+
+    // ─── REFRESH URLS ───
+    // Mint fresh presigned URLs for specific chunks whose originals
+    // expired. The storage-key format must match what /init and
+    // /new-version-init generate — keep it centralized here so a
+    // future prefix change only needs one edit.
+    if (body.action === "refresh-urls") {
+      const parsed = RefreshUrlsSchema.safeParse(body);
+      if (!parsed.success) {
+        return NextResponse.json({ error: "Invalid data" }, { status: 400 });
+      }
+      const data = parsed.data;
+
+      // Owner check. Non-owners never have an upload in flight so
+      // there's no legitimate reason to refresh a URL here.
+      const { data: file } = await supabase
+        .from("files")
+        .select("id, owner_id")
+        .eq("id", data.fileId)
+        .eq("owner_id", session.userId)
+        .single();
+      if (!file) {
+        return NextResponse.json({ error: "File not found" }, { status: 404 });
+      }
+
+      // Resolve the version number for the storage-key prefix. If the
+      // client supplied versionId, trust it (and validate it belongs
+      // to this file); otherwise default to v1.
+      let versionNumber = 1;
+      if (data.versionId) {
+        const { data: version } = await supabase
+          .from("file_versions")
+          .select("version_number")
+          .eq("id", data.versionId)
+          .eq("file_id", data.fileId)
+          .single();
+        if (!version) {
+          return NextResponse.json({ error: "Version not found" }, { status: 404 });
+        }
+        versionNumber = version.version_number as number;
+      }
+
+      const chunkUrls: { sequence: number; storageKey: string; uploadUrl: string }[] = [];
+      for (const i of data.chunkIndexes) {
+        const storageKey = `${session.userId}/${data.fileId}/v${versionNumber}/chunk-${i}`;
+        const uploadUrl = await getUploadUrl(storageKey);
+        chunkUrls.push({ sequence: i, storageKey, uploadUrl });
+      }
+
+      return NextResponse.json({ chunkUrls });
     }
 
     // ─── CHUNK ───

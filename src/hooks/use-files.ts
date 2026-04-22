@@ -31,6 +31,9 @@ import { decryptFileContent } from "@/lib/crypto/file-crypto";
 import { toBase64, fromBase64 } from "@/lib/crypto/utils";
 import { friendlyError } from "@/lib/ui/errors";
 import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
+import { putChunkWithRetry } from "@/lib/net/chunk-upload";
+import { openDownloadSink, DownloadCancelled } from "@/lib/net/download-sink";
+import { createPreviewCache } from "@/lib/cache/preview-cache";
 import {
   loadAll as loadSearchCache,
   replaceAll as replaceSearchCache,
@@ -151,6 +154,25 @@ export interface UploadRecord {
   fileId?: string; // set after init; lets user click to reveal
 }
 
+/**
+ * Download counterpart to UploadRecord. Powers the floating
+ * download-panel tray in the bottom-right corner — same pattern as
+ * uploads, except progress advances per chunk decrypted rather than
+ * per byte uploaded. Single-chunk files jump straight from 5% →
+ * 100% so the row flashes briefly; the 500ms min-display in the
+ * panel component keeps it from looking janky.
+ */
+export interface DownloadRecord {
+  id: string;
+  fileId: string;
+  name: string;
+  size: number;
+  progress: number;
+  status: "downloading" | "done" | "error";
+  error?: string;
+  startedAt: number;
+}
+
 interface UseFilesState {
   files: DecryptedFile[];
   loading: boolean;
@@ -158,6 +180,7 @@ interface UseFilesState {
   uploadStep: string | null;
   uploadProgress: number;
   uploadQueue: UploadRecord[];
+  downloadQueue: DownloadRecord[];
   error: string | null;
   currentFolder: string | null;
   breadcrumb: { id: string | null; name: string }[];
@@ -194,6 +217,7 @@ export function useFiles(keys: {
       uploadStep: null,
       uploadProgress: 0,
       uploadQueue: [],
+      downloadQueue: [],
       error: null,
       currentFolder: null,
       callerPermission: null,
@@ -287,6 +311,12 @@ export function useFiles(keys: {
   // `${mode}:${parentId}`. Shows cached data instantly on navigation,
   // refreshes in background. Cleared on key change (login swap).
   const fileListCache = useRef<Map<string, DecryptedFile[]>>(new Map());
+
+  // Preview cache — stores decrypted Blobs so re-opening the same
+  // file doesn't re-fetch + re-decrypt every time. Cleared on key
+  // change / unmount (covered by the effect below) and invalidated
+  // per-file on new version / rotate / restore / delete.
+  const previewCache = useRef(createPreviewCache());
 
   // Per-file upload cap for the current plan. Lazy-fetched on the first
   // upload so the dashboard render path doesn't pay a round-trip. The
@@ -389,13 +419,16 @@ export function useFiles(keys: {
 
   useEffect(() => {
     // Wipe on key change (which covers logout → login swap) and on
-    // unmount. Plaintext private hierarchical keys live here and must
-    // not outlive the session they were decrypted in.
+    // unmount. Plaintext private hierarchical keys and plaintext
+    // preview Blobs live here and must not outlive the session they
+    // were decrypted in.
     folderPrivHierCache.current.clear();
     fileListCache.current.clear();
+    previewCache.current.clear();
     return () => {
       folderPrivHierCache.current.clear();
       fileListCache.current.clear();
+      previewCache.current.clear();
     };
   }, [keys]);
 
@@ -1084,29 +1117,52 @@ export function useFiles(keys: {
 
       const { fileId, versionId, chunkUrls } = initData;
 
-      // 3. Encrypt and upload chunks with concurrency control
+      // 3. Encrypt and upload chunks with a proper semaphore. The
+      //    previous Promise.race + splice loop had two bugs: it
+      //    could splice unsettled promises out of the queue, and
+      //    the inner Promise.race([p.then(() => true),
+      //    Promise.resolve(false)]) always resolved to `false` on
+      //    most engines (the synchronously-resolved promise won),
+      //    so the queue never actually shrank.
+      //
+      //    The pattern here keeps TWO collections: `inflight`
+      //    (gates concurrency, self-shrinks via finally) and
+      //    `allChunks` (the canonical success/failure surface —
+      //    Promise.all at the end propagates any chunk error to
+      //    the outer try/catch).
       const uploadProgressBase = 15;
       const uploadProgressRange = 80; // 15% to 95%
       let chunksCompleted = 0;
-
-      // Process chunks with concurrency limit
-      const chunkQueue: Promise<void>[] = [];
+      const inflight = new Set<Promise<void>>();
+      const allChunks: Promise<void>[] = [];
 
       for await (const { data: chunkData, index, isFinal } of fileChunkGenerator(file)) {
         const chunkUrl = chunkUrls[index];
 
-        const chunkPromise = (async () => {
-          // Encrypt chunk
+        const chunkPromise: Promise<void> = (async () => {
           const encrypted = encryptChunk(chunkData, index, isFinal, sessionKey);
 
-          // Upload to R2
-          const r2Res = await fetch(chunkUrl.uploadUrl, {
-            method: "PUT",
-            body: encrypted.ciphertext as unknown as BodyInit,
-            headers: { "Content-Type": "application/octet-stream" },
-          });
-
-          if (!r2Res.ok) throw new Error(`Chunk ${index} upload failed`);
+          await putChunkWithRetry(
+            chunkUrl.uploadUrl,
+            encrypted.ciphertext as unknown as BodyInit,
+            {
+              refreshUrl: async () => {
+                const r = await fetch("/api/files/chunk-upload", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    action: "refresh-urls",
+                    fileId,
+                    versionId,
+                    chunkIndexes: [index],
+                  }),
+                });
+                if (!r.ok) throw new Error(`Chunk ${index} URL refresh failed`);
+                const d = await r.json();
+                return d.chunkUrls[0].uploadUrl as string;
+              },
+            },
+          );
 
           // Register chunk with server
           await fetch("/api/files/chunk-upload", {
@@ -1125,25 +1181,31 @@ export function useFiles(keys: {
           });
 
           chunksCompleted++;
-          const progress = uploadProgressBase + Math.round((chunksCompleted / chunkCount) * uploadProgressRange);
+          const progress =
+            uploadProgressBase + Math.round((chunksCompleted / chunkCount) * uploadProgressRange);
           updateProgress(progress, "Uploading to secure storage...");
         })();
 
-        chunkQueue.push(chunkPromise);
+        allChunks.push(chunkPromise);
+        inflight.add(chunkPromise);
+        // .then(cleanup, cleanup) handles both outcomes without
+        // orphaning a rejected follow-on promise (which .finally
+        // would). The actual error propagation happens via
+        // Promise.all(allChunks) below.
+        const cleanup = () => inflight.delete(chunkPromise);
+        chunkPromise.then(cleanup, cleanup);
 
-        // Limit concurrency
-        if (chunkQueue.length >= CONCURRENT_CHUNK_UPLOADS) {
-          await Promise.race(chunkQueue);
-          // Remove completed promises
-          for (let i = chunkQueue.length - 1; i >= 0; i--) {
-            const settled = await Promise.race([chunkQueue[i].then(() => true), Promise.resolve(false)]);
-            if (settled) chunkQueue.splice(i, 1);
-          }
+        if (inflight.size >= CONCURRENT_CHUNK_UPLOADS) {
+          // Swallow errors here — the canonical propagation point is
+          // Promise.all(allChunks) below. Without the catch, Node
+          // logs an unhandledRejection for the losing chunk.
+          await Promise.race(inflight).catch(() => {});
         }
       }
 
-      // Wait for remaining chunks
-      await Promise.all(chunkQueue);
+      // Canonical error surface — any chunk failure (retries
+      // exhausted, refresh-URL failed, etc.) propagates here.
+      await Promise.all(allChunks);
 
       // 4. Finalize
       updateProgress(96, "Finalizing...");
@@ -1400,22 +1462,40 @@ export function useFiles(keys: {
         }
         const { versionId, chunkUrls } = initData;
 
-        // 4. Upload chunks with the same concurrency shape as uploadFile.
-        const chunkQueue: Promise<void>[] = [];
+        // 4. Upload chunks with the same semaphore pattern as
+        //    uploadFile — see the long comment there for why we
+        //    keep two collections (inflight vs allChunks).
+        const inflight = new Set<Promise<void>>();
+        const allChunks: Promise<void>[] = [];
         for await (const {
           data: chunkData,
           index,
           isFinal,
         } of fileChunkGenerator(newFile)) {
           const chunkUrl = chunkUrls[index];
-          const promise = (async () => {
+          const promise: Promise<void> = (async () => {
             const encrypted = encryptChunk(chunkData, index, isFinal, sessionKey!);
-            const r2Res = await fetch(chunkUrl.uploadUrl, {
-              method: "PUT",
-              body: encrypted.ciphertext as unknown as BodyInit,
-              headers: { "Content-Type": "application/octet-stream" },
-            });
-            if (!r2Res.ok) throw new Error(`Chunk ${index} upload failed`);
+            await putChunkWithRetry(
+              chunkUrl.uploadUrl,
+              encrypted.ciphertext as unknown as BodyInit,
+              {
+                refreshUrl: async () => {
+                  const r = await fetch("/api/files/chunk-upload", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      action: "refresh-urls",
+                      fileId: existingFileId,
+                      versionId,
+                      chunkIndexes: [index],
+                    }),
+                  });
+                  if (!r.ok) throw new Error(`Chunk ${index} URL refresh failed`);
+                  const d = await r.json();
+                  return d.chunkUrls[0].uploadUrl as string;
+                },
+              },
+            );
             await fetch("/api/files/chunk-upload", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1431,13 +1511,15 @@ export function useFiles(keys: {
               }),
             });
           })();
-          chunkQueue.push(promise);
-          if (chunkQueue.length >= CONCURRENT_CHUNK_UPLOADS) {
-            await Promise.race(chunkQueue);
-            chunkQueue.splice(0, chunkQueue.length - CONCURRENT_CHUNK_UPLOADS + 1);
+          allChunks.push(promise);
+          inflight.add(promise);
+          const cleanup = () => inflight.delete(promise);
+          promise.then(cleanup, cleanup);
+          if (inflight.size >= CONCURRENT_CHUNK_UPLOADS) {
+            await Promise.race(inflight).catch(() => {});
           }
         }
-        await Promise.all(chunkQueue);
+        await Promise.all(allChunks);
         bumpQueue(95);
 
         // 5. Finalize — server flips files.current_version_number +
@@ -1451,6 +1533,11 @@ export function useFiles(keys: {
             versionId,
           }),
         });
+
+        // Any cached preview is for the previous version — drop it
+        // so the next preview open re-fetches + re-decrypts under
+        // the new session key.
+        previewCache.current.invalidate(existingFileId);
 
         // Mark done in the panel; auto-drop after 5s.
         setState((s) => ({
@@ -1492,6 +1579,14 @@ export function useFiles(keys: {
     }));
   }, []);
 
+  /** Remove a single download from the floating panel (manual dismiss). */
+  const dismissDownload = useCallback((downloadId: string) => {
+    setState((s) => ({
+      ...s,
+      downloadQueue: s.downloadQueue.filter((r) => r.id !== downloadId),
+    }));
+  }, []);
+
   /** Fetch every version of a file in newest-first order. */
   const listVersions = useCallback(async (fileId: string) => {
     const res = await fetch(`/api/files/${fileId}/versions`);
@@ -1522,6 +1617,9 @@ export function useFiles(keys: {
         throw new Error(data.error ?? "Restore failed");
       }
       const data = await res.json();
+      // Restore bumps the current version. Any cached preview is
+      // under a stale session key — drop it.
+      previewCache.current.invalidate(fileId);
       await fetchFiles(state.currentFolder);
       return data as { versionId: string; versionNumber: number };
     },
@@ -1625,16 +1723,58 @@ export function useFiles(keys: {
     if (!keys) return;
     setState((s) => ({ ...s, error: null }));
 
+    // Seed the panel with whatever we know from the current view so
+    // the row has a name + size before we've decrypted metadata.
+    // 99% of the time the user is downloading a file they clicked
+    // on in the active folder, so this is a hit. Read state.files
+    // through setState's updater so we don't risk a stale closure
+    // on rapid folder navigation.
+    const queueId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setState((s) => {
+      const viewHit = s.files.find((f) => f.id === fileId);
+      const initialRecord: DownloadRecord = {
+        id: queueId,
+        fileId,
+        name: viewHit?.name ?? "Downloading…",
+        size: viewHit?.size ?? 0,
+        progress: 0,
+        status: "downloading",
+        startedAt: Date.now(),
+      };
+      return { ...s, downloadQueue: [initialRecord, ...s.downloadQueue] };
+    });
+
+    const updateProgress = (pct: number) => {
+      setState((s) => ({
+        ...s,
+        downloadQueue: s.downloadQueue.map((r) =>
+          r.id === queueId ? { ...r, progress: pct } : r,
+        ),
+      }));
+    };
+
     let sessionKey: Uint8Array | null = null;
     try {
       const res = await fetch(`/api/files/chunk-download?fileId=${fileId}`);
       const data = await res.json();
 
       if (!res.ok) {
-        setState((s) => ({ ...s, error: data.error }));
+        setState((s) => ({
+          ...s,
+          error: data.error,
+          downloadQueue: s.downloadQueue.map((r) =>
+            r.id === queueId
+              ? { ...r, status: "error", error: data.error ?? "Download failed" }
+              : r,
+          ),
+        }));
         return;
       }
 
+      updateProgress(5);
       sessionKey = unwrapSessionKeyFromDownload(data);
 
       // 3. Decrypt metadata
@@ -1643,54 +1783,97 @@ export function useFiles(keys: {
         : data.encryptedMetadata;
       const meta = decryptMetadata(encMeta, sessionKey);
 
-      let decryptedContent: Uint8Array;
+      // Promote the real plaintext name + size into the panel row.
+      // For files opened via shared link or URL (not clicked in the
+      // view), this is when the row's placeholder name resolves.
+      setState((s) => ({
+        ...s,
+        downloadQueue: s.downloadQueue.map((r) =>
+          r.id === queueId
+            ? { ...r, name: meta.name, size: meta.size ?? r.size }
+            : r,
+        ),
+      }));
 
-      if (data.chunked) {
-        // 4a. Chunked download — download and decrypt each chunk, reassemble
-        const chunks = data.chunks as { sequence: number; downloadUrl: string; encryptionNonce: string; isFinal: boolean }[];
-        const decryptedChunks: Uint8Array[] = [];
-
-        for (const chunk of chunks) {
-          const r2Res = await fetch(chunk.downloadUrl);
-          const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-          const decrypted = decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey);
-          decryptedChunks.push(decrypted);
+      // 5. Open a write target. On Chrome/Edge/Opera this prompts the
+      // native save picker and streams bytes straight to disk — the
+      // only path that works for the 5 GB / 25 GB paid tiers, since
+      // buffering a plaintext blob of that size exceeds the tab heap.
+      // On Firefox/Safari, falls back to an in-memory Blob with the
+      // existing memory envelope.
+      //
+      // Force application/octet-stream on the fallback Blob so that
+      // even if a middle-click triggers inline navigation, the browser
+      // treats it as a save — never inline rendered as HTML/SVG/XML.
+      let sink: Awaited<ReturnType<typeof openDownloadSink>>;
+      try {
+        sink = await openDownloadSink(meta.name, safeMimeForDownload(meta.type));
+      } catch (err) {
+        if (err instanceof DownloadCancelled) {
+          // User dismissed the save picker — silently drop the queue
+          // row, no error surface.
+          setState((s) => ({
+            ...s,
+            downloadQueue: s.downloadQueue.filter((r) => r.id !== queueId),
+          }));
+          return;
         }
-
-        // Reassemble
-        const totalSize = decryptedChunks.reduce((sum, c) => sum + c.length, 0);
-        decryptedContent = new Uint8Array(totalSize);
-        let offset = 0;
-        for (const chunk of decryptedChunks) {
-          decryptedContent.set(chunk, offset);
-          offset += chunk.length;
-        }
-      } else {
-        // 4b. Legacy single-blob download
-        const r2Res = await fetch(data.downloadUrl);
-        const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-        decryptedContent = decryptFileContent(encrypted, data.encryptionNonce, sessionKey);
+        throw err;
       }
 
-      // 5. Create download. Force application/octet-stream on the Blob
-      // so that even if the user middle-clicks the anchor or the
-      // browser auto-opens certain MIME types, it gets handled as a
-      // save-to-disk action — never inline rendered as HTML/SVG/XML.
-      const blob = new Blob([new Uint8Array(decryptedContent)], { type: safeMimeForDownload(meta.type) });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = meta.name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      try {
+        if (data.chunked) {
+          const chunks = data.chunks as { sequence: number; downloadUrl: string; encryptionNonce: string; isFinal: boolean }[];
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const r2Res = await fetch(chunk.downloadUrl);
+            const encrypted = new Uint8Array(await r2Res.arrayBuffer());
+            const decrypted = decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey);
+            await sink.write(decrypted);
+            updateProgress(5 + Math.floor(((i + 1) / chunks.length) * 90));
+          }
+        } else {
+          const r2Res = await fetch(data.downloadUrl);
+          const encrypted = new Uint8Array(await r2Res.arrayBuffer());
+          const decrypted = decryptFileContent(encrypted, data.encryptionNonce, sessionKey);
+          await sink.write(decrypted);
+          updateProgress(95);
+        }
+        await sink.close();
+      } catch (err) {
+        await sink.abort(err);
+        throw err;
+      }
+
+      setState((s) => ({
+        ...s,
+        downloadQueue: s.downloadQueue.map((r) =>
+          r.id === queueId ? { ...r, status: "done", progress: 100 } : r,
+        ),
+      }));
+      // Auto-drop the completed row after a beat so the tray doesn't
+      // pile up on bulk downloads. Matches upload-panel behavior.
+      setTimeout(() => {
+        setState((s) => ({
+          ...s,
+          downloadQueue: s.downloadQueue.filter((r) => r.id !== queueId),
+        }));
+      }, 5_000);
     } catch (err) {
       console.error("Download error:", err);
-      setState((s) => ({ ...s, error: "Download failed" }));
+      setState((s) => ({
+        ...s,
+        error: "Download failed",
+        downloadQueue: s.downloadQueue.map((r) =>
+          r.id === queueId
+            ? { ...r, status: "error", error: "Download failed" }
+            : r,
+        ),
+      }));
     } finally {
       if (sessionKey) sessionKey.fill(0);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keys, unwrapSessionKeyFromDownload]);
 
   /**
@@ -1707,6 +1890,23 @@ export function useFiles(keys: {
       { ok: true; blobUrl: string; name: string; type: string } | { ok: false; error: string }
     > => {
       if (!keys) return { ok: false, error: "Not signed in" };
+
+      // Cache hit: skip the R2 round-trip + re-decrypt entirely.
+      // Mint a fresh blob URL from the cached Blob — the caller
+      // revokes it on preview close (same contract as the miss
+      // path); the Blob itself stays cached until evicted or
+      // invalidated. Report 100% immediately so any loading UI
+      // doesn't hang at 0%.
+      const cached = previewCache.current.get(fileId);
+      if (cached) {
+        onProgress?.(100);
+        return {
+          ok: true,
+          blobUrl: URL.createObjectURL(cached.blob),
+          name: cached.name,
+          type: cached.mime,
+        };
+      }
 
       let sessionKey: Uint8Array | null = null;
       try {
@@ -1772,6 +1972,14 @@ export function useFiles(keys: {
         // correct render path.
         const safeMime = safeMimeForBlob(meta.type);
         const blob = new Blob([new Uint8Array(decryptedContent)], { type: safeMime });
+        // Cache the Blob for instant re-open within the session.
+        // The preview cache enforces its own size budget + LRU
+        // eviction; entries larger than the budget silently skip.
+        previewCache.current.set(fileId, {
+          blob,
+          name: meta.name,
+          mime: meta.type,
+        });
         return { ok: true, blobUrl: URL.createObjectURL(blob), name: meta.name, type: meta.type };
       } catch (err) {
         console.error("previewFile", err);
@@ -2129,6 +2337,9 @@ export function useFiles(keys: {
       try { await deleteSearchCache(fileId); } catch { /* */ }
       removeFromSearchMirror(fileId);
 
+      // Drop any cached preview — the file is gone (soft-deleted).
+      previewCache.current.invalidate(fileId);
+
       await fetchFiles(state.currentFolder, state.viewMode);
     } catch (err) {
       console.error("Delete error:", err);
@@ -2479,12 +2690,16 @@ export function useFiles(keys: {
           const isFinal = i === totalChunks - 1;
           const encrypted = encryptChunk(chunkData, i, isFinal, newSessionKey);
           const target = initData.chunkUrls[i];
-          const r2Res = await fetch(target.uploadUrl, {
-            method: "PUT",
-            body: encrypted.ciphertext as unknown as BodyInit,
-            headers: { "Content-Type": "application/octet-stream" },
-          });
-          if (!r2Res.ok) throw new Error(`Rotate upload failed at chunk ${i}`);
+          // Rotate has no per-chunk refresh endpoint — the URLs were
+          // minted under a one-shot timestamped prefix. Retry on
+          // transient 5xx/network errors still helps, but a 403
+          // here is terminal and the user needs to retry the whole
+          // rotation (rare — 6h TTL covers any realistic rotate).
+          await putChunkWithRetry(
+            target.uploadUrl,
+            encrypted.ciphertext as unknown as BodyInit,
+            {},
+          );
           newChunks.push({
             sequence: i,
             storageKey: target.storageKey,
@@ -2540,6 +2755,10 @@ export function useFiles(keys: {
 
         plaintext.fill(0);
         newSessionKey.fill(0);
+        // Rotation changes the session key — any cached preview was
+        // decrypted under the old one and is now dead data. Drop it
+        // so the next preview fetches fresh under the new key.
+        previewCache.current.invalidate(file.id);
         await fetchFiles(state.currentFolder, state.viewMode);
         return { ok: true };
       } catch (err) {
@@ -3226,6 +3445,12 @@ export function useFiles(keys: {
         });
         const data = await res.json();
         if (!res.ok) return { ok: false, error: data.error || "Purge failed" };
+        // File and every descendant are gone. Drop the cache entry
+        // for the purged id — descendants weren't in the cache
+        // keyed under their own ids anyway (purge doesn't give us
+        // that list back), so a safer bet is to just clear the
+        // whole preview cache on purge.
+        previewCache.current.clear();
         await fetchFiles(null, state.viewMode);
         return { ok: true };
       } catch {
@@ -3244,6 +3469,10 @@ export function useFiles(keys: {
         const res = await fetch("/api/files/trash/empty", { method: "POST" });
         const data = await res.json();
         if (!res.ok) return { ok: false, error: data.error || "Empty trash failed" };
+        // Every trashed file (and its descendants) is gone. Cheapest
+        // correct move: drop the whole preview cache — the alternative
+        // is walking trashed-ids and invalidating each.
+        previewCache.current.clear();
         await fetchFiles(null, "trash");
         return { ok: true, purged: data.purged ?? 0 };
       } catch {
@@ -3831,6 +4060,7 @@ export function useFiles(keys: {
     uploadFile,
     replaceFile,
     dismissUpload,
+    dismissDownload,
     listVersions,
     restoreVersion,
     deleteVersion,

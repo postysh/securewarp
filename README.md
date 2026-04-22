@@ -17,7 +17,7 @@ Password
 
 File Upload
   → Random session key per file
-  → XChaCha20-Poly1305 (encrypt content in 50 MB chunks)
+  → XChaCha20-Poly1305 (encrypt content in 4 MB chunks)
   → Authenticated chunks (sequence + isFinal prevents tampering)
   → Session key wrapped to recipient's X25519 pub key via ECDH + HKDF + XChaCha20-Poly1305
   → Encrypted blob uploaded directly to R2 (server never touches plaintext)
@@ -57,7 +57,7 @@ The threat model is deliberately the same as the SRP verifier's: a disk-level at
 | **Framework** | Next.js 16 (App Router) |
 | **Frontend** | React 19, Tailwind CSS 4, TypeScript |
 | **Icons** | Hugeicons |
-| **Client Crypto** | @noble/ciphers (XChaCha20-Poly1305), @noble/curves (X25519), @noble/hashes (HKDF + SHA-256), argon2-browser (WASM), bip39 |
+| **Client Crypto** | @noble/ciphers (XChaCha20-Poly1305), @noble/curves (X25519), @noble/hashes (HKDF + SHA-256), hash-wasm (Argon2id WASM), bip39 |
 | **Auth Protocol** | secure-remote-password (SRP-6a) |
 | **Sessions** | jose (JWT), HttpOnly cookies |
 | **Database** | Supabase Postgres (service-role, no Supabase Auth) |
