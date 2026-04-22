@@ -57,15 +57,28 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
-  // Initial load + polling refresh. Polling catches three events
-  // without WebSockets:
+  // Initial load + event-driven refresh. Realtime handles the live
+  // path (invites, removals, role changes); focus-refresh is the
+  // safety net. There's no timer-polling — 3 events to catch:
   //   - A new invite landed → workspace appears in the dropdown.
   //   - The user got removed from their active workspace → we kick
   //     them back to personal drive with a toast.
   //   - Role changed (admin demoted to editor) → UI gating updates
-  //     on next poll tick.
-  // 20s interval is a reasonable latency/traffic tradeoff for events
-  // that a user doesn't expect to feel "instant."
+  //     on next refresh.
+  //
+  // Why a ref: `useFilesContext()` returns a fresh object literal on
+  // every provider render (state spread + ~30 callbacks), which made
+  // `refreshWorkspaceList`'s useCallback identity churn on every
+  // unrelated upload/download progress tick. The `useEffect` below
+  // watched that identity and re-ran the network fetch — HAR traces
+  // showed 79 `/api/workspaces` calls in a single upload session.
+  // Capturing fileOps in a ref severs that dep so the callback's
+  // identity is stable and the effect only fires once on mount.
+  const fileOpsRef = useRef(fileOps);
+  useEffect(() => {
+    fileOpsRef.current = fileOps;
+  }, [fileOps]);
+
   const refreshWorkspaceList = useCallback(async () => {
     try {
       const res = await fetch("/api/workspaces");
@@ -88,7 +101,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
         if (!stillMember) {
           sessionStorage.removeItem("securewarp_active_workspace");
           setActiveId(null);
-          fileOps.leaveWorkspace();
+          fileOpsRef.current.leaveWorkspace();
           // Fire a window event so any listener (e.g. a toast/banner)
           // can surface the reason. Keeps this component free of
           // toast-library coupling.
@@ -101,8 +114,8 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
       } catch {
         sessionStorage.removeItem("securewarp_active_workspace");
       }
-    } catch { /* silent — next poll retries */ }
-  }, [fileOps]);
+    } catch { /* silent — realtime + focus-refresh retry */ }
+  }, []);
 
   useEffect(() => {
     void refreshWorkspaceList();
