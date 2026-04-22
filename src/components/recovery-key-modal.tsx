@@ -14,47 +14,41 @@ interface RecoveryKeyModalProps {
   open: boolean;
   onClose: () => void;
   recoveryKey?: string;
+  // Stamped onto the generated PDF so a user filing it away for years
+  // knows which account the phrase belongs to. Optional — legacy call
+  // sites still work.
+  email?: string;
 }
 
-function downloadRecoveryFile(recoveryKey: string) {
-  const content = [
-    "SECUREWARP RECOVERY KEY",
-    "=======================",
-    "",
-    "Keep this somewhere safe. If you lose your password,",
-    "this is the ONLY way to recover your encrypted files.",
-    "",
-    "Recovery phrase (paste this entire line to recover):",
-    "",
-    recoveryKey,
-    "",
-    "=======================",
-    `Generated: ${new Date().toISOString()}`,
-    "IMPORTANT: Store offline. Do not share.",
-  ].join("\n");
-
-  const blob = new Blob([content], { type: "text/plain" });
+async function downloadRecoveryPdf(recoveryKey: string, email?: string) {
+  // Dynamic import keeps pdf-lib (~150 KB) off the signup critical
+  // path — only loads when the user actually clicks download.
+  const { generateRecoveryPdf } = await import("@/lib/pdf/recovery-pdf");
+  const bytes = await generateRecoveryPdf({ recoveryKey, email });
+  const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "securewarp-recovery-key.txt";
+  a.download = "securewarp-recovery-phrase.pdf";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
-export function RecoveryKeyModal({ open, onClose, recoveryKey }: RecoveryKeyModalProps) {
+export function RecoveryKeyModal({ open, onClose, recoveryKey, email }: RecoveryKeyModalProps) {
   const words = recoveryKey ? recoveryKey.split(" ") : [];
   const [isBlurred, setIsBlurred] = useState(true);
   const [copied, setCopied] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (open) {
       setIsBlurred(true);
       setCopied(false);
       setDownloaded(false);
+      setDownloading(false);
     }
   }, [open]);
 
@@ -66,10 +60,14 @@ export function RecoveryKeyModal({ open, onClose, recoveryKey }: RecoveryKeyModa
     }
   };
 
-  const handleDownload = () => {
-    if (recoveryKey) {
-      downloadRecoveryFile(recoveryKey);
+  const handleDownload = async () => {
+    if (!recoveryKey || downloading) return;
+    setDownloading(true);
+    try {
+      await downloadRecoveryPdf(recoveryKey, email);
       setDownloaded(true);
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -150,10 +148,11 @@ export function RecoveryKeyModal({ open, onClose, recoveryKey }: RecoveryKeyModa
           <div className="flex items-center justify-between mt-5">
             <button
               onClick={handleDownload}
-              className="h-[36px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer flex items-center gap-1.5"
+              disabled={downloading}
+              className="h-[36px] px-4 rounded-[8px] text-[12px] font-medium text-text-secondary hover:bg-cta-secondary-hover border border-border-secondary transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-wait"
             >
               <HugeiconsIcon icon={Download04Icon} size={14} />
-              {downloaded ? "Downloaded" : "Download .txt"}
+              {downloading ? "Generating…" : downloaded ? "Downloaded" : "Download PDF"}
             </button>
             <button
               onClick={onClose}

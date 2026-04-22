@@ -152,6 +152,7 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
           open={true}
           onClose={auth.dismissRecoveryKey}
           recoveryKey={auth.recoveryKey}
+          email={email || recoveryEmail || undefined}
         />
       )}
 

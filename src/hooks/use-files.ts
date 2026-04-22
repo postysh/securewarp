@@ -3644,7 +3644,13 @@ export function useFiles(keys: {
    * plaintext.
    */
   const exportAllAsZip = useCallback(
-    async (onProgress?: (pct: number, step: string) => void): Promise<{ ok: true } | { ok: false; error: string }> => {
+    async (
+      onProgress?: (
+        pct: number,
+        step: string,
+        counts?: { done: number; total: number },
+      ) => void,
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
       if (!keys) return { ok: false, error: "Not signed in" };
 
       try {
@@ -3697,7 +3703,11 @@ export function useFiles(keys: {
         for (const f of nonFolders) {
           const fileId = f.id as string;
           const path = getPath(fileId);
-          onProgress?.(5 + Math.round((done / nonFolders.length) * 85), `Decrypting ${path}...`);
+          onProgress?.(
+            5 + Math.round((done / nonFolders.length) * 85),
+            `Decrypting ${path}...`,
+            { done, total: nonFolders.length },
+          );
 
           try {
             const dlRes = await fetch(`/api/files/chunk-download?fileId=${fileId}`);

@@ -176,6 +176,8 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
   );
   const [exporting, setExporting] = useState(false);
   const [exportStep, setExportStep] = useState<string | null>(null);
+  const [exportPct, setExportPct] = useState(0);
+  const [exportCounts, setExportCounts] = useState<{ done: number; total: number } | null>(null);
   const userKeys = useUserKeys();
   const auth = useAuth();
   const fileOps = useFilesContext();
@@ -400,12 +402,12 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                 <span className="text-[10px] text-text-disabled">Shown once at creation</span>
               </div>
             </SettingRow>
-            <SettingRow label="Encryption keys" description="Your public keys for verification by collaborators">
+            <SettingRow label="Public encryption key" description="Your public key for verification by collaborators">
               <button
                 onClick={() => setShowKeys(!showKeys)}
                 className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer"
               >
-                {showKeys ? "Hide" : "View keys"}
+                {showKeys ? "Hide" : "View key"}
               </button>
             </SettingRow>
             {showKeys && userKeys && (
@@ -798,9 +800,19 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                   onClick={async () => {
                     setExporting(true);
                     setExportStep("Starting...");
-                    const result = await fileOps.exportAllAsZip((_, step) => setExportStep(step));
+                    setExportPct(0);
+                    setExportCounts(null);
+                    const result = await fileOps.exportAllAsZip((pct, step, counts) => {
+                      setExportPct(pct);
+                      setExportStep(step);
+                      if (counts) setExportCounts(counts);
+                    });
                     setExporting(false);
                     setExportStep(result.ok ? null : result.error);
+                    if (result.ok) {
+                      setExportPct(0);
+                      setExportCounts(null);
+                    }
                   }}
                   disabled={exporting}
                   className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-bg-cell-hover border border-border-secondary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
@@ -809,10 +821,26 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                   {exporting ? "Exporting..." : "Export"}
                 </button>
               </div>
-              {exportStep && (
-                <p className={`text-[11px] mt-2 ${exporting ? "text-accent-green" : "text-accent-red"}`}>
-                  {exportStep}
-                </p>
+              {exporting && (
+                <div className="mt-3 space-y-1.5">
+                  <div className="h-1 w-full rounded-full bg-bg-field overflow-hidden">
+                    <div
+                      className="h-full bg-accent-green transition-all duration-200"
+                      style={{ width: `${Math.max(2, exportPct)}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-text-secondary truncate pr-2">{exportStep}</span>
+                    {exportCounts && (
+                      <span className="text-text-disabled tabular-nums shrink-0">
+                        {exportCounts.done} of {exportCounts.total} files
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {!exporting && exportStep && (
+                <p className="text-[11px] mt-2 text-accent-red">{exportStep}</p>
               )}
             </div>
           </div>
@@ -893,7 +921,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
     <>
       {modal}
       {auth.recoveryKey && (
-        <RecoveryKeyModal open={true} onClose={auth.dismissRecoveryKey} recoveryKey={auth.recoveryKey} />
+        <RecoveryKeyModal open={true} onClose={auth.dismissRecoveryKey} recoveryKey={auth.recoveryKey} email={email || undefined} />
       )}
     </>
   );

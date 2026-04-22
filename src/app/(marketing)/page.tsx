@@ -2256,10 +2256,10 @@ function SecurityPanel() {
       control: "toggle-on",
     },
     {
-      label: "Encryption keys",
-      description: "Your public keys for collaborator verification.",
+      label: "Public encryption key",
+      description: "Your public key for collaborator verification.",
       control: "button-view",
-      buttonLabel: "View keys",
+      buttonLabel: "View key",
     },
     {
       label: "Active sessions",
