@@ -15,10 +15,10 @@
  * still guards the implementation.
  *
  * Only Argon2id is off-loaded. XChaCha20 per-chunk encrypt/decrypt
- * (~5-10 ms per 4 MB chunk) is bound by the network round-trip in
+ * (~10-20 ms per 8 MB chunk) is bound by the network round-trip in
  * upload/download, not CPU; HKDF is <1 ms. The postMessage copy cost
- * of moving 4 MB chunks across the worker boundary would exceed the
- * savings.
+ * of moving multi-MB chunks across the worker boundary would exceed
+ * the savings.
  */
 
 import { expose } from "comlink";

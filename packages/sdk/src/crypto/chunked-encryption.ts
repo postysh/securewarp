@@ -15,18 +15,22 @@ import { toBase64, fromBase64, randomBytes } from "./utils";
 
 const SECRETBOX_NONCE_LEN = 24;
 
-// 4 MB per chunk. Matches Proton Drive's block size almost exactly.
-// Smaller chunks are better for three reasons: (a) each chunk finishes
-// in a few seconds even on slow uplinks, so the R2 presigned-URL TTL
-// never becomes the bottleneck; (b) a transient failure re-sends 4 MB
-// instead of 50 MB; (c) progress bars move every few seconds instead
-// of every minute on large files.
+// 8 MB per chunk. Middle ground between Proton's 4 MB (retry-friendly,
+// mobile-RAM-friendly) and WeTransfer's 15 MB (throughput-tuned for
+// raw one-shot transfers). The 4 MB size was our first cut after the
+// 50 MB → small-chunk migration; benchmarking against WeTransfer on
+// the same link showed our per-stream throughput was ~2.7 MB/s vs
+// their ~13.6 MB/s, because each PUT pays TCP slow-start + per-request
+// overhead and smaller chunks amortize that overhead over fewer bytes.
+// Doubling the chunk roughly doubles per-stream throughput while
+// keeping retry + RAM envelopes sane (5 × 8 MB = 40 MB in flight per
+// upload).
 //
 // Not a ciphertext-layout change — existing files in R2 keep whatever
 // chunk size they were uploaded with; decrypt iterates over the
 // per-chunk DB manifest, not this constant. Only new uploads use the
 // new size.
-export const CHUNK_SIZE = 4 * 1024 * 1024;
+export const CHUNK_SIZE = 8 * 1024 * 1024;
 export const MAX_FILE_SIZE_FREE = 100 * 1024 * 1024; // 100 MB for free tier
 export const MAX_FILE_SIZE_PRO = 5 * 1024 * 1024 * 1024; // 5 GB for pro tier
 export const CONCURRENT_CHUNK_UPLOADS = 5;
