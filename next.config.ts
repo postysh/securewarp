@@ -186,8 +186,8 @@ const scriptSources = [
   "'unsafe-inline'",
   // `'wasm-unsafe-eval'` is the narrow CSP3 grant that covers
   // WebAssembly.instantiate() without re-enabling string-to-code
-  // eval() / new Function(). argon2-browser ships a WASM module
-  // for Argon2id key derivation and needs this; Next.js production
+  // eval() / new Function(). hash-wasm ships a WASM module for
+  // Argon2id key derivation and needs this; Next.js production
   // bundles don't use eval(), so we drop `'unsafe-eval'` entirely.
   "'wasm-unsafe-eval'",
 ];
