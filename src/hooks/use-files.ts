@@ -20,12 +20,11 @@ import {
   type HybridPrivateKeys,
 } from "@/lib/crypto/file-crypto";
 import {
-  encryptChunk,
-  decryptChunk,
   getChunkCount,
   CHUNK_SIZE,
   CONCURRENT_CHUNK_UPLOADS,
 } from "@/lib/crypto/chunked-encryption";
+import { getChunkPool } from "@/lib/crypto/chunk-pool";
 import { toBase64, fromBase64 } from "@/lib/crypto/utils";
 import { friendlyError } from "@/lib/ui/errors";
 import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
@@ -1181,7 +1180,12 @@ export function useFiles(keys: {
 
         const chunkPromise: Promise<void> = (async () => {
           const buffer = await slice.arrayBuffer();
-          const encrypted = encryptChunk(new Uint8Array(buffer), index, isFinal, sessionKey);
+          const encrypted = await getChunkPool().encrypt(
+            new Uint8Array(buffer),
+            index,
+            isFinal,
+            sessionKey,
+          );
 
           await putChunkWithRetry(
             chunkUrl.uploadUrl,
@@ -1519,7 +1523,12 @@ export function useFiles(keys: {
           const chunkUrl = chunkUrls[index];
           const promise: Promise<void> = (async () => {
             const buffer = await slice.arrayBuffer();
-            const encrypted = encryptChunk(new Uint8Array(buffer), index, isFinal, sessionKey!);
+            const encrypted = await getChunkPool().encrypt(
+              new Uint8Array(buffer),
+              index,
+              isFinal,
+              sessionKey!,
+            );
             await putChunkWithRetry(
               chunkUrl.uploadUrl,
               encrypted.ciphertext as unknown as BodyInit,
@@ -1881,7 +1890,7 @@ export function useFiles(keys: {
           return (async () => {
             const r2Res = await fetch(chunk.downloadUrl);
             const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-            return decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey!);
+            return getChunkPool().decrypt(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey!);
           })();
         };
         const inflight: (Promise<Uint8Array> | undefined)[] = new Array(chunks.length);
@@ -2021,7 +2030,7 @@ export function useFiles(keys: {
             return (async () => {
               const r2Res = await fetch(c.downloadUrl);
               const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-              return decryptChunk(encrypted, c.encryptionNonce, c.sequence, c.isFinal, sessionKeyRef);
+              return getChunkPool().decrypt(encrypted, c.encryptionNonce, c.sequence, c.isFinal, sessionKeyRef);
             })();
           };
           const inflightPreview: (Promise<Uint8Array> | undefined)[] = new Array(chunks.length);
@@ -2658,7 +2667,7 @@ export function useFiles(keys: {
           const r2 = await fetch(chunk.downloadUrl);
           const encrypted = new Uint8Array(await r2.arrayBuffer());
           decryptedChunks.push(
-            decryptChunk(
+            await getChunkPool().decrypt(
               encrypted,
               chunk.encryptionNonce,
               chunk.sequence,
@@ -2767,9 +2776,12 @@ export function useFiles(keys: {
         for (let i = 0; i < totalChunks; i++) {
           const start = i * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, plaintext.length);
-          const chunkData = plaintext.subarray(start, end);
+          // Copy into a fresh buffer — the pool transfers ownership to
+          // its worker, which would detach `plaintext`'s backing buffer
+          // if we passed a subarray that shares it.
+          const chunkData = new Uint8Array(plaintext.subarray(start, end));
           const isFinal = i === totalChunks - 1;
-          const encrypted = encryptChunk(chunkData, i, isFinal, newSessionKey);
+          const encrypted = await getChunkPool().encrypt(chunkData, i, isFinal, newSessionKey);
           const target = initData.chunkUrls[i];
           // Rotate has no per-chunk refresh endpoint — the URLs were
           // minted under a one-shot timestamped prefix. Retry on
@@ -4031,7 +4043,7 @@ export function useFiles(keys: {
             for (const chunk of chunks) {
               const r2 = await fetch(chunk.downloadUrl);
               const encrypted = new Uint8Array(await r2.arrayBuffer());
-              decryptedChunks.push(decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey));
+              decryptedChunks.push(await getChunkPool().decrypt(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey));
             }
             const total = decryptedChunks.reduce((s, c) => s + c.length, 0);
             const content = new Uint8Array(total);
