@@ -79,23 +79,13 @@ export async function GET(request: Request) {
         }))
       );
 
-      return NextResponse.json({ chunked: true, chunks: chunkDownloads, ...base });
+      return NextResponse.json({ chunks: chunkDownloads, ...base });
     }
 
     // Folder or file without content — return key data only (used
     // by the client's parent-chain fetch to populate the hier key
     // cache for inherited children).
-    if (!file.storage_key) {
-      return NextResponse.json({ chunked: false, noContent: true, ...base });
-    }
-
-    const downloadUrl = await getDownloadUrl(file.storage_key);
-    return NextResponse.json({
-      chunked: false,
-      downloadUrl,
-      encryptionNonce: file.encryption_nonce,
-      ...base,
-    });
+    return NextResponse.json({ noContent: true, ...base });
   } catch (err) {
     logError("chunk-download", err);
     return NextResponse.json({ error: "Download failed" }, { status: 500 });

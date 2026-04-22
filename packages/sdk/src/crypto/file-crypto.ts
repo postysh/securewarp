@@ -217,20 +217,6 @@ export function generateSessionKey(): Uint8Array {
   return randomBytes(SECRETBOX_KEY_LEN);
 }
 
-export function encryptFileContent(content: Uint8Array, sessionKey: Uint8Array): {
-  ciphertext: Uint8Array;
-  nonce: string;
-} {
-  const nonce = randomBytes(SECRETBOX_NONCE_LEN);
-  const ciphertext = secretboxSeal(content, nonce, sessionKey);
-  return { ciphertext, nonce: toBase64(nonce) };
-}
-
-export function decryptFileContent(ciphertext: Uint8Array, nonceB64: string, sessionKey: Uint8Array): Uint8Array {
-  const nonce = fromBase64(nonceB64);
-  return secretboxOpen(ciphertext, nonce, sessionKey);
-}
-
 export function encryptMetadata(
   metadata: { name: string; type: string; size: number },
   sessionKey: Uint8Array,

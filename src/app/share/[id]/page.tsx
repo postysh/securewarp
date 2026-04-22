@@ -396,43 +396,34 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
         privHier
       );
 
-      let decryptedContent: Uint8Array;
-      if (data.chunked) {
-        const chunks = data.chunks as {
-          sequence: number;
-          downloadUrl: string;
-          encryptionNonce: string;
-          isFinal: boolean;
-        }[];
-        const decryptedChunks: Uint8Array[] = [];
-        const total = chunks.length;
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
-          const r2Res = await fetch(chunk.downloadUrl);
-          const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-          const decrypted = decryptChunk(
-            encrypted,
-            chunk.encryptionNonce,
-            chunk.sequence,
-            chunk.isFinal,
-            sessionKey
-          );
-          decryptedChunks.push(decrypted);
-          setDownloadProgress((p) => ({ ...p, [fileId]: Math.round(((i + 1) / total) * 100) }));
-        }
-        const totalSize = decryptedChunks.reduce((sum, c) => sum + c.length, 0);
-        decryptedContent = new Uint8Array(totalSize);
-        let offset = 0;
-        for (const chunk of decryptedChunks) {
-          decryptedContent.set(chunk, offset);
-          offset += chunk.length;
-        }
-      } else {
-        const r2Res = await fetch(data.downloadUrl);
+      const chunks = data.chunks as {
+        sequence: number;
+        downloadUrl: string;
+        encryptionNonce: string;
+        isFinal: boolean;
+      }[];
+      const decryptedChunks: Uint8Array[] = [];
+      const total = chunks.length;
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const r2Res = await fetch(chunk.downloadUrl);
         const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-        const { decryptFileContent } = await import("@/lib/crypto/file-crypto");
-        decryptedContent = decryptFileContent(encrypted, data.encryptionNonce, sessionKey);
-        setDownloadProgress((p) => ({ ...p, [fileId]: 100 }));
+        const decrypted = decryptChunk(
+          encrypted,
+          chunk.encryptionNonce,
+          chunk.sequence,
+          chunk.isFinal,
+          sessionKey
+        );
+        decryptedChunks.push(decrypted);
+        setDownloadProgress((p) => ({ ...p, [fileId]: Math.round(((i + 1) / total) * 100) }));
+      }
+      const totalSize = decryptedChunks.reduce((sum, c) => sum + c.length, 0);
+      const decryptedContent = new Uint8Array(totalSize);
+      let offset = 0;
+      for (const chunk of decryptedChunks) {
+        decryptedContent.set(chunk, offset);
+        offset += chunk.length;
       }
 
       const blob = new Blob([new Uint8Array(decryptedContent)], { type: mime || "application/octet-stream" });

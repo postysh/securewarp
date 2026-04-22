@@ -27,7 +27,6 @@ import {
   CHUNK_SIZE,
   CONCURRENT_CHUNK_UPLOADS,
 } from "@/lib/crypto/chunked-encryption";
-import { decryptFileContent } from "@/lib/crypto/file-crypto";
 import { toBase64, fromBase64 } from "@/lib/crypto/utils";
 import { friendlyError } from "@/lib/ui/errors";
 import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
@@ -1822,22 +1821,14 @@ export function useFiles(keys: {
       }
 
       try {
-        if (data.chunked) {
-          const chunks = data.chunks as { sequence: number; downloadUrl: string; encryptionNonce: string; isFinal: boolean }[];
-          for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const r2Res = await fetch(chunk.downloadUrl);
-            const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-            const decrypted = decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey);
-            await sink.write(decrypted);
-            updateProgress(5 + Math.floor(((i + 1) / chunks.length) * 90));
-          }
-        } else {
-          const r2Res = await fetch(data.downloadUrl);
+        const chunks = data.chunks as { sequence: number; downloadUrl: string; encryptionNonce: string; isFinal: boolean }[];
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const r2Res = await fetch(chunk.downloadUrl);
           const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-          const decrypted = decryptFileContent(encrypted, data.encryptionNonce, sessionKey);
+          const decrypted = decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey);
           await sink.write(decrypted);
-          updateProgress(95);
+          updateProgress(5 + Math.floor(((i + 1) / chunks.length) * 90));
         }
         await sink.close();
       } catch (err) {
@@ -1922,45 +1913,34 @@ export function useFiles(keys: {
             : data.encryptedMetadata;
         const meta = decryptMetadata(encMeta, sessionKey);
 
-        let decryptedContent: Uint8Array;
-        if (data.chunked) {
-          const chunks = data.chunks as {
-            sequence: number;
-            downloadUrl: string;
-            encryptionNonce: string;
-            isFinal: boolean;
-          }[];
-          const decryptedChunks: Uint8Array[] = [];
-          for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const r2Res = await fetch(chunk.downloadUrl);
-            const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-            decryptedChunks.push(
-              decryptChunk(
-                encrypted,
-                chunk.encryptionNonce,
-                chunk.sequence,
-                chunk.isFinal,
-                sessionKey
-              )
-            );
-            onProgress?.(Math.round(((i + 1) / chunks.length) * 100));
-          }
-          const totalSize = decryptedChunks.reduce((s, c) => s + c.length, 0);
-          decryptedContent = new Uint8Array(totalSize);
-          let offset = 0;
-          for (const c of decryptedChunks) {
-            decryptedContent.set(c, offset);
-            offset += c.length;
-          }
-        } else {
-          const r2Res = await fetch(data.downloadUrl);
+        const chunks = data.chunks as {
+          sequence: number;
+          downloadUrl: string;
+          encryptionNonce: string;
+          isFinal: boolean;
+        }[];
+        const decryptedChunks: Uint8Array[] = [];
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const r2Res = await fetch(chunk.downloadUrl);
           const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-          decryptedContent = decryptFileContent(
-            encrypted,
-            data.encryptionNonce,
-            sessionKey
+          decryptedChunks.push(
+            decryptChunk(
+              encrypted,
+              chunk.encryptionNonce,
+              chunk.sequence,
+              chunk.isFinal,
+              sessionKey
+            )
           );
+          onProgress?.(Math.round(((i + 1) / chunks.length) * 100));
+        }
+        const totalSize = decryptedChunks.reduce((s, c) => s + c.length, 0);
+        const decryptedContent = new Uint8Array(totalSize);
+        let offset = 0;
+        for (const c of decryptedChunks) {
+          decryptedContent.set(c, offset);
+          offset += c.length;
         }
 
         // Defense in depth: the MIME inside encrypted metadata is
@@ -2559,39 +2539,32 @@ export function useFiles(keys: {
           oldPrivHier
         );
 
-        let plaintext: Uint8Array;
-        if (dlData.chunked) {
-          const chunks = dlData.chunks as {
-            sequence: number;
-            downloadUrl: string;
-            encryptionNonce: string;
-            isFinal: boolean;
-          }[];
-          const decryptedChunks: Uint8Array[] = [];
-          for (const chunk of chunks) {
-            const r2 = await fetch(chunk.downloadUrl);
-            const encrypted = new Uint8Array(await r2.arrayBuffer());
-            decryptedChunks.push(
-              decryptChunk(
-                encrypted,
-                chunk.encryptionNonce,
-                chunk.sequence,
-                chunk.isFinal,
-                oldSessionKey
-              )
-            );
-          }
-          const total = decryptedChunks.reduce((s, c) => s + c.length, 0);
-          plaintext = new Uint8Array(total);
-          let offset = 0;
-          for (const c of decryptedChunks) {
-            plaintext.set(c, offset);
-            offset += c.length;
-          }
-        } else {
-          const r2 = await fetch(dlData.downloadUrl);
+        const chunks = dlData.chunks as {
+          sequence: number;
+          downloadUrl: string;
+          encryptionNonce: string;
+          isFinal: boolean;
+        }[];
+        const decryptedChunks: Uint8Array[] = [];
+        for (const chunk of chunks) {
+          const r2 = await fetch(chunk.downloadUrl);
           const encrypted = new Uint8Array(await r2.arrayBuffer());
-          plaintext = decryptFileContent(encrypted, dlData.encryptionNonce, oldSessionKey);
+          decryptedChunks.push(
+            decryptChunk(
+              encrypted,
+              chunk.encryptionNonce,
+              chunk.sequence,
+              chunk.isFinal,
+              oldSessionKey
+            )
+          );
+        }
+        const total = decryptedChunks.reduce((s, c) => s + c.length, 0);
+        const plaintext = new Uint8Array(total);
+        let offset = 0;
+        for (const c of decryptedChunks) {
+          plaintext.set(c, offset);
+          offset += c.length;
         }
         oldSessionKey.fill(0);
 
@@ -3945,24 +3918,17 @@ export function useFiles(keys: {
 
             const sessionKey = unwrapSessionKeyFromDownload(dlData);
 
-            let content: Uint8Array;
-            if (dlData.chunked) {
-              const chunks = dlData.chunks as { sequence: number; downloadUrl: string; encryptionNonce: string; isFinal: boolean }[];
-              const decryptedChunks: Uint8Array[] = [];
-              for (const chunk of chunks) {
-                const r2 = await fetch(chunk.downloadUrl);
-                const encrypted = new Uint8Array(await r2.arrayBuffer());
-                decryptedChunks.push(decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey));
-              }
-              const total = decryptedChunks.reduce((s, c) => s + c.length, 0);
-              content = new Uint8Array(total);
-              let offset = 0;
-              for (const c of decryptedChunks) { content.set(c, offset); offset += c.length; }
-            } else {
-              const r2 = await fetch(dlData.downloadUrl);
+            const chunks = dlData.chunks as { sequence: number; downloadUrl: string; encryptionNonce: string; isFinal: boolean }[];
+            const decryptedChunks: Uint8Array[] = [];
+            for (const chunk of chunks) {
+              const r2 = await fetch(chunk.downloadUrl);
               const encrypted = new Uint8Array(await r2.arrayBuffer());
-              content = decryptFileContent(encrypted, dlData.encryptionNonce, sessionKey);
+              decryptedChunks.push(decryptChunk(encrypted, chunk.encryptionNonce, chunk.sequence, chunk.isFinal, sessionKey));
             }
+            const total = decryptedChunks.reduce((s, c) => s + c.length, 0);
+            const content = new Uint8Array(total);
+            let offset = 0;
+            for (const c of decryptedChunks) { content.set(c, offset); offset += c.length; }
             sessionKey.fill(0);
             zipData[path] = content;
           } catch {

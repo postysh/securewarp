@@ -104,35 +104,20 @@ export async function GET(
       encryption_nonce: string;
       is_final: boolean;
     };
-    if (chunks && chunks.length > 0) {
-      const chunkDownloads = await Promise.all(
-        (chunks as Chunk[]).map(async (c) => ({
-          sequence: c.sequence,
-          downloadUrl: await getDownloadUrl(c.storage_key),
-          encryptionNonce: c.encryption_nonce,
-          isFinal: c.is_final,
-        }))
-      );
-      return NextResponse.json({
-        chunked: true,
-        chunks: chunkDownloads,
-        encryptedMetadata: row.encrypted_metadata,
-        publicHierarchicalKey: row.public_hierarchical_key,
-        encryptedSessionKeyByFile: row.encrypted_session_key_by_file,
-        sessionKeyNonce: row.session_key_nonce,
-        ownerPublicKey: row.owner?.public_encryption_key ?? "",
-      });
-    }
-
-    if (!row.storage_key) {
+    if (!chunks || chunks.length === 0) {
       return NextResponse.json({ error: "File has no content" }, { status: 404 });
     }
-    const downloadUrl = await getDownloadUrl(row.storage_key);
+    const chunkDownloads = await Promise.all(
+      (chunks as Chunk[]).map(async (c) => ({
+        sequence: c.sequence,
+        downloadUrl: await getDownloadUrl(c.storage_key),
+        encryptionNonce: c.encryption_nonce,
+        isFinal: c.is_final,
+      }))
+    );
     return NextResponse.json({
-      chunked: false,
-      downloadUrl,
+      chunks: chunkDownloads,
       encryptedMetadata: row.encrypted_metadata,
-      encryptionNonce: row.encryption_nonce,
       publicHierarchicalKey: row.public_hierarchical_key,
       encryptedSessionKeyByFile: row.encrypted_session_key_by_file,
       sessionKeyNonce: row.session_key_nonce,
