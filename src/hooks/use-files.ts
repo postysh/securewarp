@@ -20,7 +20,6 @@ import {
   type HybridPrivateKeys,
 } from "@/lib/crypto/file-crypto";
 import {
-  fileChunkGenerator,
   encryptChunk,
   decryptChunk,
   getChunkCount,
@@ -1159,12 +1158,30 @@ export function useFiles(keys: {
       let chunksCompleted = 0;
       const inflight = new Set<Promise<void>>();
       const allChunks: Promise<void>[] = [];
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-      for await (const { data: chunkData, index, isFinal } of fileChunkGenerator(file)) {
+      // `File.slice(...)` is an O(1) view — it does NOT read bytes.
+      // The actual disk read is `slice.arrayBuffer()`, which used to
+      // live in `fileChunkGenerator` above the `for await` and
+      // serialized the pipeline on ~8 MB × ~20-40 MB/s read = ~300 ms
+      // per chunk. Observed effect: only ~2-3 concurrent PUTs ever
+      // actually ran at once despite CONCURRENT_CHUNK_UPLOADS = 5,
+      // because new chunks couldn't dispatch until the prior one's
+      // read resolved. Hoisting the read INTO the chunk promise lets
+      // the outer loop dispatch all 5 in-flight instantly (slice is
+      // cheap); reads overlap with PUTs of earlier chunks. HAR
+      // confirmed PUT starts spaced exactly by read-time before this
+      // fix.
+      for (let index = 0; index < totalChunks; index++) {
+        const start = index * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const slice = file.slice(start, end);
+        const isFinal = index === totalChunks - 1;
         const chunkUrl = chunkUrls[index];
 
         const chunkPromise: Promise<void> = (async () => {
-          const encrypted = encryptChunk(chunkData, index, isFinal, sessionKey);
+          const buffer = await slice.arrayBuffer();
+          const encrypted = encryptChunk(new Uint8Array(buffer), index, isFinal, sessionKey);
 
           await putChunkWithRetry(
             chunkUrl.uploadUrl,
@@ -1488,17 +1505,21 @@ export function useFiles(keys: {
 
         // 4. Upload chunks with the same semaphore pattern as
         //    uploadFile — see the long comment there for why we
-        //    keep two collections (inflight vs allChunks).
+        //    keep two collections (inflight vs allChunks) and why
+        //    the file-read lives inside the chunk promise instead
+        //    of the outer loop.
         const inflight = new Set<Promise<void>>();
         const allChunks: Promise<void>[] = [];
-        for await (const {
-          data: chunkData,
-          index,
-          isFinal,
-        } of fileChunkGenerator(newFile)) {
+        const totalChunks = Math.ceil(newFile.size / CHUNK_SIZE);
+        for (let index = 0; index < totalChunks; index++) {
+          const start = index * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, newFile.size);
+          const slice = newFile.slice(start, end);
+          const isFinal = index === totalChunks - 1;
           const chunkUrl = chunkUrls[index];
           const promise: Promise<void> = (async () => {
-            const encrypted = encryptChunk(chunkData, index, isFinal, sessionKey!);
+            const buffer = await slice.arrayBuffer();
+            const encrypted = encryptChunk(new Uint8Array(buffer), index, isFinal, sessionKey!);
             await putChunkWithRetry(
               chunkUrl.uploadUrl,
               encrypted.ciphertext as unknown as BodyInit,

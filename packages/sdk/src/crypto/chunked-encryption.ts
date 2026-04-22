@@ -47,23 +47,6 @@ export interface EncryptedChunk {
  * Split a file into chunks using a generator for memory efficiency.
  * Only one chunk is in memory at a time.
  */
-export async function* fileChunkGenerator(file: File): AsyncGenerator<{ data: Uint8Array; index: number; isFinal: boolean }> {
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_SIZE, file.size);
-    const slice = file.slice(start, end);
-    const buffer = await slice.arrayBuffer();
-
-    yield {
-      data: new Uint8Array(buffer),
-      index: i,
-      isFinal: i === totalChunks - 1,
-    };
-  }
-}
-
 /**
  * Encrypt a single chunk with the session key.
  * Prepends authentication data (sequence + isFinal) to prevent reordering attacks.
