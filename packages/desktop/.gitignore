@@ -1,0 +1,13 @@
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Rust lockfile is committed at repo root / per-package depending on the
+# team's preference. Tauri docs recommend committing it for apps.
+# !src-tauri/Cargo.lock
+
+# Node
+node_modules/
+
+# OS cruft
+.DS_Store
