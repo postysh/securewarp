@@ -25,8 +25,12 @@ if command -v gitleaks &>/dev/null; then
   fi
 fi
 
-# 2. npm audit (fast, cached)
-if ! npm audit --audit-level=high 2>/dev/null | grep -q "found 0"; then
+# 2. npm audit — trust the exit code. `--audit-level=high` already
+# makes npm exit 0 when only moderate/lower vulns exist, so the
+# previous `grep -q "found 0"` approach was brittle: modern npm
+# doesn't emit that string when moderate vulns are present, and the
+# check fired false positives on clean moderate-only trees.
+if ! npm audit --audit-level=high >/dev/null 2>&1; then
   echo "❌ npm audit found high/critical vulnerabilities"
   ((FAILURES++))
 else
