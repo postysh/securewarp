@@ -103,14 +103,14 @@ describe("chunked-encryption: adversarial inputs", () => {
     }
   });
 
-  it("CHUNK_SIZE locked at 16 MB", () => {
+  it("CHUNK_SIZE locked at 8 MB", () => {
     // Sentinel: if this test ever fails it means someone changed the
     // chunk size intentionally. That's OK — but remember:
     //   - Only new uploads use the new size; old files in R2 keep
     //     their original chunks via the per-chunk DB manifest.
     //   - rotate-init caps chunkCount at 10,000 on the server, so
     //     don't shrink below what accommodates the max plan size.
-    expect(CHUNK_SIZE).toBe(16 * 1024 * 1024);
+    expect(CHUNK_SIZE).toBe(8 * 1024 * 1024);
   });
 
   it("wrong nonce for the correct ciphertext fails", () => {
