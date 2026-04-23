@@ -74,17 +74,29 @@ export function bucketForShard(shard: number): string {
 function buildUrl(shard: number, storageKey: string): string {
   const endpoint = process.env.R2_ENDPOINT!;
   const bucket = bucketForShard(shard);
-  // R2 endpoint is typically https://<account>.r2.cloudflarestorage.com
-  // The bucket is a path segment, key is the rest of the path.
-  const base = endpoint.endsWith("/") ? endpoint.slice(0, -1) : endpoint;
+  // Virtual-hosted-style URL: the bucket becomes a subdomain of the
+  // account host instead of a path segment. This is load-bearing for
+  // the entire sharding story — path-style (`<account>/<bucket>/<key>`)
+  // has every shard sharing one hostname, so the browser multiplexes
+  // all chunk streams over a single TCP connection and we get the
+  // original bandwidth ceiling back even with 15 buckets. R2 has
+  // wildcard DNS on the account subdomain, so `<bucket>.<account>.r2.
+  // cloudflarestorage.com` resolves and signed URLs work against it.
+  // Confirmed empirically — see the DNS+signed-PUT/GET/DELETE probe
+  // in the commit that introduced this code.
+  //
+  // SigV4 signs the Host header, so as long as we present the bucket-
+  // scoped host when we sign and when the browser fetches, signatures
+  // match. aws4fetch's `sign()` uses the URL we pass it verbatim.
+  //
   // Encode each path segment individually so literal slashes between
   // segments are preserved (AWS SigV4 + S3/R2 require real `/` in the
   // object path — encoding the whole key with encodeURIComponent would
-  // turn `user/file/chunk` into `user%2Ffile%2Fchunk`, which doesn't
-  // match the key R2 actually stored and also breaks signature parity
-  // with clients that uploaded via the AWS SDK).
+  // turn `user/file/chunk` into `user%2Ffile%2Fchunk`, breaking parity
+  // with AWS SDK-uploaded keys and the stored object path).
+  const u = new URL(endpoint);
   const encodedKey = storageKey.split("/").map(encodeURIComponent).join("/");
-  return `${base}/${bucket}/${encodedKey}`;
+  return `${u.protocol}//${bucket}.${u.host}/${encodedKey}`;
 }
 
 // Presigned URL expiry. 6 hours comfortably covers a 25 GB upload on
@@ -168,9 +180,11 @@ export async function deleteBlobs(
           .map((k) => `<Object><Key>${escapeXml(k)}</Key></Object>`)
           .join("") +
         `<Quiet>true</Quiet></Delete>`;
-      const endpoint = process.env.R2_ENDPOINT!;
-      const base = endpoint.endsWith("/") ? endpoint.slice(0, -1) : endpoint;
-      const url = `${base}/${bucketForShard(shard)}?delete`;
+      // Same virtual-hosted-style host as buildUrl — keeps the bucket
+      // in the subdomain rather than the path so DNS + SigV4 line up
+      // with the upload/download URLs.
+      const u = new URL(process.env.R2_ENDPOINT!);
+      const url = `${u.protocol}//${bucketForShard(shard)}.${u.host}/?delete`;
       const res = await getClient().fetch(url, {
         method: "POST",
         body: xml,
