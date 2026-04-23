@@ -10,11 +10,6 @@ import { MobileNav } from "@/components/mobile-nav";
 import { AnnouncementBanner } from "@/components/announcement-banner";
 import { UserKeysContext, type UserKeys } from "@/hooks/use-user-keys";
 import { FilesContext, useFiles } from "@/hooks/use-files";
-import {
-  requestKeysFromSiblings,
-  startKeysResponder,
-  stopKeysResponder,
-} from "@/lib/auth/tab-sync";
 
 export default function DriveClient() {
   const router = useRouter();
@@ -57,39 +52,14 @@ export default function DriveClient() {
     // persisting the plaintext keys in localStorage — doing so would
     // survive any XSS payload, which defeats the purpose of
     // zero-knowledge client-side-only key storage.
-    //
-    // Before falling back to AuthScreen, try to borrow the keys from
-    // a sibling tab over BroadcastChannel. Same-origin only; see
-    // `src/lib/auth/tab-sync.ts` for the security argument. Avoids
-    // re-prompting for the password when the user already has another
-    // tab open with the vault unlocked.
-    let cancelled = false;
     const refresh = () => {
       const stored = sessionStorage.getItem("securewarp_keys");
       setKeys(stored ? JSON.parse(stored) : null);
     };
-
-    (async () => {
-      if (!sessionStorage.getItem("securewarp_keys")) {
-        const borrowed = await requestKeysFromSiblings();
-        if (cancelled) return;
-        if (borrowed) {
-          sessionStorage.setItem("securewarp_keys", JSON.stringify(borrowed));
-          window.dispatchEvent(new Event("securewarp-keys-updated"));
-        }
-      }
-      if (cancelled) return;
-      refresh();
-      setHydrated(true);
-    })();
-
-    startKeysResponder();
+    refresh();
+    setHydrated(true);
     window.addEventListener("securewarp-keys-updated", refresh);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("securewarp-keys-updated", refresh);
-      stopKeysResponder();
-    };
+    return () => window.removeEventListener("securewarp-keys-updated", refresh);
   }, []);
 
   // Zombie-session guard. `middleware.ts` trusts the JWT signature alone
