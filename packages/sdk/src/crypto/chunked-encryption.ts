@@ -30,7 +30,18 @@ const SECRETBOX_NONCE_LEN = 24;
 export const CHUNK_SIZE = 8 * 1024 * 1024;
 export const MAX_FILE_SIZE_FREE = 100 * 1024 * 1024; // 100 MB for free tier
 export const MAX_FILE_SIZE_PRO = 5 * 1024 * 1024 * 1024; // 5 GB for pro tier
-export const CONCURRENT_CHUNK_UPLOADS = 5;
+// Matched to `SHARD_COUNT` in src/lib/db/r2.ts so each in-flight chunk
+// at steady state hits a distinct bucket hostname (→ a distinct TCP
+// connection). Bumping this WITHOUT bumping the shard count just
+// multiplexes more streams onto the existing connections without
+// improving aggregate bandwidth — the whole reason we sharded. Keep
+// the two constants in sync.
+//
+// In-flight RAM: N × CHUNK_SIZE = 15 × 8 MB = 120 MB per upload. Fine
+// on desktop, tight but acceptable on modern mobile. If a future
+// mobile path needs lower RAM, add a mobile-specific override rather
+// than lowering the desktop ceiling.
+export const CONCURRENT_CHUNK_UPLOADS = 15;
 
 export interface EncryptedChunk {
   index: number;

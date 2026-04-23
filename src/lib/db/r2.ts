@@ -45,7 +45,15 @@ function getClient(): AwsClient {
 // same endpoint host (account-scoped); only the bucket path segment
 // differs. The SigV4 signature is bucket-aware via the URL path, so no
 // per-bucket credential management is needed.
-export const SHARD_COUNT = 5;
+//
+// Why 15: a single TCP flow to R2's ENAM edge tops out around 10 MB/s
+// for uploads on a typical ISP path (TCP window / RTT ceiling that no
+// amount of chunk-size tuning changes). Matched with
+// CONCURRENT_CHUNK_UPLOADS=15, the browser opens up to 15 parallel
+// TCP connections to 15 distinct bucket hostnames, unlocking ~150 MB/s
+// aggregate for users with gigabit+ upstream. Users on weaker links
+// see per-stream bandwidth divided down proportionally — no penalty.
+export const SHARD_COUNT = 15;
 
 export function shardForChunk(sequence: number): number {
   // Round-robin by chunk sequence. Even distribution at steady state
