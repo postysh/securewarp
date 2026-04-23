@@ -48,6 +48,7 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [recoveryWords, setRecoveryWords] = useState("");
@@ -134,6 +135,9 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
         return;
       }
       if (password.length < 8) {
+        return;
+      }
+      if (!agreedToTerms) {
         return;
       }
       await auth.signup(email, password, signupTurnstileToken ?? undefined);
@@ -439,11 +443,43 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                 />
               )}
 
+              {!lockCache && mode === "signup" && (
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={agreedToTerms}
+                    onChange={(e) => setAgreedToTerms(e.target.checked)}
+                    required
+                    disabled={auth.loading}
+                    className="mt-0.5 h-4 w-4 rounded border-border-secondary bg-bg-field accent-cta-primary cursor-pointer disabled:opacity-50"
+                  />
+                  <span className="text-[12px] text-text-tertiary leading-relaxed">
+                    I agree to the{" "}
+                    <Link href="/terms" target="_blank" className="text-text-link hover:underline">
+                      Terms
+                    </Link>
+                    ,{" "}
+                    <Link href="/privacy" target="_blank" className="text-text-link hover:underline">
+                      Privacy Policy
+                    </Link>
+                    , and{" "}
+                    <Link href="/trust-and-safety" target="_blank" className="text-text-link hover:underline">
+                      Trust &amp; Safety
+                    </Link>{" "}
+                    policy.
+                  </span>
+                </label>
+              )}
+
               <button
                 type="submit"
                 disabled={
                   auth.loading ||
-                  (lockCache ? unlockPassword.length === 0 : !signupReady || (mode === "signup" && password !== confirmPassword))
+                  (lockCache
+                    ? unlockPassword.length === 0
+                    : !signupReady ||
+                      (mode === "signup" &&
+                        (password !== confirmPassword || !agreedToTerms)))
                 }
                 className="w-full flex items-center justify-center gap-2 h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
