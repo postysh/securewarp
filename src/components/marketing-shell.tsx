@@ -110,11 +110,17 @@ function LogoWordmark({ text }: { text: string }) {
         window.location.pathname + window.location.search,
       );
     }
-    try {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch {
-      window.scrollTo(0, 0);
-    }
+    // `window.scrollTo` targets whatever the user agent designates
+    // as the scrolling element (usually <html>), but with
+    // `overflow-x: hidden` set on both html + body in globals.css,
+    // some browsers treat <body> as the scroller — so window.scrollTo
+    // becomes a no-op. Issue scroll commands against all three
+    // candidates; whichever one is the real scroll container picks
+    // it up and the others are harmless no-ops.
+    const opts: ScrollToOptions = { top: 0, behavior: "smooth" };
+    try { window.scrollTo(opts); } catch { window.scrollTo(0, 0); }
+    try { document.documentElement.scrollTo(opts); } catch { /* */ }
+    try { document.body.scrollTo(opts); } catch { /* */ }
   };
 
   return (
@@ -290,9 +296,15 @@ export function HeaderBar() {
         top: 0,
         zIndex: 50,
         borderBottom: `1px solid ${BORDER}`,
-        background: "rgba(255,255,255,0.55)",
-        backdropFilter: "blur(28px) saturate(180%)",
-        WebkitBackdropFilter: "blur(28px) saturate(180%)",
+        // Flat frosted glass — no gradient. High alpha (0.88) so the
+        // bar stays legibly white even when dark content scrolls
+        // behind it; lower alpha + saturation boost made the header
+        // pick up dark tones from the content below and read muddy.
+        // Keep the blur so there's still a "glass" feel rather than
+        // a solid bar.
+        background: "rgba(255,255,255,0.88)",
+        backdropFilter: "blur(24px)",
+        WebkitBackdropFilter: "blur(24px)",
       }}
     >
       <div
