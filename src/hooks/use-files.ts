@@ -709,7 +709,17 @@ export function useFiles(keys: {
         // before any inherited child tries to walk the parent chain.
         // The normal getFilesForUser query does this via ORDER BY
         // is_folder DESC, but starred/recent/trash views order by
-        // different columns.
+        // different columns. We ONLY reorder for the decrypt loop —
+        // the final `results` array is re-sorted back into server
+        // order below so flat views (Recent/Starred/Shared/Trash)
+        // aren't mangled by folders-first rearrangement. Recent in
+        // particular returns a mix of files and folders by
+        // accessed_at desc, and the old folders-first client sort
+        // caused renamed files to sink below any folder in the list.
+        const originalPosition = new Map<string, number>();
+        (data.files as Record<string, unknown>[]).forEach((f, i) => {
+          originalPosition.set(f.id as string, i);
+        });
         const sorted = [...data.files].sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
           (b.is_folder ? 1 : 0) - (a.is_folder ? 1 : 0)
         );
@@ -935,6 +945,19 @@ export function useFiles(keys: {
             }
           }
         }
+
+        // Restore server order. The decrypt loop ran folders-first
+        // for crypto correctness (parent hier keys must be cached
+        // before inherited children decrypt), but the final display
+        // order must match the server's sort — that's how Recent
+        // (accessed_at desc) and other flat views express per-user
+        // recency. For Own view the server already returns
+        // folders-first, so this is a no-op.
+        results.sort((a, b) => {
+          const ai = originalPosition.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+          const bi = originalPosition.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+          return ai - bi;
+        });
 
         // Cache the results for instant navigation next time
         fileListCache.current.set(cacheKey, results);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import ArrowUp01Icon from "@hugeicons/core-free-icons/ArrowUp01Icon";
@@ -535,7 +535,13 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   // session) from hiding the "my renamed file should be at the top"
   // behavior that the view is named for. Column-header clicks still
   // work in-session but we do not persist them for Recent.
-  useEffect(() => {
+  //
+  // useLayoutEffect (not useEffect) so the sortField updates before
+  // the browser paints the new viewMode — otherwise there's a visible
+  // frame where Recent is rendered with the previous view's sort
+  // (e.g. "name asc" from My Drive), which re-alphabetizes the list
+  // and briefly hides the just-renamed file.
+  useLayoutEffect(() => {
     if (fileOps.viewMode === "recent") {
       setSortField("recent");
       setSortAsc(false);
