@@ -93,13 +93,20 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
   }, [mode]);
 
   // Belt-and-suspenders for the edge-cache bypass: if we reach /login
-  // or /signup while an authenticated session cookie is still live,
-  // punt to /drive. Middleware already handles this server-side, but
-  // CF's edge cache has at times served a cached auth page before
+  // while an authenticated session cookie is still live, punt to
+  // /drive. Middleware already handles this server-side, but CF's
+  // edge cache has at times served a cached auth page before
   // middleware ran (fixed by `export const dynamic = "force-dynamic"`
   // on the page files), so a client-side detector here is a cheap
   // fallback. Fetches a protected endpoint; 200 → authed → redirect.
+  //
+  // Deliberately does NOT run in signup mode. Clicking "Sign up" is
+  // an explicit "I want a new account" signal — even if the user has
+  // a live cookie from a prior session, we want to render the signup
+  // form so they can actually create a new account. The register
+  // endpoint replaces the prior session on success.
   useEffect(() => {
+    if (mode === "signup") return;
     let cancelled = false;
     fetch("/api/auth/profile", { cache: "no-store" })
       .then((res) => {
@@ -108,7 +115,7 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
       })
       .catch(() => { /* not authed, render normal form */ });
     return () => { cancelled = true; };
-  }, [router]);
+  }, [router, mode]);
 
   // Turnstile token for signup only. Login + recovery are already
   // protected by SRP + Argon2id + rate limiter, which make automated

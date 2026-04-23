@@ -5,7 +5,13 @@ import { jwtVerify } from "jose";
 const SESSION_COOKIE = "securewarp_session";
 
 const protectedRoutes = ["/drive", "/admin", "/welcome"];
-const authRoutes = ["/login", "/signup"];
+// Only /login redirects away when a session is live — visiting /login
+// with an active cookie is almost always a misclick, so we bounce to
+// /drive. /signup is intentionally NOT in this list: clicking "Sign
+// up" is an explicit "I want a new account" signal, so we let the
+// page render the signup form even if a cookie is still active. The
+// new signup replaces the prior session on success.
+const authRoutes = ["/login"];
 
 // The isolated PDF viewer subdomain. Only `/viewer` is meaningful
 // here; every other path redirects back to the main app so the
