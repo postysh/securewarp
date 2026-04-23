@@ -46,29 +46,26 @@ const InitSchema = z.object({
   { message: "parent_keys_claim must be present iff parentId is set" }
 );
 
-// Step 2: Register a chunk after upload
-const ChunkSchema = z.object({
-  action: z.literal("chunk"),
-  fileId: z.string().uuid(),
-  // Version the chunk belongs to. Returned by /init (and later by
-  // the new-version route). Optional for backward compat with any
-  // in-flight pre-migration clients — server falls back to the
-  // file's v1 in that case.
-  versionId: z.string().uuid().optional(),
+// Step 3: Finalize — confirm all chunks uploaded + register them.
+// Chunk rows are batch-inserted here rather than per-chunk mid-upload:
+// the per-chunk POST added ~330 ms serial-per-chunk wall time (CF
+// Worker → Supabase round-trip) while the R2 PUT was already done
+// and the concurrency gate was waiting on BOTH to resolve before
+// dispatching the next chunk. Moving registration to a single
+// batched INSERT at the end drops ~6-7 s off a 100-chunk upload.
+//
+// Crash safety: if the client disconnects mid-upload, R2 blobs are
+// orphaned but the DB has no stale chunk rows. The cleanup-stale
+// cron sweeps orphan R2 blobs every 24 h by matching them against
+// files whose upload_complete = false.
+const FinalizeChunkSchema = z.object({
   sequence: z.number().int().min(0),
-  isFinal: z.boolean(),
-  sizeBytes: z.number().positive(),
+  shard: z.number().int().min(0).max(63),
   storageKey: z.string().min(1),
   encryptionNonce: z.string().min(1),
-  // Shard index (which R2 bucket the ciphertext went to). Derived
-  // server-side from `sequence` via shardForChunk — we persist the
-  // client-sent value for audit clarity but re-derive on the server
-  // to prevent a malicious client from lying about where the bytes
-  // ended up. See the assertion below.
-  shard: z.number().int().min(0).max(63),
+  sizeBytes: z.number().int().positive(),
+  isFinal: z.boolean(),
 });
-
-// Step 3: Finalize — confirm all chunks uploaded
 const FinalizeSchema = z.object({
   action: z.literal("finalize"),
   fileId: z.string().uuid(),
@@ -77,6 +74,10 @@ const FinalizeSchema = z.object({
   // files metadata to point at this version). Absent = initial v1
   // upload, just flip upload_complete.
   versionId: z.string().uuid().optional(),
+  // All chunks, batched. Replaces the per-chunk action:"chunk" POSTs
+  // that used to register them one at a time. Empty array is valid
+  // only for zero-size uploads (rare but possible).
+  chunks: z.array(FinalizeChunkSchema),
 });
 
 // Client calls this when a chunk PUT returns 403 mid-upload (the
@@ -369,80 +370,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ chunkUrls });
     }
 
-    // ─── CHUNK ───
-    if (body.action === "chunk") {
-      const parsed = ChunkSchema.safeParse(body);
-      if (!parsed.success) {
-        return NextResponse.json({ error: "Invalid data" }, { status: 400 });
-      }
-
-      const data = parsed.data;
-
-      // Verify file belongs to user
-      const { data: file } = await supabase
-        .from("files")
-        .select("id")
-        .eq("id", data.fileId)
-        .eq("owner_id", session.userId)
-        .single();
-
-      if (!file) {
-        return NextResponse.json({ error: "File not found" }, { status: 404 });
-      }
-
-      // Resolve which version this chunk belongs to. Prefer the
-      // explicit versionId the client supplied; fall back to the
-      // file's v1 (shouldn't happen post-migration, but backwards
-      // compat with any in-flight client that hasn't been updated).
-      let versionId = data.versionId ?? null;
-      if (!versionId) {
-        const { data: v1 } = await supabase
-          .from("file_versions")
-          .select("id")
-          .eq("file_id", data.fileId)
-          .eq("version_number", 1)
-          .single();
-        versionId = (v1?.id as string | null) ?? null;
-      }
-
-      // Re-derive the shard server-side. If the client sent a shard
-      // that doesn't match `shardForChunk(sequence)`, reject — a
-      // malicious client could otherwise point a chunk row at a
-      // bucket the bytes never went to, causing "missing chunk"
-      // errors on the next download. The shard persisted to the DB
-      // always matches what URL-minting produced.
-      const expectedShard = shardForChunk(data.sequence);
-      if (data.shard !== expectedShard) {
-        return NextResponse.json(
-          { error: "Shard mismatch" },
-          { status: 400 },
-        );
-      }
-
-      // Insert chunk record
-      const { error } = await supabase.from("file_chunks").insert({
-        file_id: data.fileId,
-        version_id: versionId,
-        sequence: data.sequence,
-        is_final: data.isFinal,
-        size_bytes: data.sizeBytes,
-        storage_key: data.storageKey,
-        encryption_nonce: data.encryptionNonce,
-        shard: expectedShard,
-      });
-
-      if (error) throw error;
-
-      return NextResponse.json({ success: true });
-    }
-
     // ─── FINALIZE ───
     if (body.action === "finalize") {
       const parsed = FinalizeSchema.safeParse(body);
       if (!parsed.success) {
         return NextResponse.json({ error: "Invalid data" }, { status: 400 });
       }
-      const { fileId, versionId } = parsed.data;
+      const { fileId, versionId, chunks: submittedChunks } = parsed.data;
 
       // Owner check — only the owner's session can finalize.
       const { data: file } = await supabase
@@ -455,13 +389,25 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "File not found" }, { status: 404 });
       }
 
+      // Validate the shard mapping for every submitted chunk. Re-derive
+      // from sequence on the server so a malicious client can't record
+      // a chunk in the wrong bucket (would cause "missing chunk" at
+      // download time). Cheap loop; bails early on first mismatch.
+      for (const c of submittedChunks) {
+        if (c.shard !== shardForChunk(c.sequence)) {
+          return NextResponse.json(
+            { error: `Shard mismatch at sequence ${c.sequence}` },
+            { status: 400 },
+          );
+        }
+      }
+
       // Two paths:
-      //   - Initial v1 upload: versionId absent. Count chunks by
-      //     file_id (they all belong to v1). Flip upload_complete.
-      //   - New version upload: versionId present. Count chunks by
-      //     version_id so we don't accidentally mix counts with v1's.
-      //     Bump current_version_number + version_count and update
-      //     the denormalized metadata columns on `files` so listings
+      //   - Initial v1 upload: versionId absent. Chunks belong to v1.
+      //     Flip upload_complete.
+      //   - New version upload: versionId present. Chunks belong to
+      //     that version. Bump current_version_number + version_count
+      //     and update the denormalized metadata on `files` so listings
       //     reflect the new version.
       if (versionId) {
         const { data: version } = await supabase
@@ -474,16 +420,30 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Version not found" }, { status: 404 });
         }
 
-        const { data: chunks } = await supabase
-          .from("file_chunks")
-          .select("sequence")
-          .eq("version_id", versionId);
-        if (!chunks || chunks.length !== version.chunk_count) {
+        if (submittedChunks.length !== version.chunk_count) {
           return NextResponse.json(
-            { error: "Not all chunks uploaded" },
+            { error: "Chunk count mismatch" },
             { status: 400 },
           );
         }
+
+        // Bulk insert chunks. Replaces the per-chunk action:"chunk"
+        // round-trips the client used to make (~330 ms each). Atomic
+        // insert; any failure leaves the DB clean (no chunks recorded
+        // for this version, cleanup-stale picks up orphan R2 blobs).
+        const { error: insChunksErr } = await supabase.from("file_chunks").insert(
+          submittedChunks.map((c) => ({
+            file_id: fileId,
+            version_id: versionId,
+            sequence: c.sequence,
+            is_final: c.isFinal,
+            size_bytes: c.sizeBytes,
+            storage_key: c.storageKey,
+            encryption_nonce: c.encryptionNonce,
+            shard: c.shard,
+          })),
+        );
+        if (insChunksErr) throw insChunksErr;
 
         // Commit: point `files` at the new version so list endpoints
         // render the new metadata immediately. version_count is an
@@ -542,17 +502,35 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true });
       }
 
-      // Initial v1 finalize: scope chunk count by file_id (v1 is the
-      // only version in existence).
-      const { data: chunks } = await supabase
-        .from("file_chunks")
-        .select("sequence")
-        .eq("file_id", fileId)
-        .order("sequence");
-
-      if (!chunks || chunks.length !== file.chunk_count) {
-        return NextResponse.json({ error: "Not all chunks uploaded" }, { status: 400 });
+      // Initial v1 finalize: chunks belong to v1. Validate count
+      // against the declared chunk_count on the files row, then
+      // bulk-insert and flip upload_complete.
+      if (submittedChunks.length !== file.chunk_count) {
+        return NextResponse.json({ error: "Chunk count mismatch" }, { status: 400 });
       }
+
+      // Resolve v1's id so chunks link to the correct version row.
+      const { data: v1 } = await supabase
+        .from("file_versions")
+        .select("id")
+        .eq("file_id", fileId)
+        .eq("version_number", 1)
+        .single();
+      const v1Id = v1?.id as string | undefined;
+
+      const { error: insChunksErr } = await supabase.from("file_chunks").insert(
+        submittedChunks.map((c) => ({
+          file_id: fileId,
+          version_id: v1Id ?? null,
+          sequence: c.sequence,
+          is_final: c.isFinal,
+          size_bytes: c.sizeBytes,
+          storage_key: c.storageKey,
+          encryption_nonce: c.encryptionNonce,
+          shard: c.shard,
+        })),
+      );
+      if (insChunksErr) throw insChunksErr;
 
       const { error: finalizeErr } = await supabase
         .from("files")

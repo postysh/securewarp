@@ -1159,18 +1159,27 @@ export function useFiles(keys: {
       const allChunks: Promise<void>[] = [];
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
+      // Metadata to batch-register at finalize time. Replaces the
+      // per-chunk POST /api/files/chunk-upload action:"chunk" that
+      // used to run serially inside each chunk's async function —
+      // ~330 ms of CF Worker + Supabase round-trip per chunk that
+      // held the concurrency gate open while the DB wrote a single
+      // row. One batched insert at finalize time is the same DB
+      // work wrapped into one trip.
+      const registeredChunks: Array<{
+        sequence: number;
+        shard: number;
+        storageKey: string;
+        encryptionNonce: string;
+        sizeBytes: number;
+        isFinal: boolean;
+      }> = new Array(totalChunks);
+
       // `File.slice(...)` is an O(1) view — it does NOT read bytes.
-      // The actual disk read is `slice.arrayBuffer()`, which used to
-      // live in `fileChunkGenerator` above the `for await` and
-      // serialized the pipeline on ~8 MB × ~20-40 MB/s read = ~300 ms
-      // per chunk. Observed effect: only ~2-3 concurrent PUTs ever
-      // actually ran at once despite CONCURRENT_CHUNK_UPLOADS = 5,
-      // because new chunks couldn't dispatch until the prior one's
-      // read resolved. Hoisting the read INTO the chunk promise lets
-      // the outer loop dispatch all 5 in-flight instantly (slice is
-      // cheap); reads overlap with PUTs of earlier chunks. HAR
-      // confirmed PUT starts spaced exactly by read-time before this
-      // fix.
+      // The actual disk read is `slice.arrayBuffer()`. Hoisting the
+      // read INTO the chunk promise lets the outer loop dispatch all
+      // in-flight instantly (slice is cheap); reads overlap with PUTs
+      // of earlier chunks.
       for (let index = 0; index < totalChunks; index++) {
         const start = index * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, file.size);
@@ -1209,22 +1218,17 @@ export function useFiles(keys: {
             },
           );
 
-          // Register chunk with server
-          await fetch("/api/files/chunk-upload", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "chunk",
-              fileId,
-              versionId,
-              sequence: index,
-              isFinal,
-              sizeBytes: encrypted.sizeBytes,
-              storageKey: chunkUrl.storageKey,
-              encryptionNonce: encrypted.nonce,
-              shard: chunkUrl.shard,
-            }),
-          });
+          // Record metadata for the batched finalize POST. Index
+          // position matches sequence so we can drop the array into
+          // the payload in-order.
+          registeredChunks[index] = {
+            sequence: index,
+            shard: chunkUrl.shard,
+            storageKey: chunkUrl.storageKey,
+            encryptionNonce: encrypted.nonce,
+            sizeBytes: encrypted.sizeBytes,
+            isFinal,
+          };
 
           chunksCompleted++;
           const progress =
@@ -1253,12 +1257,16 @@ export function useFiles(keys: {
       // exhausted, refresh-URL failed, etc.) propagates here.
       await Promise.all(allChunks);
 
-      // 4. Finalize
+      // 4. Finalize with the batched chunk metadata.
       updateProgress(96, "Finalizing...");
       await fetch("/api/files/chunk-upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "finalize", fileId }),
+        body: JSON.stringify({
+          action: "finalize",
+          fileId,
+          chunks: registeredChunks,
+        }),
       });
 
       // 5. Update the local search cache so this file is discoverable
@@ -1510,12 +1518,21 @@ export function useFiles(keys: {
 
         // 4. Upload chunks with the same semaphore pattern as
         //    uploadFile — see the long comment there for why we
-        //    keep two collections (inflight vs allChunks) and why
-        //    the file-read lives inside the chunk promise instead
-        //    of the outer loop.
+        //    keep two collections (inflight vs allChunks), why the
+        //    file-read lives inside the chunk promise, and why chunk
+        //    metadata is batched into the finalize POST instead of
+        //    per-chunk round-trips.
         const inflight = new Set<Promise<void>>();
         const allChunks: Promise<void>[] = [];
         const totalChunks = Math.ceil(newFile.size / CHUNK_SIZE);
+        const registeredChunks: Array<{
+          sequence: number;
+          shard: number;
+          storageKey: string;
+          encryptionNonce: string;
+          sizeBytes: number;
+          isFinal: boolean;
+        }> = new Array(totalChunks);
         for (let index = 0; index < totalChunks; index++) {
           const start = index * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, newFile.size);
@@ -1551,21 +1568,14 @@ export function useFiles(keys: {
                 },
               },
             );
-            await fetch("/api/files/chunk-upload", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                action: "chunk",
-                fileId: existingFileId,
-                versionId,
-                sequence: index,
-                isFinal,
-                sizeBytes: encrypted.sizeBytes,
-                storageKey: chunkUrl.storageKey,
-                encryptionNonce: encrypted.nonce,
-                shard: chunkUrl.shard,
-              }),
-            });
+            registeredChunks[index] = {
+              sequence: index,
+              shard: chunkUrl.shard,
+              storageKey: chunkUrl.storageKey,
+              encryptionNonce: encrypted.nonce,
+              sizeBytes: encrypted.sizeBytes,
+              isFinal,
+            };
           })();
           allChunks.push(promise);
           inflight.add(promise);
@@ -1578,8 +1588,8 @@ export function useFiles(keys: {
         await Promise.all(allChunks);
         bumpQueue(95);
 
-        // 5. Finalize — server flips files.current_version_number +
-        //    denormalized metadata to this version.
+        // 5. Finalize — server batch-inserts all chunks then flips
+        //    files.current_version_number + denormalized metadata.
         await fetch("/api/files/chunk-upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1587,6 +1597,7 @@ export function useFiles(keys: {
             action: "finalize",
             fileId: existingFileId,
             versionId,
+            chunks: registeredChunks,
           }),
         });
 
