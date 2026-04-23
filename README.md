@@ -846,6 +846,40 @@ ALTER TABLE user_ip_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE banned_identifiers ENABLE ROW LEVEL SECURITY;
 ```
 
+#### Law enforcement request log
+
+```sql
+-- Intake log for legal process served on SecureWarp. Populated
+-- manually by admins as each request arrives (via email, mail, or
+-- in-person service), because legal process doesn't come through
+-- any app endpoint. Drives the "Law enforcement requests" section of
+-- the transparency report.
+CREATE TABLE IF NOT EXISTS law_enforcement_requests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  received_at timestamptz NOT NULL,
+  type text NOT NULL CHECK (type IN (
+    'subpoena-us', 'warrant-us', 'preservation-us', 'mlat', 'nsl', 'other'
+  )),
+  jurisdiction text,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN (
+    'pending', 'produced', 'challenged', 'rejected'
+  )),
+  produced_at timestamptz,
+  gag_order_until timestamptz,
+  notes text,
+  created_by_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS le_requests_received_idx
+  ON law_enforcement_requests (received_at DESC);
+CREATE INDEX IF NOT EXISTS le_requests_status_idx
+  ON law_enforcement_requests (status, received_at DESC);
+
+ALTER TABLE law_enforcement_requests ENABLE ROW LEVEL SECURITY;
+```
+
 ### Development
 
 ```bash
