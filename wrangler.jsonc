@@ -18,6 +18,14 @@
   "compatibility_date": "2025-03-25",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 
+  // Smart Placement — CF re-homes the Worker to a colo close to the
+  // origin DB (Supabase) when the call graph shows that a request
+  // waits on far-away subrequests. File bytes never touch the Worker
+  // (they go browser → R2 direct via presigned URLs), so this does
+  // NOT affect upload/download throughput. It shaves RTT off metadata
+  // and auth API calls that the Worker makes to Supabase.
+  "placement": { "mode": "smart" },
+
   // Disable the *.workers.dev preview URL. Traffic should only reach
   // this Worker through the custom domain (securewarp.com). Leaving the
   // workers.dev subdomain enabled is both a backup URL users might

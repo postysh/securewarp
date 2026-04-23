@@ -17,7 +17,7 @@ Password
 
 File Upload
   → Random session key per file
-  → XChaCha20-Poly1305 (encrypt content in 8 MB chunks)
+  → XChaCha20-Poly1305 (encrypt content in 16 MB chunks)
   → Authenticated chunks (sequence + isFinal prevents tampering)
   → Session key wrapped to recipient's X25519 pub key via ECDH + HKDF + XChaCha20-Poly1305
   → Encrypted blob uploaded directly to R2 (server never touches plaintext)

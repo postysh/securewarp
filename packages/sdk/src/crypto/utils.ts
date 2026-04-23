@@ -21,7 +21,7 @@ import {
 export function toBase64(bytes: Uint8Array): string {
   // Chunk the byte → char conversion so `String.fromCharCode.apply` doesn't
   // blow the JS call-stack on large inputs (browsers cap apply args at
-  // roughly 65k–125k depending on engine; ciphertext chunks can be 8 MB+).
+  // roughly 65k–125k depending on engine; ciphertext chunks can be 16 MB+).
   let binary = "";
   const CHUNK = 0x8000; // 32 KiB — safely below every engine's cap.
   for (let i = 0; i < bytes.length; i += CHUNK) {

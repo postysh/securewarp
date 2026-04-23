@@ -14,11 +14,11 @@
  * bit-identity compat test in `packages/sdk/src/crypto/argon2-compat.test.ts`
  * still guards the implementation.
  *
- * Only Argon2id is off-loaded. XChaCha20 per-chunk encrypt/decrypt
- * (~10-20 ms per 8 MB chunk) is bound by the network round-trip in
- * upload/download, not CPU; HKDF is <1 ms. The postMessage copy cost
- * of moving multi-MB chunks across the worker boundary would exceed
- * the savings.
+ * Only Argon2id is off-loaded here. XChaCha20 per-chunk encrypt/decrypt
+ * runs in its own worker pool (`chunk-pool.ts`) — at 16 MB per chunk,
+ * HAR measurements showed pure-JS noble was eating ~400 ms of main-
+ * thread CPU per chunk, which bottlenecked the 5-way network pipeline.
+ * HKDF is <1 ms and stays on the main thread.
  */
 
 import { expose } from "comlink";
