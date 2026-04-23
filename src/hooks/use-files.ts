@@ -2439,7 +2439,15 @@ export function useFiles(keys: {
       // Drop any cached preview — the file is gone (soft-deleted).
       previewCache.current.invalidate(fileId);
 
-      await fetchFiles(state.currentFolder, state.viewMode);
+      // Optimistic removal — the trashed file shouldn't appear in
+      // the non-trash view anymore; drop it from local state and
+      // refetch silently so the UI doesn't hang on a full list
+      // round-trip before the row disappears.
+      setState((s) => ({
+        ...s,
+        files: s.files.filter((f) => f.id !== fileId),
+      }));
+      void fetchFiles(state.currentFolder, state.viewMode, undefined, undefined, { silent: true });
     } catch (err) {
       console.error("Delete error:", err);
       setState((s) => ({ ...s, error: "Delete failed" }));
@@ -3546,7 +3554,16 @@ export function useFiles(keys: {
         // that list back), so a safer bet is to just clear the
         // whole preview cache on purge.
         previewCache.current.clear();
-        await fetchFiles(null, state.viewMode);
+        // Optimistic local update — drop the purged row from state
+        // immediately so the UI feels snappy on a long trash list.
+        // Fire-and-forget the full refetch in the background to
+        // pick up any server-side state we don't know about
+        // (orphan cleanup, cascade effects on shared views, etc.).
+        setState((s) => ({
+          ...s,
+          files: s.files.filter((f) => f.id !== fileId),
+        }));
+        void fetchFiles(null, state.viewMode, undefined, undefined, { silent: true });
         return { ok: true };
       } catch {
         return { ok: false, error: "Purge failed" };
@@ -3568,7 +3585,13 @@ export function useFiles(keys: {
         // correct move: drop the whole preview cache — the alternative
         // is walking trashed-ids and invalidating each.
         previewCache.current.clear();
-        await fetchFiles(null, "trash");
+        // Optimistic: if we're currently in the trash view, clear
+        // local files immediately so the list empties without
+        // waiting on the refetch. The background refetch reconciles.
+        setState((s) =>
+          s.viewMode === "trash" ? { ...s, files: [] } : s,
+        );
+        void fetchFiles(null, "trash", undefined, undefined, { silent: true });
         return { ok: true, purged: data.purged ?? 0 };
       } catch {
         return { ok: false, error: "Empty trash failed" };

@@ -272,6 +272,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [emptyTrashBusy, setEmptyTrashBusy] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState<DecryptedFile | null>(null);
   const [purgeBusy, setPurgeBusy] = useState(false);
+  // Bulk purge (selection-based "Delete forever" from trash view).
+  // Kept separate from the single-file purgeTarget so the confirm
+  // dialog can render "Delete N items forever?" without fighting
+  // the single-file dialog's title.
+  const [bulkPurgeTargets, setBulkPurgeTargets] = useState<DecryptedFile[]>([]);
+  const [bulkPurgeBusy, setBulkPurgeBusy] = useState(false);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const [quotaModalOpen, setQuotaModalOpen] = useState(false);
 
@@ -471,6 +477,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     !!versionHistoryTarget ||
     !!renameTarget ||
     !!purgeTarget ||
+    bulkPurgeTargets.length > 0 ||
     !!shareTarget ||
     !!moveTarget ||
     !!detailsTarget ||
@@ -712,10 +719,16 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         return;
       }
 
-      // Delete/Backspace — trash selected
+      // Delete/Backspace — trash selected (or permanent-delete if
+      // already in the trash view; soft-delete there would be a no-op).
       if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0) {
         e.preventDefault();
         const ids = [...selected];
+        if (fileOps.viewMode === "trash") {
+          const targets = fileOps.files.filter((f) => ids.includes(f.id));
+          setBulkPurgeTargets(targets);
+          return;
+        }
         selectNone();
         (async () => {
           for (const id of ids) await fileOps.deleteItem(id);
@@ -1176,10 +1189,18 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <button
                 onClick={async () => {
                   const ids = [...selected];
+                  const targets = fileOps.files.filter((f) => ids.includes(f.id));
+                  // Trash view → permanent delete (soft-delete on
+                  // already-trashed rows is a no-op). Open the bulk
+                  // purge confirm; selection clears on confirm/cancel.
+                  if (fileOps.viewMode === "trash") {
+                    setBulkPurgeTargets(targets);
+                    return;
+                  }
                   selectNone();
                   for (const id of ids) await fileOps.deleteItem(id);
                 }}
-                title="Trash"
+                title={fileOps.viewMode === "trash" ? "Delete forever" : "Trash"}
                 className="p-1.5 rounded-md hover:bg-cta-nav-hover transition-colors cursor-pointer text-accent-red"
               >
                 <HugeiconsIcon icon={Delete02Icon} size={15} />
@@ -2269,6 +2290,44 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           });
         }}
         onCancel={() => !purgeBusy && setPurgeTarget(null)}
+      />
+      <ConfirmDialog
+        open={bulkPurgeTargets.length > 0}
+        title={
+          bulkPurgeTargets.length === 1
+            ? `Delete "${bulkPurgeTargets[0]?.name ?? ""}" forever?`
+            : `Delete ${bulkPurgeTargets.length} items forever?`
+        }
+        description={
+          bulkPurgeTargets.length === 1
+            ? bulkPurgeTargets[0]?.isFolder
+              ? "This folder and every file inside it will be permanently deleted. This can't be undone."
+              : "This file will be permanently deleted. This can't be undone."
+            : "These items and anything inside them will be permanently deleted. This can't be undone."
+        }
+        confirmLabel="Delete forever"
+        destructive
+        busy={bulkPurgeBusy}
+        busyLabel="Deleting…"
+        onConfirm={async () => {
+          if (bulkPurgeTargets.length === 0) return;
+          setBulkPurgeBusy(true);
+          const ids = bulkPurgeTargets.map((f) => f.id);
+          // Fire purges in parallel. Each one is an independent
+          // subtree walk on the server; no ordering requirement.
+          await Promise.allSettled(ids.map((id) => fileOps.purgeItem(id)));
+          setBulkPurgeBusy(false);
+          setBulkPurgeTargets([]);
+          // Clear just the affected ids from selection.
+          const affected = new Set(ids);
+          setSelected((prev) => {
+            if (![...prev].some((id) => affected.has(id))) return prev;
+            const next = new Set(prev);
+            for (const id of affected) next.delete(id);
+            return next;
+          });
+        }}
+        onCancel={() => !bulkPurgeBusy && setBulkPurgeTargets([])}
       />
       <FilePreview
         fileId={previewFileId}
