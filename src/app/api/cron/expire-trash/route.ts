@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/db/supabase";
-import { deleteBlob } from "@/lib/db/r2";
+import { deleteBlobs } from "@/lib/db/r2";
 import { auditEventAwait } from "@/lib/audit";
 import { safeCompare, utf8ToBytes } from "@/lib/auth/safe-compare";
 import { logError } from "@/lib/log";
@@ -28,33 +28,36 @@ async function run(): Promise<NextResponse> {
     // Find all files trashed before the cutoff
     const { data: expired, error: findErr } = await supabase
       .from("files")
-      .select("id, storage_key, owner_id")
+      .select("id")
       .lt("deleted_at", cutoff)
       .not("deleted_at", "is", null);
     if (findErr) throw findErr;
 
     let fileIds: string[] = [];
-    let storageKeys: string[] = [];
+    let orphanedChunks: { shard: number; storageKey: string }[] = [];
     if (expired && expired.length > 0) {
       fileIds = expired.map((f) => f.id);
 
-      // Collect chunk storage keys
+      // Collect (shard, storage_key) for every chunk. Legacy
+      // files.storage_key is gone.
       const { data: chunks } = await supabase
         .from("file_chunks")
-        .select("storage_key")
+        .select("storage_key, shard")
         .in("file_id", fileIds);
 
-      storageKeys = [
-        ...expired.map((f) => f.storage_key).filter((k): k is string => !!k),
-        ...((chunks || []).map((c) => c.storage_key as string)),
-      ];
+      orphanedChunks = (chunks || [])
+        .filter((c) => !!c.storage_key)
+        .map((c) => ({
+          storageKey: c.storage_key as string,
+          shard: (c.shard as number | null) ?? 0,
+        }));
 
-      // R2 cleanup (best-effort)
-      await Promise.all(
-        storageKeys.map(async (key) => {
-          try { await deleteBlob(key); } catch (err) { logError("cron.expire-trash.r2", err); }
-        })
-      );
+      // R2 cleanup (best-effort, grouped by shard internally)
+      try {
+        await deleteBlobs(orphanedChunks);
+      } catch (err) {
+        logError("cron.expire-trash.r2", err);
+      }
 
       // DB delete (cascades to file_keys, file_chunks)
       const { error: delErr } = await supabase
@@ -79,12 +82,12 @@ async function run(): Promise<NextResponse> {
     // get killed when Workers returns the response.
     await auditEventAwait({
       event: "cleanup.run",
-      detail: `source=expire-trash purged=${fileIds.length} blobs=${storageKeys.length} rate_limits=${rlCount ?? 0} tokens=${rtCount ?? 0}`,
+      detail: `source=expire-trash purged=${fileIds.length} blobs=${orphanedChunks.length} rate_limits=${rlCount ?? 0} tokens=${rtCount ?? 0}`,
     });
 
     return NextResponse.json({
       purged: fileIds.length,
-      blobs: storageKeys.length,
+      blobs: orphanedChunks.length,
       pruned: { rateLimits: rlCount ?? 0, recoveryTokens: rtCount ?? 0 },
     });
   } catch (err) {

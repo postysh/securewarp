@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
-import { deleteBlob } from "@/lib/db/r2";
+import { deleteBlobs } from "@/lib/db/r2";
 import { auditEvent } from "@/lib/audit";
 import { broadcast } from "@/lib/realtime/broadcast";
 import { channelForWorkspace } from "@/lib/realtime/channels";
@@ -99,26 +99,29 @@ export async function POST(request: Request) {
       throw new Error(`Subtree lookup failed: ${subErr.message}`);
     }
 
-    // rpc returns [{out_file_id, out_storage_key}, ...] including both
-    // the files.storage_key (legacy single-blob) and file_chunks rows.
-    // Columns are prefixed to avoid a PL/pgSQL ambiguity between the
-    // RETURNS TABLE output and the source columns.
-    const rows = (subtree || []) as { out_storage_key: string | null }[];
-    const storageKeys = rows
-      .map((r) => r.out_storage_key)
-      .filter((k): k is string => !!k);
+    // rpc returns [{out_file_id, out_storage_key, out_shard}, ...] for
+    // every chunk in the subtree. Columns are prefixed to avoid a
+    // PL/pgSQL ambiguity between the RETURNS TABLE output and the
+    // source columns.
+    const rows = (subtree || []) as {
+      out_storage_key: string | null;
+      out_shard: number | null;
+    }[];
+    const orphanedChunks = rows
+      .filter((r) => !!r.out_storage_key)
+      .map((r) => ({
+        storageKey: r.out_storage_key as string,
+        shard: r.out_shard ?? 0,
+      }));
 
     // R2 cleanup (best-effort). A failed delete here leaks storage
-    // but must not block the DB purge.
-    await Promise.all(
-      storageKeys.map(async (key) => {
-        try {
-          await deleteBlob(key);
-        } catch (err) {
-          logError("files.purge.r2", err);
-        }
-      })
-    );
+    // but must not block the DB purge. `deleteBlobs` groups by shard
+    // and issues one S3 DeleteObjects per bucket.
+    try {
+      await deleteBlobs(orphanedChunks);
+    } catch (err) {
+      logError("files.purge.r2", err);
+    }
 
     // DB delete. ON DELETE CASCADE on files → file_keys + file_chunks
     // does the rest. Scoped to the root row's owner: workspace admins
@@ -146,7 +149,7 @@ export async function POST(request: Request) {
       event: "files.purge",
       actorUserId: session.userId,
       targetFileId: fileId,
-      detail: `${storageKeys.length} blobs`,
+      detail: `${orphanedChunks.length} blobs`,
     });
 
     return NextResponse.json({ success: true });

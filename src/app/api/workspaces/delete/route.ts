@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
-import { deleteBlob } from "@/lib/db/r2";
+import { deleteBlobs } from "@/lib/db/r2";
 import { logError } from "@/lib/log";
 
 const Schema = z.object({
@@ -36,26 +36,27 @@ export async function POST(request: Request) {
       .single();
     if (!ws) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Collect all files in the workspace for R2 cleanup
+    // Collect all chunks in the workspace for R2 cleanup. Legacy
+    // files.storage_key is gone — everything is on file_chunks.
     const { data: wsFiles } = await supabase
       .from("files")
-      .select("id, storage_key")
+      .select("id")
       .eq("workspace_id", parsed.data.workspaceId);
     const fileIds = (wsFiles || []).map((f) => f.id);
 
     const { data: chunks } = fileIds.length > 0
-      ? await supabase.from("file_chunks").select("storage_key").in("file_id", fileIds)
+      ? await supabase.from("file_chunks").select("storage_key, shard").in("file_id", fileIds)
       : { data: [] };
 
-    const storageKeys = [
-      ...(wsFiles || []).map((f) => f.storage_key).filter((k): k is string => !!k),
-      ...((chunks || []).map((c) => c.storage_key as string)),
-    ];
+    const orphanedChunks = (chunks || [])
+      .filter((c) => !!c.storage_key)
+      .map((c) => ({
+        storageKey: c.storage_key as string,
+        shard: (c.shard as number | null) ?? 0,
+      }));
 
     // R2 cleanup (best-effort)
-    await Promise.all(storageKeys.map(async (key) => {
-      try { await deleteBlob(key); } catch { /* */ }
-    }));
+    try { await deleteBlobs(orphanedChunks); } catch { /* */ }
 
     // Delete workspace (cascades to workspace_members)
     await supabase.from("workspaces").delete().eq("id", parsed.data.workspaceId);

@@ -1,7 +1,7 @@
 import "server-only";
 import { supabase } from "./supabase";
 import { deleteFileVersion } from "./files";
-import { deleteBlob } from "./r2";
+import { deleteBlobs } from "./r2";
 import { getEntitlements } from "@/lib/billing/customers";
 import { logError } from "@/lib/log";
 
@@ -77,20 +77,18 @@ export async function pruneVersionsForFile(
 
   let blobsPurged = 0;
   for (const versionId of toDelete) {
-    let orphaned: string[] = [];
+    let orphaned: { shard: number; storageKey: string }[] = [];
     try {
       orphaned = await deleteFileVersion(versionId);
     } catch (err) {
       logError("version-prune.delete", { fileId, versionId, err });
       continue;
     }
-    for (const key of orphaned) {
-      try {
-        await deleteBlob(key);
-        blobsPurged++;
-      } catch (err) {
-        logError("version-prune.r2", { fileId, versionId, key, err });
-      }
+    try {
+      await deleteBlobs(orphaned);
+      blobsPurged += orphaned.length;
+    } catch (err) {
+      logError("version-prune.r2", { fileId, versionId, count: orphaned.length, err });
     }
   }
 

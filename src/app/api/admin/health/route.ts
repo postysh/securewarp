@@ -38,10 +38,11 @@ export async function GET() {
 
     // R2: creds present check only. The actual signing path validates
     // at upload/download time via the AwsClient constructor error flow.
+    // Bucket names are derived per-shard from SHARD_COUNT in r2.ts, so
+    // there's no R2_BUCKET env var to check.
     const r2Configured = Boolean(
       process.env.R2_ACCESS_KEY_ID &&
         process.env.R2_SECRET_ACCESS_KEY &&
-        process.env.R2_BUCKET &&
         process.env.R2_ENDPOINT
     );
 

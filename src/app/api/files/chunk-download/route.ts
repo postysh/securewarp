@@ -71,9 +71,9 @@ export async function GET(request: Request) {
 
     if (chunks && chunks.length > 0) {
       const chunkDownloads = await Promise.all(
-        chunks.map(async (chunk: { sequence: number; storage_key: string; encryption_nonce: string; is_final: boolean }) => ({
+        chunks.map(async (chunk: { sequence: number; storage_key: string; encryption_nonce: string; is_final: boolean; shard: number | null }) => ({
           sequence: chunk.sequence,
-          downloadUrl: await getDownloadUrl(chunk.storage_key),
+          downloadUrl: await getDownloadUrl(chunk.shard ?? 0, chunk.storage_key),
           encryptionNonce: chunk.encryption_nonce,
           isFinal: chunk.is_final,
         }))

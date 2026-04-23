@@ -198,7 +198,7 @@ export async function restoreFileVersion(params: {
 
   const { data: sourceChunks, error: chunksErr } = await supabase
     .from("file_chunks")
-    .select("sequence, is_final, size_bytes, storage_key, encryption_nonce")
+    .select("sequence, is_final, size_bytes, storage_key, encryption_nonce, shard")
     .eq("version_id", params.sourceVersionId)
     .order("sequence");
   if (chunksErr) throw new Error(chunksErr.message);
@@ -253,11 +253,12 @@ export async function restoreFileVersion(params: {
       sequence: c.sequence,
       is_final: c.is_final,
       size_bytes: c.size_bytes,
-      // Shared R2 blob — same storage_key. When deleting this
+      // Shared R2 blob — same (shard, storage_key). When deleting this
       // version later, a reference count across file_chunks decides
       // whether to also purge the blob.
       storage_key: c.storage_key,
       encryption_nonce: c.encryption_nonce,
+      shard: c.shard,
     }));
     const { error: insertErr } = await supabase.from("file_chunks").insert(rows);
     if (insertErr) throw new Error(insertErr.message);
@@ -269,38 +270,52 @@ export async function restoreFileVersion(params: {
 /**
  * Delete a specific version. The caller must ensure it's NOT the
  * current version (that's nonsensical — there'd be no "head" to show
- * in lists). Returns the storage_keys that became orphaned by this
- * delete so the caller can purge R2 blobs. Keys still referenced by
- * another version are filtered out.
+ * in lists). Returns the `{shard, storageKey}` records that became
+ * orphaned by this delete so the caller can purge R2 blobs from the
+ * correct bucket. Keys still referenced by another version are
+ * filtered out.
  */
-export async function deleteFileVersion(versionId: string): Promise<string[]> {
+export async function deleteFileVersion(
+  versionId: string,
+): Promise<{ shard: number; storageKey: string }[]> {
   // Pull the chunk rows for this version BEFORE deleting so we can
-  // reference-count their storage_keys across remaining versions.
+  // reference-count their (shard, storage_key) across remaining versions.
   const { data: chunks } = await supabase
     .from("file_chunks")
-    .select("storage_key")
+    .select("storage_key, shard")
     .eq("version_id", versionId);
 
-  const storageKeys = (chunks ?? [])
-    .map((c) => c.storage_key as string)
-    .filter(Boolean);
+  const candidates = (chunks ?? [])
+    .map((c) => ({
+      storageKey: c.storage_key as string,
+      shard: (c.shard as number | null) ?? 0,
+    }))
+    .filter((c) => c.storageKey);
 
   // Delete the version row — file_chunks rows cascade.
   const { error } = await supabase.from("file_versions").delete().eq("id", versionId);
   if (error) throw new Error(error.message);
 
-  if (storageKeys.length === 0) return [];
+  if (candidates.length === 0) return [];
 
-  // Ref-count: any storage_key still referenced by a different
+  // Ref-count: any (shard, storage_key) still referenced by a different
   // version stays; the rest are orphaned and safe to purge from R2.
+  // storage_key alone includes UUIDs (userId + fileId + versionNumber
+  // + chunk-N) so cross-shard collisions are effectively impossible,
+  // but we match on the tuple to be rigorous.
+  const uniqueKeys = Array.from(new Set(candidates.map((c) => c.storageKey)));
   const { data: stillRefed } = await supabase
     .from("file_chunks")
-    .select("storage_key")
-    .in("storage_key", storageKeys);
+    .select("storage_key, shard")
+    .in("storage_key", uniqueKeys);
   const refedSet = new Set(
-    (stillRefed ?? []).map((r) => r.storage_key as string),
+    (stillRefed ?? []).map(
+      (r) => `${(r.shard as number | null) ?? 0}:${r.storage_key as string}`,
+    ),
   );
-  return storageKeys.filter((k) => !refedSet.has(k));
+  return candidates.filter(
+    (c) => !refedSet.has(`${c.shard}:${c.storageKey}`),
+  );
 }
 
 export async function createFile(data: {

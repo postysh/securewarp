@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
-import { deleteBlob } from "@/lib/db/r2";
+import { deleteBlobs } from "@/lib/db/r2";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -16,10 +16,11 @@ export async function POST() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Collect storage keys for every trashed owned file + their chunks.
+    // Collect (shard, storage_key) for every chunk in trashed files.
+    // Legacy files.storage_key branch is gone.
     const { data: trashedFiles, error: loadErr } = await supabase
       .from("files")
-      .select("id, storage_key")
+      .select("id")
       .eq("owner_id", session.userId)
       .not("deleted_at", "is", null);
     if (loadErr) throw new Error(`Trash lookup failed: ${loadErr.message}`);
@@ -30,28 +31,24 @@ export async function POST() {
 
     const { data: chunks, error: chunkErr } = await supabase
       .from("file_chunks")
-      .select("storage_key")
+      .select("storage_key, shard")
       .in("file_id", trashedIds);
     if (chunkErr) throw new Error(`Chunk lookup failed: ${chunkErr.message}`);
 
-    const storageKeys: string[] = [
-      ...(trashedFiles || [])
-        .map((r) => r.storage_key as string | null)
-        .filter((k): k is string => !!k),
-      ...((chunks || []).map((r) => r.storage_key as string)),
-    ];
+    const orphanedChunks = (chunks || [])
+      .filter((c) => !!c.storage_key)
+      .map((c) => ({
+        storageKey: c.storage_key as string,
+        shard: (c.shard as number | null) ?? 0,
+      }));
 
     // R2 cleanup — best-effort. A leaked blob is cheap; blocking
     // the DB delete on R2 availability is not.
-    await Promise.all(
-      storageKeys.map(async (key) => {
-        try {
-          await deleteBlob(key);
-        } catch (err) {
-          logError("files.trash.empty.r2", err);
-        }
-      })
-    );
+    try {
+      await deleteBlobs(orphanedChunks);
+    } catch (err) {
+      logError("files.trash.empty.r2", err);
+    }
 
     const { error: delErr } = await supabase
       .from("files")
@@ -63,7 +60,7 @@ export async function POST() {
     auditEvent({
       event: "files.purge",
       actorUserId: session.userId,
-      detail: `empty trash: ${trashedIds.length} rows, ${storageKeys.length} blobs`,
+      detail: `empty trash: ${trashedIds.length} rows, ${orphanedChunks.length} blobs`,
     });
 
     return NextResponse.json({ success: true, purged: trashedIds.length });

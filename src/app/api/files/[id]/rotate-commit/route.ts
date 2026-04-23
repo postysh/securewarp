@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getOwnedFile } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
-import { deleteBlob } from "@/lib/db/r2";
+import { deleteBlobs, shardForChunk } from "@/lib/db/r2";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -132,17 +132,17 @@ export async function POST(
       );
     }
 
-    // Fetch OLD chunk storage keys + version rows so we can clean
-    // them up AFTER the new state commits. If anything fails mid-
-    // sequence, the old state stays readable until the files row
-    // flips (step 5 below).
+    // Fetch OLD chunk (shard, storage_key) pairs + version rows so
+    // we can clean them up AFTER the new state commits. If anything
+    // fails mid-sequence, the old state stays readable until the
+    // files row flips (step 5 below).
     const { data: oldChunks } = await supabase
       .from("file_chunks")
-      .select("storage_key")
+      .select("storage_key, shard")
       .eq("file_id", file.id);
-    const oldStorageKeys = ((oldChunks as { storage_key: string }[]) ?? [])
-      .map((c) => c.storage_key)
-      .filter((k): k is string => !!k);
+    const oldOrphanedChunks = ((oldChunks as { storage_key: string; shard: number | null }[]) ?? [])
+      .filter((c) => !!c.storage_key)
+      .map((c) => ({ storageKey: c.storage_key, shard: c.shard ?? 0 }));
 
     // ── mutation sequence ───────────────────────────────────────────
     // Rotation wipes the past: a revoked collaborator's cached
@@ -197,7 +197,10 @@ export async function POST(
 
     const newVersionId = newVersion.id as string;
 
-    // 3. Insert new chunks linked to the new version.
+    // 3. Insert new chunks linked to the new version. Derive shard
+    // from sequence — same rule rotate-init used when minting the
+    // upload URLs, so the blobs that were uploaded under bucket
+    // shard-N are recorded with shard=N in the DB.
     const { error: insChunksErr } = await supabase.from("file_chunks").insert(
       data.newChunks.map((c) => ({
         file_id: file.id,
@@ -207,6 +210,7 @@ export async function POST(
         size_bytes: c.sizeBytes,
         storage_key: c.storageKey,
         encryption_nonce: c.encryptionNonce,
+        shard: shardForChunk(c.sequence),
       }))
     );
     if (insChunksErr) throw insChunksErr;
@@ -272,14 +276,14 @@ export async function POST(
     if (upsertErr) throw upsertErr;
 
     // Fire-and-forget blob cleanup — don't block the response on R2.
-    void Promise.allSettled(oldStorageKeys.map((k) => deleteBlob(k))).then(
-      (results) => {
-        const failures = results.filter((r) => r.status === "rejected").length;
-        if (failures > 0) {
-          logError("files.rotate-commit.orphan-blobs", { failures, total: oldStorageKeys.length });
-        }
-      }
-    );
+    // `deleteBlobs` groups by shard and issues one S3 DeleteObjects
+    // per bucket.
+    void deleteBlobs(oldOrphanedChunks).catch((err) => {
+      logError("files.rotate-commit.orphan-blobs", {
+        total: oldOrphanedChunks.length,
+        err,
+      });
+    });
 
     auditEvent({
       event: "files.rotate",

@@ -1222,6 +1222,7 @@ export function useFiles(keys: {
               sizeBytes: encrypted.sizeBytes,
               storageKey: chunkUrl.storageKey,
               encryptionNonce: encrypted.nonce,
+              shard: chunkUrl.shard,
             }),
           });
 
@@ -1562,6 +1563,7 @@ export function useFiles(keys: {
                 sizeBytes: encrypted.sizeBytes,
                 storageKey: chunkUrl.storageKey,
                 encryptionNonce: encrypted.nonce,
+                shard: chunkUrl.shard,
               }),
             });
           })();

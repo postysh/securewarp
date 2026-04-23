@@ -6,7 +6,7 @@ import {
   getFileById,
   getFileVersion,
 } from "@/lib/db/files";
-import { deleteBlob } from "@/lib/db/r2";
+import { deleteBlobs } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
@@ -69,7 +69,7 @@ export async function DELETE(
       );
     }
 
-    const orphanedStorageKeys = await deleteFileVersion(parsed.data.versionId);
+    const orphanedChunks = await deleteFileVersion(parsed.data.versionId);
 
     // Recount remaining versions so the denormalized version_count
     // stays honest. Deletes are rare enough that a single COUNT is
@@ -89,25 +89,24 @@ export async function DELETE(
 
     // Best-effort R2 cleanup. A failed delete just leaves an orphan
     // blob — cheap to tolerate and easy to sweep with a retention
-    // job later. Don't throw on R2 errors.
-    for (const key of orphanedStorageKeys) {
-      try {
-        await deleteBlob(key);
-      } catch (err) {
-        logError("files.version.delete.r2", { key, err });
-      }
+    // job later. Don't throw on R2 errors. `deleteBlobs` groups by
+    // shard internally and issues one S3 DeleteObjects per bucket.
+    try {
+      await deleteBlobs(orphanedChunks);
+    } catch (err) {
+      logError("files.version.delete.r2", { count: orphanedChunks.length, err });
     }
 
     auditEvent({
       event: "files.version_delete",
       actorUserId: session.userId,
       targetFileId: parsed.data.id,
-      detail: `v${version.version_number} (${orphanedStorageKeys.length} blobs purged)`,
+      detail: `v${version.version_number} (${orphanedChunks.length} blobs purged)`,
     });
 
     return NextResponse.json({
       ok: true,
-      orphanedStorageKeys: orphanedStorageKeys.length,
+      orphanedStorageKeys: orphanedChunks.length,
     });
   } catch (err) {
     logError("files.version.delete", err);

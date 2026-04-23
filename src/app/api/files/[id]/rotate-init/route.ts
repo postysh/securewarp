@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getOwnedFile } from "@/lib/db/files";
-import { getUploadUrl } from "@/lib/db/r2";
+import { getUploadUrl, shardForChunk } from "@/lib/db/r2";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
@@ -68,11 +68,12 @@ export async function POST(
     // ones. Using a timestamp avoids collisions between back-to-back
     // rotations and keeps the key prefix debuggable.
     const version = Date.now().toString(36);
-    const chunkUrls: { sequence: number; storageKey: string; uploadUrl: string }[] = [];
+    const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
     for (let i = 0; i < parsed.data.chunkCount; i++) {
+      const shard = shardForChunk(i);
       const storageKey = `${session.userId}/${file.id}/v${version}/chunk-${i}`;
-      const uploadUrl = await getUploadUrl(storageKey);
-      chunkUrls.push({ sequence: i, storageKey, uploadUrl });
+      const uploadUrl = await getUploadUrl(shard, storageKey);
+      chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
     }
 
     return NextResponse.json({ chunkUrls });

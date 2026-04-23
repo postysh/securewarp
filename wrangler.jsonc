@@ -46,17 +46,14 @@
     "head_sampling_rate": 1,
   },
 
-  // R2 bucket binding for encrypted file blobs. The bucket already exists
-  // in the Cloudflare account under the name "securewarp". We still use
-  // presigned URLs (via aws4fetch in src/lib/db/r2.ts) so direct browser
-  // uploads keep working — the binding is wired up for future server-side
-  // R2 access if we ever need it.
-  "r2_buckets": [
-    {
-      "binding": "R2_BUCKET_BINDING",
-      "bucket_name": "securewarp",
-    },
-  ],
+  // R2: no Worker binding. We use account-scoped S3-compatible
+  // presigned URLs (via aws4fetch in src/lib/db/r2.ts) minted server-side
+  // and handed to the browser, which uploads/downloads directly. That
+  // model works across multiple buckets (we have 5 shards:
+  // securewarp-shard-0..4) without listing each as a binding, and keeps
+  // the Worker off the data path entirely. The R2_ACCESS_KEY_ID /
+  // R2_SECRET_ACCESS_KEY / R2_ENDPOINT secrets are account-scoped, so
+  // they sign URLs for any bucket in the account.
 
   // Non-secret email config. EMAIL_FROM must match a sender identity
   // verified in Resend (e.g. no-reply@<verified-domain>). RESEND_API_KEY

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession, deleteSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
-import { deleteBlob } from "@/lib/db/r2";
+import { deleteBlobs } from "@/lib/db/r2";
 import { auditEvent } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
@@ -30,44 +30,41 @@ export async function POST() {
       );
     }
 
-    // Collect all R2 storage keys before cascade-deleting the DB rows.
+    // Collect all (shard, storage_key) pairs before cascade-deleting
+    // the DB rows. The legacy `files.storage_key` branch is gone — the
+    // single-blob upload path was removed; every file now lives on
+    // file_chunks exclusively.
     const { data: files } = await supabase
       .from("files")
-      .select("id, storage_key")
+      .select("id")
       .eq("owner_id", userId);
     const fileIds = (files || []).map((f) => f.id);
 
-    let chunkKeys: string[] = [];
+    let orphanedChunks: { shard: number; storageKey: string }[] = [];
     if (fileIds.length > 0) {
       const { data: chunks } = await supabase
         .from("file_chunks")
-        .select("storage_key")
+        .select("storage_key, shard")
         .in("file_id", fileIds);
-      chunkKeys = (chunks || []).map((c) => c.storage_key as string);
+      orphanedChunks = (chunks || [])
+        .filter((c) => !!c.storage_key)
+        .map((c) => ({
+          storageKey: c.storage_key as string,
+          shard: (c.shard as number | null) ?? 0,
+        }));
     }
 
-    const allKeys = [
-      ...(files || [])
-        .map((f) => f.storage_key as string | null)
-        .filter((k): k is string => !!k),
-      ...chunkKeys,
-    ];
-
-    // R2 cleanup — best-effort
-    await Promise.all(
-      allKeys.map(async (key) => {
-        try {
-          await deleteBlob(key);
-        } catch (err) {
-          logError("auth.delete-account.r2", err);
-        }
-      })
-    );
+    // R2 cleanup — best-effort; groups by shard internally.
+    try {
+      await deleteBlobs(orphanedChunks);
+    } catch (err) {
+      logError("auth.delete-account.r2", err);
+    }
 
     auditEvent({
       event: "auth.delete_account",
       actorUserId: userId,
-      detail: `${allKeys.length} blobs`,
+      detail: `${orphanedChunks.length} blobs`,
     });
 
     // Delete the user row — cascades to files, file_keys, file_chunks,

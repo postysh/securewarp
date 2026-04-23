@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { safeCompare, utf8ToBytes } from "@/lib/auth/safe-compare";
 import { supabase } from "@/lib/db/supabase";
-import { deleteBlob } from "@/lib/db/r2";
+import { deleteBlobs } from "@/lib/db/r2";
 import { auditEventAwait } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -38,7 +38,7 @@ async function runCleanup(): Promise<NextResponse> {
     // by default, so they're naturally excluded.
     const { data: stale, error: listErr } = await supabase
       .from("files")
-      .select("id, storage_key")
+      .select("id")
       .eq("upload_complete", false)
       .lt("created_at", cutoff);
 
@@ -48,25 +48,25 @@ async function runCleanup(): Promise<NextResponse> {
     let blobsDeleted = 0;
 
     for (const file of stale ?? []) {
-      // Collect every R2 key tied to this file (single blob + chunks).
-      const keys: string[] = [];
-      if (file.storage_key) keys.push(file.storage_key);
-
       const { data: chunks } = await supabase
         .from("file_chunks")
-        .select("storage_key")
+        .select("storage_key, shard")
         .eq("file_id", file.id);
 
-      for (const c of chunks ?? []) {
-        if (c.storage_key) keys.push(c.storage_key);
-      }
+      const orphaned: { shard: number; storageKey: string }[] = (chunks ?? [])
+        .filter((c) => !!c.storage_key)
+        .map((c) => ({
+          storageKey: c.storage_key as string,
+          shard: (c.shard as number | null) ?? 0,
+        }));
 
       // Delete R2 objects first. Failures are logged but don't block the
       // DB cleanup — worst case a future sweep picks them up by key pattern.
-      const results = await Promise.allSettled(keys.map((k) => deleteBlob(k)));
-      for (const r of results) {
-        if (r.status === "fulfilled") blobsDeleted++;
-        else logError("cleanup.deleteBlob", r.reason);
+      try {
+        await deleteBlobs(orphaned);
+        blobsDeleted += orphaned.length;
+      } catch (err) {
+        logError("cleanup.deleteBlobs", err);
       }
 
       // Cascade deletes file_chunks and file_keys via FK ON DELETE CASCADE.

@@ -7,7 +7,7 @@ import {
   createFileVersion,
   getEffectivePermission,
 } from "@/lib/db/files";
-import { getUploadUrl } from "@/lib/db/r2";
+import { getUploadUrl, shardForChunk } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
 import { assertWithinQuota } from "@/lib/db/quota";
 import { pruneVersionsForFile } from "@/lib/db/version-prune";
@@ -60,6 +60,12 @@ const ChunkSchema = z.object({
   sizeBytes: z.number().positive(),
   storageKey: z.string().min(1),
   encryptionNonce: z.string().min(1),
+  // Shard index (which R2 bucket the ciphertext went to). Derived
+  // server-side from `sequence` via shardForChunk — we persist the
+  // client-sent value for audit clarity but re-derive on the server
+  // to prevent a malicious client from lying about where the bytes
+  // ended up. See the assertion below.
+  shard: z.number().int().min(0).max(63),
 });
 
 // Step 3: Finalize — confirm all chunks uploaded
@@ -211,14 +217,17 @@ export async function POST(request: Request) {
         parentKeysClaimWrappedBy: data.parentKeysClaimWrappedBy ?? null,
       });
 
-      // Generate presigned URLs for all chunks. Storage keys now
-      // include the version id so multiple versions of the same file
-      // can co-exist in R2 without collisions.
-      const chunkUrls: { sequence: number; storageKey: string; uploadUrl: string }[] = [];
+      // Generate presigned URLs for all chunks. Storage keys include
+      // the version id so multiple versions of the same file coexist
+      // in R2 without collisions. Shard (= bucket) is round-robin by
+      // sequence — the URL's hostname carries the bucket name so the
+      // client transparently hits the right one.
+      const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
       for (let i = 0; i < data.chunkCount; i++) {
+        const shard = shardForChunk(i);
         const storageKey = `${session.userId}/${file.id}/v${version.version_number}/chunk-${i}`;
-        const uploadUrl = await getUploadUrl(storageKey);
-        chunkUrls.push({ sequence: i, storageKey, uploadUrl });
+        const uploadUrl = await getUploadUrl(shard, storageKey);
+        chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
       }
 
       return NextResponse.json({ fileId: file.id, versionId: version.id, chunkUrls });
@@ -285,11 +294,12 @@ export async function POST(request: Request) {
         parentKeysClaimWrappedBy: data.parentKeysClaimWrappedBy ?? null,
       });
 
-      const chunkUrls: { sequence: number; storageKey: string; uploadUrl: string }[] = [];
+      const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
       for (let i = 0; i < data.chunkCount; i++) {
+        const shard = shardForChunk(i);
         const storageKey = `${session.userId}/${data.fileId}/v${version.version_number}/chunk-${i}`;
-        const uploadUrl = await getUploadUrl(storageKey);
-        chunkUrls.push({ sequence: i, storageKey, uploadUrl });
+        const uploadUrl = await getUploadUrl(shard, storageKey);
+        chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
       }
 
       auditEvent({
@@ -348,11 +358,12 @@ export async function POST(request: Request) {
         versionNumber = version.version_number as number;
       }
 
-      const chunkUrls: { sequence: number; storageKey: string; uploadUrl: string }[] = [];
+      const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
       for (const i of data.chunkIndexes) {
+        const shard = shardForChunk(i);
         const storageKey = `${session.userId}/${data.fileId}/v${versionNumber}/chunk-${i}`;
-        const uploadUrl = await getUploadUrl(storageKey);
-        chunkUrls.push({ sequence: i, storageKey, uploadUrl });
+        const uploadUrl = await getUploadUrl(shard, storageKey);
+        chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
       }
 
       return NextResponse.json({ chunkUrls });
@@ -394,6 +405,20 @@ export async function POST(request: Request) {
         versionId = (v1?.id as string | null) ?? null;
       }
 
+      // Re-derive the shard server-side. If the client sent a shard
+      // that doesn't match `shardForChunk(sequence)`, reject — a
+      // malicious client could otherwise point a chunk row at a
+      // bucket the bytes never went to, causing "missing chunk"
+      // errors on the next download. The shard persisted to the DB
+      // always matches what URL-minting produced.
+      const expectedShard = shardForChunk(data.sequence);
+      if (data.shard !== expectedShard) {
+        return NextResponse.json(
+          { error: "Shard mismatch" },
+          { status: 400 },
+        );
+      }
+
       // Insert chunk record
       const { error } = await supabase.from("file_chunks").insert({
         file_id: data.fileId,
@@ -403,6 +428,7 @@ export async function POST(request: Request) {
         size_bytes: data.sizeBytes,
         storage_key: data.storageKey,
         encryption_nonce: data.encryptionNonce,
+        shard: expectedShard,
       });
 
       if (error) throw error;

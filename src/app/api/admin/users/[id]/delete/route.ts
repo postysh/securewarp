@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin, adminAudit } from "@/lib/auth/admin";
 import { supabase } from "@/lib/db/supabase";
-import { deleteBlob } from "@/lib/db/r2";
+import { deleteBlobs } from "@/lib/db/r2";
 import { logError } from "@/lib/log";
 
 const BodySchema = z.object({
@@ -55,26 +55,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "Confirmation email did not match" }, { status: 400 });
     }
 
-    // Collect R2 keys to delete after the DB cascade.
+    // Collect (shard, storageKey) pairs to delete after the DB cascade.
+    // Legacy `files.storage_key` branch is gone; all content lives on
+    // file_chunks.
     const { data: files } = await supabase
       .from("files")
-      .select("id, storage_key")
+      .select("id")
       .eq("owner_id", targetId);
     const fileIds = (files || []).map((f) => f.id);
 
-    let chunkKeys: string[] = [];
+    let orphanedChunks: { shard: number; storageKey: string }[] = [];
     if (fileIds.length > 0) {
       const { data: chunks } = await supabase
         .from("file_chunks")
-        .select("storage_key")
+        .select("storage_key, shard")
         .in("file_id", fileIds);
-      chunkKeys = (chunks || []).map((c) => c.storage_key as string);
+      orphanedChunks = (chunks || [])
+        .filter((c) => !!c.storage_key)
+        .map((c) => ({
+          storageKey: c.storage_key as string,
+          shard: (c.shard as number | null) ?? 0,
+        }));
     }
-
-    const allKeys = [
-      ...(files || []).map((f) => f.storage_key as string | null).filter((k): k is string => !!k),
-      ...chunkKeys,
-    ];
 
     // Delete DB row first (cascades). R2 cleanup is best-effort afterwards.
     const { error: delErr } = await supabase.from("users").delete().eq("id", targetId);
@@ -86,22 +88,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       actorRole: ctx.role,
       action: "user.delete",
       targetUserId: targetId,
-      detail: `email=${target.email} blobs=${allKeys.length} reason=${parsed.data.reason ?? ""}`,
+      detail: `email=${target.email} blobs=${orphanedChunks.length} reason=${parsed.data.reason ?? ""}`,
     });
 
-    // R2 cleanup — best-effort. If a blob fails, nightly cleanup will sweep
-    // it as orphaned (its DB row is gone).
-    await Promise.all(
-      allKeys.map(async (key) => {
-        try {
-          await deleteBlob(key);
-        } catch (err) {
-          logError("admin.users.delete.r2", err);
-        }
-      })
-    );
+    // R2 cleanup — best-effort. If a shard's delete fails, nightly
+    // cleanup sweeps orphans (their DB rows are already gone).
+    try {
+      await deleteBlobs(orphanedChunks);
+    } catch (err) {
+      logError("admin.users.delete.r2", err);
+    }
 
-    return NextResponse.json({ success: true, blobsDeleted: allKeys.length });
+    return NextResponse.json({ success: true, blobsDeleted: orphanedChunks.length });
   } catch (err) {
     logError("admin.users.delete", err);
     return NextResponse.json({ error: "Failed to delete user" }, { status: 500 });

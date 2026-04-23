@@ -91,7 +91,7 @@ export async function GET(
 
     const chunksQuery = supabase
       .from("file_chunks")
-      .select("sequence, storage_key, encryption_nonce, is_final")
+      .select("sequence, storage_key, encryption_nonce, is_final, shard")
       .eq("file_id", row.id)
       .order("sequence");
     const { data: chunks } = currentVersion?.id
@@ -103,6 +103,7 @@ export async function GET(
       storage_key: string;
       encryption_nonce: string;
       is_final: boolean;
+      shard: number | null;
     };
     if (!chunks || chunks.length === 0) {
       return NextResponse.json({ error: "File has no content" }, { status: 404 });
@@ -110,7 +111,7 @@ export async function GET(
     const chunkDownloads = await Promise.all(
       (chunks as Chunk[]).map(async (c) => ({
         sequence: c.sequence,
-        downloadUrl: await getDownloadUrl(c.storage_key),
+        downloadUrl: await getDownloadUrl(c.shard ?? 0, c.storage_key),
         encryptionNonce: c.encryption_nonce,
         isFinal: c.is_final,
       }))

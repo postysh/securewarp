@@ -667,6 +667,49 @@ CREATE POLICY "users can read their own seen rows"
   USING (auth.uid() = user_id);
 ```
 
+#### Multi-bucket chunk sharding
+
+```sql
+-- Chunks are distributed across N=5 R2 buckets (securewarp-shard-0..4)
+-- so the browser opens N independent TCP connections instead of
+-- multiplexing 5 streams over one. Each file_chunks row records which
+-- shard holds its ciphertext — read paths (download, rotate, delete)
+-- use this to route requests to the correct bucket.
+--
+-- Zero-knowledge is unchanged: only the storage location moved, not
+-- the cipher or the keys. DEFAULT 0 is a safe fallback if a row
+-- somehow slips in without the column set; new uploads always write
+-- the real shard.
+ALTER TABLE file_chunks
+  ADD COLUMN IF NOT EXISTS shard smallint NOT NULL DEFAULT 0;
+
+-- Rewrite subtree_storage_keys to include the shard column and drop
+-- the legacy `files.storage_key` branch (the single-blob upload path
+-- is gone — every file now lives in file_chunks exclusively).
+-- Callers (/api/files/purge) destructure the new `out_shard` field
+-- and pass (shard, storageKey) tuples to the bulk-delete helper.
+--
+-- DROP first because the return-type shape changed; Postgres won't
+-- let CREATE OR REPLACE redefine RETURNS TABLE columns.
+DROP FUNCTION IF EXISTS subtree_storage_keys(uuid, uuid);
+
+CREATE FUNCTION subtree_storage_keys(p_root uuid, p_owner uuid)
+RETURNS TABLE(out_file_id uuid, out_storage_key text, out_shard smallint)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  RETURN QUERY
+  WITH RECURSIVE subtree AS (
+    SELECT f.id FROM files f WHERE f.id = p_root AND f.owner_id = p_owner
+    UNION ALL
+    SELECT f.id FROM files f INNER JOIN subtree s ON f.parent_id = s.id
+    WHERE f.owner_id = p_owner
+  )
+  SELECT fc.file_id, fc.storage_key, fc.shard
+  FROM file_chunks fc
+  INNER JOIN subtree s ON fc.file_id = s.id;
+END $$;
+```
+
 ### Development
 
 ```bash
