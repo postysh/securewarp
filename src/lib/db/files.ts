@@ -980,24 +980,44 @@ export async function getTrashedForUser(userId: string, workspaceId?: string | n
 }
 
 /**
- * Most recently touched files across all folders — flat list, capped
- * at 50. "Recent" means updated_at desc; the column is bumped on
- * upload finalize, rename, and move so it's a reasonable proxy for
- * "last interacted with".
+ * Per-user "Recent" — the 50 files this user has most recently
+ * opened/uploaded/navigated into. Sorts by `user_file_access.
+ * accessed_at` (bumped on chunk-download, list-with-parent, and
+ * upload finalize) with a fallback to `files.updated_at` so a user
+ * who's never opened a file still sees recently-modified items
+ * instead of an empty view.
+ *
+ * Per-user semantics matter: a collaborator editing a shared file
+ * should not pin it to the top of YOUR Recent if you haven't touched
+ * it. The access table is keyed on (user_id, file_id), so each user
+ * gets their own ordering.
  */
 export async function getRecentForUser(userId: string): Promise<FileRowWithKey[]> {
   // Reuses getAllAccessibleFiles so inherited descendants (files a
   // collaborator created inside a folder the user shared) show up
   // too, not just files with a direct file_keys row for the caller.
-  // Sorted + sliced client-side; drive sizes we serve are small
+  // Sorted + sliced server-side; drive sizes we serve are small
   // enough that the full fetch is cheap.
   const all = await getAllAccessibleFiles(userId, { includeWorkspaces: false });
+  if (all.length === 0) return [];
+
+  const fileIds = all.map((f) => f.id);
+  const { data: accessRows } = await supabase
+    .from("user_file_access")
+    .select("file_id, accessed_at")
+    .eq("user_id", userId)
+    .in("file_id", fileIds);
+
+  const accessByFile = new Map<string, string>(
+    (accessRows || []).map((r) => [r.file_id as string, r.accessed_at as string]),
+  );
+
   return all
     .slice()
     .sort((a, b) => {
-      const au = a.updated_at ?? "";
-      const bu = b.updated_at ?? "";
-      return bu.localeCompare(au);
+      const ar = accessByFile.get(a.id) ?? a.updated_at ?? "";
+      const br = accessByFile.get(b.id) ?? b.updated_at ?? "";
+      return br.localeCompare(ar);
     })
     .slice(0, 50);
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { getFileForDownload } from "@/lib/db/files";
+import { recordFileAccess } from "@/lib/db/file-access";
 import { getDownloadUrl } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
 import { logError } from "@/lib/log";
@@ -85,6 +86,12 @@ export async function GET(request: Request) {
           isFinal: chunk.is_final,
         }))
       );
+
+      // Real file read — bump Recent. Only for content paths; the
+      // "no content" branch below is used by the client to walk the
+      // parent-keys-claim chain during crypto hydration, which isn't
+      // a user-facing "open."
+      recordFileAccess(session.userId, fileId);
 
       return NextResponse.json({ chunks: chunkDownloads, ...base });
     }

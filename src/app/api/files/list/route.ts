@@ -12,6 +12,7 @@ import {
   getEffectivePermission,
   type FileRowWithKey,
 } from "@/lib/db/files";
+import { recordFileAccess } from "@/lib/db/file-access";
 import { supabase } from "@/lib/db/supabase";
 import { respondWithETag } from "@/lib/http/etag";
 import { logError } from "@/lib/log";
@@ -53,6 +54,8 @@ export async function GET(request: Request) {
       nextCursor = result.nextCursor;
     } else {
       files = await getInheritedChildren(parentId, session.userId);
+      // Folder navigated into — bump its Recent stamp for this user.
+      recordFileAccess(session.userId, parentId);
     }
 
     // Enrich each file with collaborators, stars, and labels.

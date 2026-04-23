@@ -667,6 +667,31 @@ CREATE POLICY "users can read their own seen rows"
   USING (auth.uid() = user_id);
 ```
 
+#### Per-user Recent tracker
+
+```sql
+-- Per-user last-access time for files and folders. Drives the
+-- "Recent" view — previously Recent sorted by files.updated_at
+-- (server-side mutation time), which meant opening a file 50 times
+-- never moved it up, while a collaborator's edit bumped it to the
+-- top of everyone's Recent. Per-user recency fixes both.
+CREATE TABLE IF NOT EXISTS user_file_access (
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  file_id uuid NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  accessed_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, file_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_file_access_recent
+  ON user_file_access (user_id, accessed_at DESC);
+
+ALTER TABLE user_file_access ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "users can read their own access rows"
+  ON user_file_access FOR SELECT
+  USING (auth.uid() = user_id);
+```
+
 #### Multi-bucket chunk sharding
 
 ```sql

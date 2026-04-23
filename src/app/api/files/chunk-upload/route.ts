@@ -547,6 +547,11 @@ export async function POST(request: Request) {
         .eq("owner_id", session.userId);
       if (finalizeErr) throw finalizeErr;
 
+      // Just uploaded a new file — put it at the top of the owner's
+      // Recent so they can find it right after upload.
+      const { recordFileAccess } = await import("@/lib/db/file-access");
+      recordFileAccess(session.userId, fileId);
+
       // Broadcast to the file's workspace so other members' drives
       // pick up the new row without polling. parent_id tells the
       // client which folder view should append the row. Fire-and-
