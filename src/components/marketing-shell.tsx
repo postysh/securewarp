@@ -150,11 +150,11 @@ function LogoWordmark({ text }: { text: string }) {
  *
  * `prefers-reduced-motion` users get the final state instantly.
  */
-function AnimatedBrandMark({ size = 72 }: { size?: number }) {
-  // Source viewBox lifted verbatim from mark-w.svg. Trimming the
-  // large 375×375 canvas padding via a tight viewBox so the glyph
-  // fills the requested size without BrandMark's negative-margin
-  // hack.
+function AnimatedBrandMark({ size = 36 }: { size?: number }) {
+  // Source viewBox lifted verbatim from mark-w.svg but tightly
+  // cropped to the glyph region so the requested size maps directly
+  // to the visible footprint without BrandMark's negative-margin
+  // hack. Default 36 matches the header sizing we landed on.
   return (
     <span
       aria-label="SecureWarp"
@@ -163,8 +163,6 @@ function AnimatedBrandMark({ size = 72 }: { size?: number }) {
         display: "inline-flex",
         width: size,
         height: size,
-        // Crop the source viewBox padding — the glyph only occupies
-        // the centre band of the 375×375 canvas.
         flexShrink: 0,
       }}
     >
@@ -322,7 +320,7 @@ export function HeaderBar() {
             minWidth: 0,
           }}
         >
-          <AnimatedBrandMark size={72} />
+          <AnimatedBrandMark size={36} />
           <LogoWordmark text="SECUREWARP" />
           <span
             style={{
