@@ -7,6 +7,7 @@ import {
   isDescendantOf,
   getEffectivePermission,
 } from "@/lib/db/files";
+import { recordFileAccess } from "@/lib/db/file-access";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { broadcastFileMutation } from "@/lib/realtime/broadcast";
@@ -171,6 +172,9 @@ export async function POST(
       parentKeysClaimWrappedBy,
       destWorkspaceId
     );
+
+    // Moving is an interaction — bump Recent for the actor.
+    recordFileAccess(session.userId, fileId);
 
     auditEvent({
       event: "files.move",

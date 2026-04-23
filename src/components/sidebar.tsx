@@ -378,12 +378,22 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const [newLabelColor, setNewLabelColor] = useState(labelColors[0]);
 
   useEffect(() => {
-    fetch("/api/pins").then((r) => r.json()).then((d) => {
-      if (d.pins) setRawPins(d.pins);
-    }).catch(() => {});
+    const loadPins = () => {
+      fetch("/api/pins").then((r) => r.json()).then((d) => {
+        if (d.pins) setRawPins(d.pins);
+      }).catch(() => {});
+    };
+    loadPins();
     fetch("/api/labels").then((r) => r.json()).then((d) => {
       if (d.labels) setLabels(d.labels);
     }).catch(() => {});
+    // Refetch on pin/unpin (dispatched from the file browser's
+    // context menu) so the sidebar reflects the change immediately
+    // instead of waiting for a page refresh.
+    window.addEventListener("securewarp-pins-changed", loadPins);
+    return () => {
+      window.removeEventListener("securewarp-pins-changed", loadPins);
+    };
   }, []);
 
   // Re-resolve pin names whenever the file list arrives or changes, so a pin

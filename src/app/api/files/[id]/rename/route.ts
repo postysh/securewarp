@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getFileById, updateFileMetadata, getEffectivePermission } from "@/lib/db/files";
+import { recordFileAccess } from "@/lib/db/file-access";
 import { auditEvent } from "@/lib/audit";
 import { broadcastFileMutation } from "@/lib/realtime/broadcast";
 import { logError } from "@/lib/log";
@@ -51,6 +52,10 @@ export async function POST(
     }
 
     await updateFileMetadata(fileId, parsed.data.encryptedMetadata);
+
+    // Renaming is an interaction — bump Recent for the actor so the
+    // file they just touched moves to the top of their list.
+    recordFileAccess(session.userId, fileId);
 
     auditEvent({
       event: "files.rename",

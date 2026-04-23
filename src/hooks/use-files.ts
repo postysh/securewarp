@@ -1936,6 +1936,12 @@ export function useFiles(keys: {
           r.id === queueId ? { ...r, status: "done", progress: 100 } : r,
         ),
       }));
+      // Signal that the Recent view may be stale — the server just
+      // bumped accessed_at for this file, so anyone sitting on the
+      // Recent tab should refetch to reflect the new ordering.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("securewarp-recent-dirty"));
+      }
       // Auto-drop the completed row after a beat so the tray doesn't
       // pile up on bulk downloads. Matches upload-panel behavior.
       setTimeout(() => {

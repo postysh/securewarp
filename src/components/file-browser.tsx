@@ -51,7 +51,7 @@ import { WorkspaceInviteModal } from "./workspace-invite-modal";
 import { WorkspaceActivityPage } from "./workspace-activity-modal";
 import { FileDetailsModal } from "./file-details-modal";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
-import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview } from "@/hooks/use-files";
+import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview, type ViewMode } from "@/hooks/use-files";
 import { useRealtimeChannel } from "@/hooks/use-realtime";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { userLabel, userInitials, userColor } from "@/lib/display";
@@ -271,14 +271,40 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const fileOps = useFilesContext();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [sortField, setSortField] = useState<SortField>(() => {
-    if (typeof window === "undefined") return "name";
-    return (localStorage.getItem("securewarp_sort_field") as SortField) || "name";
-  });
-  const [sortAsc, setSortAsc] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return localStorage.getItem("securewarp_sort_asc") !== "false";
-  });
+  // Sort preference is scoped to the current view. Sorting "Recent"
+  // by Name previously clobbered "My Drive"'s alphabetical setting,
+  // which felt broken — each view now remembers its own key/direction.
+  // Stored under securewarp_sort_<viewMode> so switching views pulls
+  // up that view's last choice, and folder drill-ins inherit from
+  // the "own" view so drilling in doesn't visually re-sort.
+  const sortStorageKey = useCallback((view: ViewMode) => {
+    return `securewarp_sort_${view}`;
+  }, []);
+  const readSortPref = useCallback(
+    (view: ViewMode): { field: SortField; asc: boolean } => {
+      if (typeof window === "undefined") return { field: "name", asc: true };
+      const raw = localStorage.getItem(sortStorageKey(view));
+      if (!raw) {
+        // Backfill from the old global keys so users who had a saved
+        // preference don't lose it on first load after this change.
+        const legacyField = localStorage.getItem("securewarp_sort_field") as SortField | null;
+        const legacyAsc = localStorage.getItem("securewarp_sort_asc");
+        if (legacyField) {
+          return { field: legacyField, asc: legacyAsc !== "false" };
+        }
+        return { field: "name", asc: true };
+      }
+      try {
+        const parsed = JSON.parse(raw) as { field: SortField; asc: boolean };
+        return { field: parsed.field, asc: parsed.asc };
+      } catch {
+        return { field: "name", asc: true };
+      }
+    },
+    [sortStorageKey],
+  );
+  const [sortField, setSortField] = useState<SortField>(() => readSortPref("own").field);
+  const [sortAsc, setSortAsc] = useState(() => readSortPref("own").asc);
   const [layout, setLayout] = useState<"list" | "grid">(() => {
     if (typeof window === "undefined") return "list";
     return (localStorage.getItem("securewarp_layout") as "list" | "grid") || "list";
@@ -487,6 +513,50 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     setContextMenu(null);
     setFilterLabel(null);
   }, [fileOps.viewMode, fileOps.currentFolder]);
+
+  // Load the saved sort preference for whichever view we're in.
+  // Each view (own / recent / starred / shared / trash) gets its
+  // own (field, asc) pair — switching views shouldn't stomp the
+  // other view's choice.
+  useEffect(() => {
+    const pref = readSortPref(fileOps.viewMode);
+    setSortField(pref.field);
+    setSortAsc(pref.asc);
+  }, [fileOps.viewMode, readSortPref]);
+
+  // Refetch Recent when a preview closes so the file the user just
+  // opened floats to the top. The server recorded the access during
+  // the chunk-download request, but the client's Recent list is a
+  // snapshot from whenever the view was last loaded — without this
+  // nudge the reordering only shows up on the next navigation.
+  const previewIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = previewIdRef.current;
+    previewIdRef.current = previewFileId;
+    if (prev && !previewFileId && fileOps.viewMode === "recent") {
+      void fileOps.fetchFiles(
+        null,
+        "recent",
+        undefined,
+        undefined,
+        { silent: true },
+      );
+    }
+  }, [previewFileId, fileOps]);
+
+  // Same refetch for direct downloads — the hook fires
+  // `securewarp-recent-dirty` when a save-to-disk completes. Covers
+  // cases where the user downloads without opening preview first.
+  useEffect(() => {
+    const handler = () => {
+      if (fileOps.viewMode !== "recent") return;
+      void fileOps.fetchFiles(null, "recent", undefined, undefined, {
+        silent: true,
+      });
+    };
+    window.addEventListener("securewarp-recent-dirty", handler);
+    return () => window.removeEventListener("securewarp-recent-dirty", handler);
+  }, [fileOps]);
 
   // All refresh paths are Realtime now — no polling. See
   // /src/lib/realtime/broadcast.ts for the publisher side.
@@ -895,16 +965,14 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   // toggleSelect moved above keyboard handler — see below
 
   const toggleSort = (field: SortField) => {
-    if (sortField === field) {
-      const next = !sortAsc;
-      setSortAsc(next);
-      localStorage.setItem("securewarp_sort_asc", String(next));
-    } else {
-      setSortField(field);
-      setSortAsc(true);
-      localStorage.setItem("securewarp_sort_field", field);
-      localStorage.setItem("securewarp_sort_asc", "true");
-    }
+    const nextField = field;
+    const nextAsc = sortField === field ? !sortAsc : true;
+    setSortField(nextField);
+    setSortAsc(nextAsc);
+    localStorage.setItem(
+      sortStorageKey(fileOps.viewMode),
+      JSON.stringify({ field: nextField, asc: nextAsc }),
+    );
   };
 
   const SortArrow = ({ field }: { field: SortField }) => {
@@ -2096,6 +2164,9 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                       }
                       return next;
                     });
+                    // Let the sidebar know so its Pinned list reloads
+                    // without a page refresh.
+                    window.dispatchEvent(new Event("securewarp-pins-changed"));
                     setContextMenu(null);
                   }}
                   className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
