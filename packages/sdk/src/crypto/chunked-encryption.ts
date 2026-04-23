@@ -37,11 +37,9 @@ export const MAX_FILE_SIZE_PRO = 5 * 1024 * 1024 * 1024; // 5 GB for pro tier
 // improving aggregate bandwidth — the whole reason we sharded. Keep
 // the two constants in sync.
 //
-// In-flight RAM: N × CHUNK_SIZE = 15 × 8 MB = 120 MB per upload. Fine
-// on desktop, tight but acceptable on modern mobile. If a future
-// mobile path needs lower RAM, add a mobile-specific override rather
-// than lowering the desktop ceiling.
-export const CONCURRENT_CHUNK_UPLOADS = 15;
+// In-flight RAM: N × CHUNK_SIZE = 5 × 8 MB = 40 MB per upload. Fine
+// on desktop and mobile. See r2.ts for why 5 rather than 15.
+export const CONCURRENT_CHUNK_UPLOADS = 5;
 
 export interface EncryptedChunk {
   index: number;

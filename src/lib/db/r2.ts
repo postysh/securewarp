@@ -46,14 +46,22 @@ function getClient(): AwsClient {
 // differs. The SigV4 signature is bucket-aware via the URL path, so no
 // per-bucket credential management is needed.
 //
-// Why 15: a single TCP flow to R2's ENAM edge tops out around 10 MB/s
-// for uploads on a typical ISP path (TCP window / RTT ceiling that no
-// amount of chunk-size tuning changes). Matched with
-// CONCURRENT_CHUNK_UPLOADS=15, the browser opens up to 15 parallel
-// TCP connections to 15 distinct bucket hostnames, unlocking ~150 MB/s
-// aggregate for users with gigabit+ upstream. Users on weaker links
-// see per-stream bandwidth divided down proportionally — no penalty.
-export const SHARD_COUNT = 15;
+// Why 5: we briefly tried 15 shards looking for more aggregate
+// throughput but HAR measurements showed the real bottleneck is the
+// ISP's sustained-upload ceiling (~30-40 MB/s on the test machine's
+// "1 Gbps" plan — cable/fiber uplinks typically burst high then shape
+// down under sustained load). Past ~5 flows the bandwidth just gets
+// divided more ways without additional headroom: per-chunk duration
+// grows, TLS-handshake overhead multiplies by shard count on the
+// first chunks, and small uploads feel noticeably slower. 5 shards is
+// the sweet spot — actually uses the available pipe without paying
+// 15× setup cost or starving individual streams.
+//
+// securewarp-shard-5..14 exist in R2 but the code no longer routes to
+// them. They're harmless — empty buckets cost nothing. If we ever
+// find a real-world upload link that sustains above ~60 MB/s, we can
+// revisit.
+export const SHARD_COUNT = 5;
 
 export function shardForChunk(sequence: number): number {
   // Round-robin by chunk sequence. Even distribution at steady state
