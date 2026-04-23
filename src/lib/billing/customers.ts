@@ -167,26 +167,16 @@ export async function getEntitlements(userId: string): Promise<Entitlements> {
       isCustom: false,
     };
   }
-  // Tier-gated: the override only applies while the user is on a
-  // paid Stripe tier. If they cancel down to Free, overrides go
-  // dormant — Free defaults apply. The row stays in place so a
-  // resubscribe auto-reactivates the override without admin
-  // re-configuring it. Prevents the "canceled enterprise user keeps
-  // 5 TB for free" drift scenario.
-  if (tier === "free") {
-    return {
-      tier,
-      tierLabel: base.label,
-      priceCents: base.priceCents,
-      storageGB: base.storageGB,
-      seats: base.seats,
-      workspaces: base.workspaces,
-      maxFileSizeBytes: base.maxFileSizeBytes,
-      versionCount: base.versionCount,
-      versionTtlDays: base.versionTtlDays,
-      isCustom: false,
-    };
-  }
+  // Overrides apply regardless of subscription tier — an admin that
+  // grants extra storage or a bigger max file size to a free-tier
+  // user expects the dashboard to reflect it immediately. Previously
+  // this function silently discarded overrides for free users on the
+  // theory that a canceled paid user would otherwise "keep 5 TB for
+  // free"; that trade was wrong (admins were writing to a row that
+  // had no effect and getting no feedback). If a canceled paid user
+  // shouldn't retain a bespoke override, it's the admin's job to
+  // clear the row at cancellation time. A future `override_expires_at`
+  // column could automate that, but we don't need it yet.
   const hasAnyOverride =
     ov.tier_label_override !== null ||
     ov.storage_gb_override !== null ||
