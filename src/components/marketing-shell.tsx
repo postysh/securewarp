@@ -53,11 +53,16 @@ export const BRAND_LOGO = CHILLAX_STACK;
  */
 export function MarketingShell({ children }: { children: React.ReactNode }) {
   return (
-    // Outer `<main>` paints cream in the side gutters — anywhere
-    // outside the 1200px body column. The body column itself sits
-    // on a pure-white fill so the content area reads cleaner while
-    // the gutters keep Gately's warm-cream surround.
-    <main style={{ background: BG, minHeight: "100vh", color: TEXT }}>
+    // Outer `<main>` is all white — both the 1200px body column and
+    // the side gutters share a single white fill. The thin borders
+    // on the body column are kept as a subtle frame for large
+    // viewports; on narrow screens they're edge-to-edge with the
+    // viewport so they don't render visibly.
+    //
+    // `BG` (cream) is still used by specific mockup cards inside
+    // page sections (pricing, how-it-works, etc.) as an intentional
+    // design accent — those stay untouched.
+    <main style={{ background: "#ffffff", minHeight: "100vh", color: TEXT }}>
       <div
         style={{
           width: "100%",
@@ -80,56 +85,17 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
 
 // ─── Sticky header ─────────────────────────────────────────────
 /**
- * Decrypt-reveal of the SECUREWARP wordmark — lifted from the
- * landing marketing nav so the mockup's logo is visually identical.
- * Each slot cycles through random glyphs, then locks in left to
- * right. Clicking after reveal scrolls to top (or navigates to
- * / if on a different page).
+ * Clickable wordmark — renders "SECUREWARP" statically. Previously
+ * ran a decrypt-style reveal where each glyph cycled through random
+ * characters before locking in; swapped for a static mark paired
+ * with the animated brand icon (see AnimatedBrandMark) so the entry
+ * animation lives in the graphical logo, not the text.
+ *
+ * Click → scroll to top on /, or navigate to / from any other page.
  */
-function LogoReveal({ text }: { text: string }) {
-  const [display, setDisplay] = useState<string[]>(() =>
-    text.split("").map(() => "*"),
-  );
-  const [revealed, setRevealed] = useState(false);
+function LogoWordmark({ text }: { text: string }) {
   const router = useRouter();
   const pathname = usePathname();
-
-  useEffect(() => {
-    const FRAME_MS = 40;
-    const REVEAL_DELAY = 110;
-    const CYCLES_PER_SLOT = 5;
-    const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ*/#@!$%&+<>?";
-    let cancelled = false;
-    const slots = text.split("");
-    const locked = slots.map(() => false);
-    const current = slots.map(() => "*");
-    let tick = 0;
-    const timer = setInterval(() => {
-      if (cancelled) return;
-      tick++;
-      for (let i = 0; i < slots.length; i++) {
-        if (locked[i]) continue;
-        const startTick = Math.floor((i * REVEAL_DELAY) / FRAME_MS);
-        if (tick < startTick) continue;
-        const elapsed = tick - startTick;
-        if (elapsed >= CYCLES_PER_SLOT) {
-          current[i] = slots[i];
-          locked[i] = true;
-        } else {
-          current[i] = GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
-        }
-      }
-      setDisplay([...current]);
-      if (locked.every(Boolean)) {
-        clearInterval(timer);
-        setRevealed(true);
-      }
-    }, FRAME_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [text]);
 
   const handleClick = () => {
     if (typeof window === "undefined") return;
@@ -155,8 +121,7 @@ function LogoReveal({ text }: { text: string }) {
     <button
       type="button"
       onClick={handleClick}
-      disabled={!revealed}
-      aria-label={revealed ? `${text}. Scroll to top` : text}
+      aria-label={`${text}. Scroll to top`}
       style={{
         background: "transparent",
         border: "none",
@@ -164,16 +129,108 @@ function LogoReveal({ text }: { text: string }) {
         margin: 0,
         color: "inherit",
         font: "inherit",
-        cursor: revealed ? "pointer" : "default",
-        // Doto here only — novelty dot-matrix face is limited to
-        // the logo wordmark so it doesn't impact body legibility.
+        cursor: "pointer",
         fontFamily: BRAND_LOGO,
         fontVariantNumeric: "tabular-nums",
         letterSpacing: 1,
       }}
     >
-      {display.join("")}
+      {text}
     </button>
+  );
+}
+
+/**
+ * Animated brand mark — three-bar chevron icon whose individual bars
+ * slide in with staggered delays on mount. The same three paths from
+ * /public/logos/mark-w.svg, inlined here so each path can carry its
+ * own CSS animation. Bars arrive palest-first (left → right) so the
+ * final bright bar locks in last, mirroring the visual hierarchy of
+ * the static mark.
+ *
+ * `prefers-reduced-motion` users get the final state instantly.
+ */
+function AnimatedBrandMark({ size = 72 }: { size?: number }) {
+  // Source viewBox lifted verbatim from mark-w.svg. Trimming the
+  // large 375×375 canvas padding via a tight viewBox so the glyph
+  // fills the requested size without BrandMark's negative-margin
+  // hack.
+  return (
+    <span
+      aria-label="SecureWarp"
+      role="img"
+      style={{
+        display: "inline-flex",
+        width: size,
+        height: size,
+        // Crop the source viewBox padding — the glyph only occupies
+        // the centre band of the 375×375 canvas.
+        flexShrink: 0,
+      }}
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="115 140 145 100"
+        preserveAspectRatio="xMidYMid meet"
+        width={size}
+        height={size}
+        aria-hidden
+      >
+        {/* Bar 3 (palest, leftmost). Arrives first. */}
+        <path
+          className="securewarp-bar securewarp-bar-1"
+          fill="#eba587"
+          d="M 140.488281 150.132812 L 124.757812 165.859375 C 123.546875 167.070312 123.546875 169.03125 124.757812 170.238281 L 139.875 185.355469 L 163.648438 161.582031 L 152.199219 150.132812 C 148.964844 146.898438 143.722656 146.898438 140.488281 150.132812 Z"
+        />
+        {/* Bar 2 (mid tone). */}
+        <path
+          className="securewarp-bar securewarp-bar-2"
+          fill="#e18c6e"
+          d="M 181.859375 154.964844 L 145.671875 191.152344 L 162.976562 208.457031 L 205.019531 166.410156 L 193.574219 154.964844 C 190.339844 151.726562 185.09375 151.726562 181.859375 154.964844 Z"
+        />
+        {/* Bar 1 (brightest, rightmost). Locks in last. */}
+        <path
+          className="securewarp-bar securewarp-bar-3"
+          fill="#ef5a3c"
+          d="M 228.265625 154.761719 L 168.773438 214.253906 L 180.21875 225.703125 C 183.457031 228.9375 188.699219 228.9375 191.933594 225.703125 L 251.425781 166.210938 L 239.980469 154.761719 C 236.742188 151.527344 231.5 151.527344 228.265625 154.761719 Z"
+        />
+      </svg>
+      <style jsx>{`
+        @keyframes securewarp-bar-in {
+          from {
+            opacity: 0;
+            transform: translate(-14px, 8px);
+          }
+          to {
+            opacity: 1;
+            transform: translate(0, 0);
+          }
+        }
+        :global(.securewarp-bar) {
+          opacity: 0;
+          transform-origin: center;
+          transform-box: fill-box;
+          animation: securewarp-bar-in 420ms cubic-bezier(0.22, 1, 0.36, 1)
+            forwards;
+        }
+        :global(.securewarp-bar-1) {
+          animation-delay: 0ms;
+        }
+        :global(.securewarp-bar-2) {
+          animation-delay: 140ms;
+        }
+        :global(.securewarp-bar-3) {
+          animation-delay: 280ms;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          :global(.securewarp-bar) {
+            animation: none;
+            opacity: 1;
+            transform: none;
+          }
+        }
+      `}</style>
+    </span>
   );
 }
 
@@ -265,8 +322,8 @@ export function HeaderBar() {
             minWidth: 0,
           }}
         >
-          <BrandMark size={72} />
-          <LogoReveal text="SECUREWARP" />
+          <AnimatedBrandMark size={72} />
+          <LogoWordmark text="SECUREWARP" />
           <span
             style={{
               fontSize: 9,
