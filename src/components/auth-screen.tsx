@@ -91,6 +91,24 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
     if (meta) setLockCache(meta);
   }, [mode]);
 
+  // Belt-and-suspenders for the edge-cache bypass: if we reach /login
+  // or /signup while an authenticated session cookie is still live,
+  // punt to /drive. Middleware already handles this server-side, but
+  // CF's edge cache has at times served a cached auth page before
+  // middleware ran (fixed by `export const dynamic = "force-dynamic"`
+  // on the page files), so a client-side detector here is a cheap
+  // fallback. Fetches a protected endpoint; 200 → authed → redirect.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/profile", { cache: "no-store" })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) router.replace("/drive");
+      })
+      .catch(() => { /* not authed, render normal form */ });
+    return () => { cancelled = true; };
+  }, [router]);
+
   // Turnstile token for signup only. Login + recovery are already
   // protected by SRP + Argon2id + rate limiter, which make automated
   // attacks expensive enough that Turnstile would be cosmetic there.
