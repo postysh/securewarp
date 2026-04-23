@@ -196,6 +196,28 @@ function PrivatePill() {
   );
 }
 
+function UnderReviewPill() {
+  return (
+    <Tooltip
+      label="This file has been reported and is under trust & safety review. Sharing and deletion are disabled while we investigate."
+      side="bottom"
+    >
+      <div
+        className="inline-flex items-center gap-1 h-[20px] px-1.5 rounded-[5px]"
+        style={{
+          background: "rgba(239,90,60,0.12)",
+          color: "rgb(239,90,60)",
+        }}
+      >
+        <HugeiconsIcon icon={Flag01Icon} size={10} />
+        <span className="text-[10px] font-mono uppercase tracking-wider font-semibold leading-none">
+          Under review
+        </span>
+      </div>
+    </Tooltip>
+  );
+}
+
 function CollaboratorStack({ collaborators, hasActiveLink }: { collaborators: FileCollaboratorPreview[]; hasActiveLink?: boolean }) {
   const nonOwnerCollabs = (collaborators ?? []).filter((c) => !c.isOwner);
   const hasMembers = nonOwnerCollabs.length > 0;
@@ -644,6 +666,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     uploadProgress: f.uploadProgress,
     collaborators: f.collaborators,
     hasActiveLink: f.hasActiveLink,
+    evidenceHoldAt: f.evidenceHoldAt,
     ownerEmail: f.ownerEmail,
     ownerDisplayName: f.ownerDisplayName ?? null,
     // NEW badge flag — file was created in the last 24h and the
@@ -1772,6 +1795,8 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                         </div>
                       </div>
                     </Tooltip>
+                  ) : file.evidenceHoldAt ? (
+                    <UnderReviewPill />
                   ) : (
                     <CollaboratorStack collaborators={file.collaborators} hasActiveLink={file.hasActiveLink} />
                   )}
@@ -1960,7 +1985,33 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <HugeiconsIcon icon={Tick01Icon} size={14} color="var(--icon-tertiary)" /> Select all
               </button>
             </>
-          ) : (
+          ) : (() => {
+            // Evidence-hold short-circuit. When a file is frozen, we
+            // collapse the context menu to a single non-interactive
+            // notice — every other action (trash, rename, share,
+            // download, move) is blocked server-side anyway, and
+            // surfacing those greyed-out is busier than showing one
+            // clear status line.
+            const fullSelected = fileOps.files.find((f) => f.id === contextMenu.fileId);
+            if (fullSelected?.evidenceHoldAt) {
+              return (
+                <div className="px-3 py-3 flex items-start gap-2.5 text-[12px]">
+                  <HugeiconsIcon icon={Flag01Icon} size={14} color="rgb(239,90,60)" />
+                  <div className="flex flex-col gap-1 leading-snug">
+                    <span style={{ color: "rgb(239,90,60)" }} className="font-medium">
+                      Under trust &amp; safety review
+                    </span>
+                    <span className="text-text-tertiary">
+                      This file has been reported. Actions are disabled until
+                      the review is complete. Reply to the notification email
+                      if you believe this is a mistake.
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })() || (
           <>
           {fileOps.viewMode !== "trash" && (
             <>
@@ -2154,6 +2205,26 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               )}
             </>
           )}
+          {/* Report — shown on any file I don't own, in any non-trash
+              view. Catches shared-with-me items whether they're
+              reached via the Shared-with-me sidebar or by browsing
+              into an inherited subfolder. */}
+          {fileOps.viewMode !== "trash" && (() => {
+            const full = fileOps.files.find((f) => f.id === contextMenu?.fileId);
+            const isOwner = !!keys && full?.ownerEmail === keys.email;
+            if (!full || isOwner) return null;
+            return (
+              <button
+                onClick={() => {
+                  setReportTarget(full);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={Flag01Icon} size={14} color="var(--icon-tertiary)" /> Report
+              </button>
+            );
+          })()}
           <div className="h-px bg-border-tertiary my-1" />
           {fileOps.viewMode === "trash" ? (
             (() => {
@@ -2190,30 +2261,17 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               );
             })()
           ) : fileOps.viewMode === "shared" ? (
-            <>
-              <button
-                onClick={() => {
-                  if (!contextMenu) return;
-                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
-                  if (full) setReportTarget(full);
-                  setContextMenu(null);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={Flag01Icon} size={14} color="var(--icon-tertiary)" /> Report
-              </button>
-              <button
-                onClick={async () => {
-                  if (!contextMenu) return;
-                  const fileId = contextMenu.fileId!;
-                  setContextMenu(null);
-                  await fileOps.leaveShare(fileId);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
-              >
-                <HugeiconsIcon icon={Delete02Icon} size={14} /> Remove from shared
-              </button>
-            </>
+            <button
+              onClick={async () => {
+                if (!contextMenu) return;
+                const fileId = contextMenu.fileId!;
+                setContextMenu(null);
+                await fileOps.leaveShare(fileId);
+              }}
+              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={14} /> Remove from shared
+            </button>
           ) : fileOps.callerPermission !== "viewer" ? (
             <button
               onClick={() => {

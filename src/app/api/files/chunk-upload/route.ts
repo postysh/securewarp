@@ -378,6 +378,14 @@ export async function POST(request: Request) {
       }
       const { fileId, versionId, chunks: submittedChunks } = parsed.data;
 
+      // Preservation-hold IP capture — no-op for 99% of users, logs
+      // the upload IP for flagged users so we have a record if a
+      // report is later filed on this content.
+      const { logUserIp, extractRequestIp } = await import(
+        "@/lib/db/trust-safety"
+      );
+      await logUserIp(session.userId, "upload", extractRequestIp(request));
+
       // Owner check — only the owner's session can finalize.
       const { data: file } = await supabase
         .from("files")

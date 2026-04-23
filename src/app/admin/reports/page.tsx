@@ -8,6 +8,13 @@ import ShieldUserIcon from "@hugeicons/core-free-icons/ShieldUserIcon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
 import ArrowUpRight01Icon from "@hugeicons/core-free-icons/ArrowUpRight01Icon";
+import LinkSquare02Icon from "@hugeicons/core-free-icons/LinkSquare02Icon";
+import PauseIcon from "@hugeicons/core-free-icons/PauseIcon";
+import UserBlock01Icon from "@hugeicons/core-free-icons/UserBlock01Icon";
+import UnavailableIcon from "@hugeicons/core-free-icons/UnavailableIcon";
+import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
+import SnowIcon from "@hugeicons/core-free-icons/SnowIcon";
+import DatabaseIcon from "@hugeicons/core-free-icons/DatabaseIcon";
 import { AdminSidebarToggle } from "../layout";
 
 type ReportCategory = "csam" | "harassment" | "malware" | "copyright" | "illegal" | "other";
@@ -28,13 +35,25 @@ interface ReportRow {
   linkId: string | null;
   ownerEmail: string | null;
   ownerSuspendedAt: string | null;
+  ownerPreservationHoldAt: string | null;
   fileSizeBytes: number | null;
   fileCreatedAt: string | null;
   fileDeletedAt: string | null;
   fileUploadComplete: boolean | null;
+  fileEvidenceHoldAt: string | null;
   linkRevokedAt: string | null;
   linkExpiresAt: string | null;
 }
+
+type CardAction =
+  | "revoke-link"
+  | "suspend-uploader"
+  | "unsuspend-uploader"
+  | "evidence-hold"
+  | "clear-evidence-hold"
+  | "set-preservation"
+  | "clear-preservation"
+  | "ban-uploader";
 
 const CATEGORY_LABEL: Record<ReportCategory, string> = {
   csam: "CSAM",
@@ -118,6 +137,30 @@ export default function AdminReportsPage() {
     [statusFilter, load],
   );
 
+  const performAction = useCallback(
+    async (
+      id: string,
+      action: CardAction,
+      extra?: { banIp?: boolean; banReason?: "csam" | "abuse" | "fraud" | "manual" },
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const res = await fetch(`/api/admin/reports/${id}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...extra }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as { error?: string }));
+        return { ok: false, error: (data as { error?: string }).error ?? "Action failed" };
+      }
+      // Side-effect happened on the server; refresh the current view
+      // so column state (suspended badge, link revoked, etc.) reflects
+      // reality.
+      await load();
+      return { ok: true };
+    },
+    [load],
+  );
+
   const filters: { id: StatusFilter; label: string }[] = useMemo(
     () => [
       { id: "pending", label: "Pending" },
@@ -172,7 +215,12 @@ export default function AdminReportsPage() {
         ) : (
           <div className="flex flex-col gap-3">
             {rows.map((row) => (
-              <ReportCard key={row.id} row={row} onUpdate={updateStatus} />
+              <ReportCard
+                key={row.id}
+                row={row}
+                onUpdate={updateStatus}
+                onAction={performAction}
+              />
             ))}
           </div>
         )}
@@ -184,15 +232,50 @@ export default function AdminReportsPage() {
 function ReportCard({
   row,
   onUpdate,
+  onAction,
 }: {
   row: ReportRow;
   onUpdate: (id: string, status: ReportStatus, notes?: string) => void;
+  onAction: (
+    id: string,
+    action: CardAction,
+    extra?: { banIp?: boolean; banReason?: "csam" | "abuse" | "fraud" | "manual" },
+  ) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [notes, setNotes] = useState(row.handlerNotes ?? "");
+  const [actionBusy, setActionBusy] = useState<CardAction | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const submit = (status: ReportStatus) => {
     onUpdate(row.id, status, notes.trim() || undefined);
   };
+
+  const runAction = async (
+    action: CardAction,
+    extra?: { banIp?: boolean; banReason?: "csam" | "abuse" | "fraud" | "manual" },
+  ) => {
+    setActionBusy(action);
+    setActionError(null);
+    const res = await onAction(row.id, action, extra);
+    setActionBusy(null);
+    if (!res.ok && res.error) setActionError(res.error);
+  };
+
+  const confirmAndRun = (
+    message: string,
+    action: CardAction,
+    extra?: { banIp?: boolean; banReason?: "csam" | "abuse" | "fraud" | "manual" },
+  ) => {
+    if (window.confirm(message)) void runAction(action, extra);
+  };
+
+  const linkActive =
+    !!row.linkId &&
+    !row.linkRevokedAt &&
+    !(row.linkExpiresAt && new Date(row.linkExpiresAt) < new Date());
+  const onHold = !!row.fileEvidenceHoldAt;
+  const suspended = !!row.ownerSuspendedAt;
+  const preserved = !!row.ownerPreservationHoldAt;
 
   return (
     <div className="rounded-[10px] border border-border-tertiary bg-bg-l2 p-4">
@@ -238,7 +321,7 @@ function ReportCard({
 
         <FactBlock label="Uploader">
           {row.ownerEmail ? (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-text-primary">{row.ownerEmail}</span>
               {row.ownerSuspendedAt && (
                 <span
@@ -249,6 +332,18 @@ function ReportCard({
                   }}
                 >
                   suspended
+                </span>
+              )}
+              {row.ownerPreservationHoldAt && (
+                <span
+                  className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
+                  style={{
+                    background: "rgba(66,153,225,0.15)",
+                    color: "var(--accent-blue-primary)",
+                  }}
+                  title="IP logging is active for this user"
+                >
+                  preserving
                 </span>
               )}
               <Link
@@ -266,14 +361,28 @@ function ReportCard({
         <FactBlock label="File">
           {row.fileId ? (
             <div className="flex flex-col text-text-primary">
-              <span>
-                {formatBytes(row.fileSizeBytes)}
-                {row.fileCreatedAt && (
-                  <>
-                    {" · "}uploaded {formatRelative(row.fileCreatedAt)}
-                  </>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span>
+                  {formatBytes(row.fileSizeBytes)}
+                  {row.fileCreatedAt && (
+                    <>
+                      {" · "}uploaded {formatRelative(row.fileCreatedAt)}
+                    </>
+                  )}
+                </span>
+                {row.fileEvidenceHoldAt && (
+                  <span
+                    className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
+                    style={{
+                      background: "rgba(239,90,60,0.12)",
+                      color: "rgb(239,90,60)",
+                    }}
+                    title="Frozen from deletion and download"
+                  >
+                    on hold
+                  </span>
                 )}
-              </span>
+              </div>
               <span className="text-[11px] text-text-disabled font-mono">
                 {row.fileDeletedAt ? "deleted · " : row.fileUploadComplete === false ? "upload incomplete · " : ""}
                 {row.fileId.slice(0, 8)}…
@@ -327,7 +436,118 @@ function ReportCard({
         />
       </div>
 
-      <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+      {actionError && (
+        <div
+          className="mt-3 text-[11px] px-3 py-2 rounded-[6px]"
+          style={{
+            color: "rgb(239,90,60)",
+            background: "rgba(239,90,60,0.08)",
+          }}
+        >
+          {actionError}
+        </div>
+      )}
+
+      {/* Direct actions — the report-card buttons that actually do
+          things to content and accounts, separate from the
+          dismiss/actioned/escalated status lifecycle below. */}
+      <div className="mt-3 -mx-1 flex items-center gap-1 flex-wrap border-t border-border-tertiary pt-3">
+        {row.linkId && linkActive && (
+          <ActionButton
+            icon={LinkSquare02Icon}
+            label={actionBusy === "revoke-link" ? "Revoking…" : "Revoke link"}
+            color="var(--accent-orange-primary)"
+            disabled={actionBusy !== null}
+            onClick={() => runAction("revoke-link")}
+          />
+        )}
+        {row.fileId && !onHold && (
+          <ActionButton
+            icon={SnowIcon}
+            label={actionBusy === "evidence-hold" ? "Holding…" : "Evidence hold"}
+            color="var(--accent-blue-primary)"
+            disabled={actionBusy !== null}
+            onClick={() => runAction("evidence-hold")}
+          />
+        )}
+        {row.fileId && onHold && (
+          <ActionButton
+            icon={SnowIcon}
+            label={actionBusy === "clear-evidence-hold" ? "Clearing…" : "Clear hold"}
+            color="var(--icon-tertiary)"
+            disabled={actionBusy !== null}
+            onClick={() =>
+              confirmAndRun(
+                "Clear the evidence hold on this file? The uploader will be able to delete it again.",
+                "clear-evidence-hold",
+              )
+            }
+          />
+        )}
+        {!preserved ? (
+          <ActionButton
+            icon={DatabaseIcon}
+            label={actionBusy === "set-preservation" ? "Starting…" : "Start IP log"}
+            color="var(--accent-blue-primary)"
+            disabled={actionBusy !== null}
+            onClick={() => runAction("set-preservation")}
+          />
+        ) : (
+          <ActionButton
+            icon={DatabaseIcon}
+            label={actionBusy === "clear-preservation" ? "Stopping…" : "Stop IP log"}
+            color="var(--icon-tertiary)"
+            disabled={actionBusy !== null}
+            onClick={() => runAction("clear-preservation")}
+          />
+        )}
+        {!suspended ? (
+          <ActionButton
+            icon={PauseIcon}
+            label={actionBusy === "suspend-uploader" ? "Suspending…" : "Suspend uploader"}
+            color="var(--accent-orange-primary)"
+            disabled={actionBusy !== null}
+            onClick={() =>
+              confirmAndRun(
+                "Suspend this uploader? Their active sessions are invalidated and they cannot log back in until unsuspended.",
+                "suspend-uploader",
+              )
+            }
+          />
+        ) : (
+          <ActionButton
+            icon={CheckmarkCircle02Icon}
+            label={actionBusy === "unsuspend-uploader" ? "Unsuspending…" : "Unsuspend"}
+            color="var(--icon-tertiary)"
+            disabled={actionBusy !== null}
+            onClick={() => runAction("unsuspend-uploader")}
+          />
+        )}
+        <ActionButton
+          icon={UserBlock01Icon}
+          label={actionBusy === "ban-uploader" ? "Banning…" : "Ban uploader"}
+          color="var(--accent-red-primary)"
+          disabled={actionBusy !== null}
+          onClick={() =>
+            confirmAndRun(
+              "Permanently ban this uploader by email and recent IPs? They will be suspended immediately and blocked from re-registering. This is typically reserved for CSAM and serious abuse.",
+              "ban-uploader",
+              { banIp: true, banReason: row.category === "csam" ? "csam" : "abuse" },
+            )
+          }
+        />
+        <a
+          href={`/api/admin/reports/${row.id}/forensic`}
+          className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer inline-flex items-center gap-1.5"
+          download
+        >
+          <HugeiconsIcon icon={Download04Icon} size={12} color="var(--accent-blue-primary)" />
+          Forensic packet
+        </a>
+      </div>
+
+      {/* Status lifecycle */}
+      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
         {row.status !== "dismissed" && (
           <ActionButton
             icon={Cancel01Icon}
@@ -379,16 +599,19 @@ function ActionButton({
   label,
   color,
   onClick,
+  disabled,
 }: {
   icon: typeof AlertCircleIcon;
   label: string;
   color: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer inline-flex items-center gap-1.5"
+      disabled={disabled}
+      className="h-[28px] px-3 rounded-[6px] text-[11px] font-medium text-text-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
     >
       <HugeiconsIcon icon={icon} size={12} color={color} />
       {label}

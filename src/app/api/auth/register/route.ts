@@ -8,6 +8,7 @@ import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { getBoolFlag } from "@/lib/flags";
 import { auditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/email/send";
+import { isBanned } from "@/lib/db/trust-safety";
 import { logError } from "@/lib/log";
 import { detectRegionFromCountry } from "@/lib/billing/region";
 
@@ -63,6 +64,24 @@ export async function POST(request: Request) {
     const startMs = Date.now();
     const existing = await getUserByEmail(email);
     if (existing) {
+      const elapsed = Date.now() - startMs;
+      const pad = Math.max(0, 500 - elapsed);
+      await new Promise((r) => setTimeout(r, pad));
+      return NextResponse.json(
+        { error: "Unable to create account. Please try a different email or sign in." },
+        { status: 400 }
+      );
+    }
+
+    // Banlist check — normalized email OR signup IP hash. A match
+    // returns the SAME generic error as "already exists" so attackers
+    // can't distinguish bans from collisions, and fail-timing-wise
+    // we pay the 500ms floor whether we hit this branch or not.
+    const rawIp =
+      request.headers.get("cf-connecting-ip") ??
+      request.headers.get("x-vercel-forwarded-for") ??
+      (ip !== "unknown" ? ip : null);
+    if (await isBanned(email, rawIp)) {
       const elapsed = Date.now() - startMs;
       const pad = Math.max(0, 500 - elapsed);
       await new Promise((r) => setTimeout(r, pad));

@@ -135,6 +135,9 @@ export async function POST(request: Request) {
     await resetRateLimit(`login:${user.email}`);
     await resetRateLimit(rlKey);
 
+    const { logUserIp, extractRequestIp } = await import("@/lib/db/trust-safety");
+    await logUserIp(user.id, "login", extractRequestIp(request));
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     logError("auth.login.verify-2fa", err);

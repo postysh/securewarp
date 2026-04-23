@@ -144,7 +144,7 @@ export function ReportFileModal({
           </div>
         ) : (
           <form onSubmit={submit} className="px-5 py-5">
-            <p className="text-[11px] text-text-disabled leading-relaxed mb-4">
+            <p className="text-[11px] text-text-tertiary leading-relaxed mb-4">
               SecureWarp stores files encrypted. We cannot read the contents. Your report helps our team take action on the file, the share, and the uploader.
             </p>
 

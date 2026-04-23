@@ -55,6 +55,7 @@ export async function GET(
       .eq("id", parsedQuery.data.fileId)
       .eq("upload_complete", true)
       .is("deleted_at", null)
+      .is("evidence_hold_at", null)
       .single();
     if (error || !file) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });

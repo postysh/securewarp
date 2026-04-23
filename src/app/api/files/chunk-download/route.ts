@@ -27,6 +27,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
+    // Preservation-hold IP capture — tracks downloaders of a flagged
+    // user's content so a forensic packet can show who pulled copies.
+    const { logUserIp, extractRequestIp } = await import(
+      "@/lib/db/trust-safety"
+    );
+    await logUserIp(session.userId, "download", extractRequestIp(request));
+
     const { file, directKey, parentChain, ancestorKey } = result;
 
     // Resolve the current version's id so we return ONLY its chunks.

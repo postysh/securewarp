@@ -10,6 +10,7 @@ import {
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
 import { broadcastFileMutation } from "@/lib/realtime/broadcast";
+import { isFileOnHold } from "@/lib/db/trust-safety";
 import { logError } from "@/lib/log";
 
 // Owner-only soft delete. Recursively marks the file (or every
@@ -42,6 +43,19 @@ export async function POST(request: Request) {
     }
 
     const fileId = parsed.data.fileId;
+
+    // Evidence hold gate — files frozen by trust & safety cannot be
+    // trashed by the uploader. Cleared by admins only. This covers
+    // both personal and workspace paths since hold is per-file.
+    if (await isFileOnHold(fileId)) {
+      return NextResponse.json(
+        {
+          error:
+            "This file is under trust & safety review and cannot be deleted.",
+        },
+        { status: 423 },
+      );
+    }
 
     // Access gate: owner can trash directly. In workspaces, editors+
     // can also trash files they don't own — we use an unscoped RPC

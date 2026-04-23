@@ -6,6 +6,7 @@ import { deleteBlobs } from "@/lib/db/r2";
 import { auditEvent } from "@/lib/audit";
 import { broadcast } from "@/lib/realtime/broadcast";
 import { channelForWorkspace } from "@/lib/realtime/channels";
+import { isFileOnHold } from "@/lib/db/trust-safety";
 import { logError } from "@/lib/log";
 
 // Hard delete. Only valid on rows that are currently in the trash
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
     // each is allowed to purge, but via different checks.
     const { data: root, error: loadErr } = await supabase
       .from("files")
-      .select("id, deleted_at, owner_id, workspace_id")
+      .select("id, deleted_at, owner_id, workspace_id, evidence_hold_at")
       .eq("id", fileId)
       .single();
     if (loadErr || !root) {
@@ -56,6 +57,18 @@ export async function POST(request: Request) {
     }
     if (!root.deleted_at) {
       return NextResponse.json({ error: "Not in trash" }, { status: 400 });
+    }
+
+    // Evidence hold — content frozen by trust & safety cannot be
+    // hard-deleted by anyone except via the admin clear-hold path.
+    if (root.evidence_hold_at) {
+      return NextResponse.json(
+        {
+          error:
+            "This file is under trust & safety review and cannot be permanently deleted.",
+        },
+        { status: 423 },
+      );
     }
 
     const rootOwnerId = root.owner_id as string;

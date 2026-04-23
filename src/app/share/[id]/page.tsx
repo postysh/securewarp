@@ -290,7 +290,7 @@ function ReportDialog({
           </div>
         ) : (
           <div className="px-5 py-4 flex flex-col gap-4">
-            <div className="text-[11px] text-text-disabled leading-relaxed">
+            <div className="text-[11px] text-text-tertiary leading-relaxed">
               SecureWarp stores files encrypted. We cannot read the contents. Your report helps our team take action on the share link and the uploader. See our{" "}
               <Link
                 href="/trust-and-safety"

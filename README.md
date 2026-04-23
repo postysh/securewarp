@@ -777,6 +777,75 @@ CREATE INDEX IF NOT EXISTS file_reports_dedup_idx
 ALTER TABLE file_reports ENABLE ROW LEVEL SECURITY;
 ```
 
+#### Trust & safety automation
+
+```sql
+-- Evidence hold: once set, the file cannot be deleted, purged, or
+-- downloaded. Cleared by admins only. Used to freeze content that's
+-- under trust & safety review so a CSAM/malware upload can't be
+-- wiped mid-investigation by the uploader.
+ALTER TABLE files
+  ADD COLUMN IF NOT EXISTS evidence_hold_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS files_evidence_hold_idx
+  ON files (evidence_hold_at DESC)
+  WHERE evidence_hold_at IS NOT NULL;
+
+-- Preservation hold on a user: flips IP logging ON for that user going
+-- forward. Default is OFF for everyone (zero-knowledge / minimal
+-- retention). Set when a report fires against them, a CSAM auto-action
+-- triggers, or an admin flips it manually. Cleared by admins.
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS preservation_hold_at timestamptz;
+
+-- Per-user IP log. Only populated when the user's preservation_hold_at
+-- is set. IPs are hashed (SHA-256) so a DB leak doesn't expose raw
+-- addresses. Events are small so we can group by type during forensic
+-- export.
+CREATE TABLE IF NOT EXISTS user_ip_log (
+  id bigserial PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  event text NOT NULL CHECK (event IN (
+    'login', 'upload', 'download', 'link-create', 'api'
+  )),
+  ip_hash text NOT NULL,
+  occurred_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS user_ip_log_user_idx
+  ON user_ip_log (user_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS user_ip_log_ip_idx
+  ON user_ip_log (ip_hash, occurred_at DESC);
+
+-- Banlist. Signup checks normalized email AND the signup IP hash
+-- against this table; a match silently fails registration with a
+-- generic error. Admins add entries via the report-card "Ban
+-- uploader" button on CSAM reports.
+CREATE TABLE IF NOT EXISTS banned_identifiers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email_normalized text,
+  ip_hash text,
+  reason text NOT NULL CHECK (reason IN (
+    'csam', 'abuse', 'fraud', 'manual'
+  )),
+  source_report_id uuid REFERENCES file_reports(id) ON DELETE SET NULL,
+  banned_by_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  banned_at timestamptz NOT NULL DEFAULT now(),
+  notes text,
+  CHECK (email_normalized IS NOT NULL OR ip_hash IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS banned_identifiers_email_idx
+  ON banned_identifiers (email_normalized)
+  WHERE email_normalized IS NOT NULL;
+CREATE INDEX IF NOT EXISTS banned_identifiers_ip_idx
+  ON banned_identifiers (ip_hash)
+  WHERE ip_hash IS NOT NULL;
+
+ALTER TABLE user_ip_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE banned_identifiers ENABLE ROW LEVEL SECURITY;
+```
+
 ### Development
 
 ```bash

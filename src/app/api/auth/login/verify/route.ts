@@ -128,6 +128,11 @@ export async function POST(request: Request) {
 
     await resetRateLimit(`login:${user.email}`);
 
+    // Preservation-hold IP logging. No-op for 99% of users; for
+    // flagged users we capture the login IP for forensic export.
+    const { logUserIp, extractRequestIp } = await import("@/lib/db/trust-safety");
+    await logUserIp(user.id, "login", extractRequestIp(request));
+
     return NextResponse.json({
       serverProof,
       encryptedUserData: user.encrypted_user_data,

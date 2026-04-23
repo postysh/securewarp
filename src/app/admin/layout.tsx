@@ -10,6 +10,7 @@ import SecurityLockIcon from "@hugeicons/core-free-icons/SecurityLockIcon";
 import MegaphoneIcon01 from "@hugeicons/core-free-icons/Megaphone01Icon";
 import Flag03Icon from "@hugeicons/core-free-icons/Flag03Icon";
 import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
+import ShieldUserIcon from "@hugeicons/core-free-icons/ShieldUserIcon";
 import MessageMultiple01Icon from "@hugeicons/core-free-icons/MessageMultiple01Icon";
 import DollarCircleIcon from "@hugeicons/core-free-icons/DollarCircleIcon";
 import ArrowLeft02Icon from "@hugeicons/core-free-icons/ArrowLeft02Icon";
@@ -179,6 +180,7 @@ const navItems = [
   { icon: DollarCircleIcon, label: "Cost", href: "/admin/costs", exact: false },
   { icon: MessageMultiple01Icon, label: "Feedback", href: "/admin/feedback", exact: false },
   { icon: AlertCircleIcon, label: "Reports", href: "/admin/reports", exact: false },
+  { icon: ShieldUserIcon, label: "Forensic", href: "/admin/forensic", exact: false },
   { icon: MegaphoneIcon01, label: "Announcements", href: "/admin/announcements", exact: false },
   { icon: Flag03Icon, label: "Feature flags", href: "/admin/flags", exact: false },
   { icon: SecurityLockIcon, label: "Audit log", href: "/admin/audit", exact: false },

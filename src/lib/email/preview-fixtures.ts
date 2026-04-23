@@ -46,4 +46,9 @@ export const EMAIL_PREVIEW_FIXTURES: Record<TemplateName, unknown> = {
     renewalDate: "April 23, 2026",
     portalUrl: "https://www.securewarp.com/drive",
   },
+  "abuse-reported": {
+    userName: "Jane Doe",
+    category: "csam",
+    referenceId: "b72f1c8e-3d4a-4e82-9a6b-2c5f9e0d7a1c",
+  },
 };

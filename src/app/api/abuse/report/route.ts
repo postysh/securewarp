@@ -156,6 +156,57 @@ export async function POST(request: Request) {
       details,
     });
 
+    // CSAM auto-response. Three things fire automatically because
+    // they're reversible and meaningfully limit further distribution
+    // during the ~hours it takes an admin to review:
+    //   1. Revoke the share link (if any) — stops new recipients.
+    //   2. Turn on preservation hold for the uploader — starts
+    //      capturing their IPs so the forensic packet has data when
+    //      the admin opens the queue.
+    //   3. Email the uploader with a reference id.
+    // Evidence hold, suspension, and banning are deliberately NOT
+    // auto — a malicious reporter could weaponize those. Admin
+    // confirms them from the report card.
+    if (category === "csam") {
+      try {
+        if (linkId) {
+          await supabase
+            .from("file_links")
+            .update({ revoked_at: new Date().toISOString() })
+            .eq("id", linkId)
+            .is("revoked_at", null);
+        }
+        const { setPreservationHold } = await import("@/lib/db/trust-safety");
+        await setPreservationHold(targetOwnerId);
+
+        // Notify the uploader. Fire-and-forget the actual send but
+        // await the lookup so we have the email before the worker
+        // isolate tears down.
+        const { data: owner } = await supabase
+          .from("users")
+          .select("email, display_name")
+          .eq("id", targetOwnerId)
+          .single();
+        if (owner?.email) {
+          const { sendEmail } = await import("@/lib/email/send");
+          await sendEmail({
+            to: owner.email,
+            template: "abuse-reported",
+            data: {
+              userName: owner.display_name ?? null,
+              category,
+              referenceId: row.id,
+            },
+          });
+        }
+      } catch (err) {
+        // Auto-response failure must not fail the report itself. A
+        // missed auto-revoke just means the admin has to click the
+        // button on the card.
+        logError("abuse.report.csam-auto", err);
+      }
+    }
+
     return NextResponse.json({ ok: true, id: row.id });
   } catch (err) {
     logError("abuse.report", err);

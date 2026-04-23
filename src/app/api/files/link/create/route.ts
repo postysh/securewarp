@@ -139,6 +139,13 @@ export async function POST(request: Request) {
       detail: parsed.data.passwordSalt ? "password" : "public",
     });
 
+    // Preservation-hold IP capture on new link creation. No-op unless
+    // the user is flagged.
+    const { logUserIp, extractRequestIp } = await import(
+      "@/lib/db/trust-safety"
+    );
+    await logUserIp(session.userId, "link-create", extractRequestIp(request));
+
     return NextResponse.json({ id });
   } catch (err) {
     logError("files.link.create", err);

@@ -35,6 +35,11 @@ export interface FileRow {
   parent_keys_claim: string | null;
   parent_keys_claim_wrapped_by: string | null;
   deleted_at: string | null;
+  // Trust & safety: when non-null, the file is frozen — it can't be
+  // deleted, purged, or downloaded, and it's hidden from anyone but
+  // the uploader (whose drive surfaces an "under review" badge).
+  // Cleared by admins only.
+  evidence_hold_at: string | null;
   is_workspace_root: boolean;
   workspace_id: string | null;
   // Monotonic version pointer. Bumped on every new-version finalize
@@ -482,6 +487,7 @@ export async function getSharedWithUser(userId: string): Promise<FileRowWithKey[
     .neq("owner_id", userId)
     .eq("upload_complete", true)
     .is("deleted_at", null)
+    .is("evidence_hold_at", null)
     .is("workspace_id", null)
     .eq("is_workspace_root", false)
     .order("created_at", { ascending: false })
@@ -520,6 +526,7 @@ export async function getInheritedChildren(
       .eq("parent_id", parentId)
       .eq("upload_complete", true)
       .is("deleted_at", null)
+      .is("evidence_hold_at", null)
       .order("is_folder", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(100),
@@ -1230,6 +1237,7 @@ export async function getFileForDownload(
     .eq("id", fileId)
     .eq("upload_complete", true)
     .is("deleted_at", null)
+    .is("evidence_hold_at", null)
     .single();
   if (fileErr || !fileRow) return null;
 

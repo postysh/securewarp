@@ -88,6 +88,7 @@ export interface ReportRow {
   file_workspace_id: string | null;
   reporter_user_id: string | null;
   reporter_email: string | null;
+  reporter_ip_hash: string | null;
   category: ReportCategory;
   details: string;
   status: ReportStatus;
@@ -115,11 +116,13 @@ export async function listReports(opts: {
 export interface AdminReportView extends ReportRow {
   ownerEmail: string | null;
   ownerSuspendedAt: string | null;
+  ownerPreservationHoldAt: string | null;
   reporterUserEmail: string | null;
   fileSizeBytes: number | null;
   fileCreatedAt: string | null;
   fileUploadComplete: boolean | null;
   fileDeletedAt: string | null;
+  fileEvidenceHoldAt: string | null;
   linkRevokedAt: string | null;
   linkExpiresAt: string | null;
   linkCreatedAt: string | null;
@@ -154,13 +157,21 @@ export async function listReportsWithContext(opts: {
     userIds.length
       ? supabase
           .from("users")
-          .select("id, email, suspended_at")
+          .select("id, email, suspended_at, preservation_hold_at")
           .in("id", userIds)
-      : Promise.resolve({ data: [] as { id: string; email: string; suspended_at: string | null }[], error: null }),
+      : Promise.resolve({
+          data: [] as {
+            id: string;
+            email: string;
+            suspended_at: string | null;
+            preservation_hold_at: string | null;
+          }[],
+          error: null,
+        }),
     fileIds.length
       ? supabase
           .from("files")
-          .select("id, size_bytes, created_at, upload_complete, deleted_at")
+          .select("id, size_bytes, created_at, upload_complete, deleted_at, evidence_hold_at")
           .in("id", fileIds)
       : Promise.resolve({
           data: [] as {
@@ -169,6 +180,7 @@ export async function listReportsWithContext(opts: {
             created_at: string;
             upload_complete: boolean;
             deleted_at: string | null;
+            evidence_hold_at: string | null;
           }[],
           error: null,
         }),
@@ -207,11 +219,13 @@ export async function listReportsWithContext(opts: {
       ...r,
       ownerEmail: owner?.email ?? null,
       ownerSuspendedAt: owner?.suspended_at ?? null,
+      ownerPreservationHoldAt: owner?.preservation_hold_at ?? null,
       reporterUserEmail: reporter?.email ?? null,
       fileSizeBytes: file?.size_bytes ?? null,
       fileCreatedAt: file?.created_at ?? null,
       fileUploadComplete: file?.upload_complete ?? null,
       fileDeletedAt: file?.deleted_at ?? null,
+      fileEvidenceHoldAt: file?.evidence_hold_at ?? null,
       linkRevokedAt: link?.revoked_at ?? null,
       linkExpiresAt: link?.expires_at ?? null,
       linkCreatedAt: link?.created_at ?? null,
