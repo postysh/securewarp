@@ -710,6 +710,26 @@ BEGIN
 END $$;
 ```
 
+#### User R2 region (foundation for future multi-region)
+
+```sql
+-- Tag every user with a geographic R2 region at signup, derived from
+-- the CF-IPCountry header (see src/lib/billing/region.ts). NOT used
+-- for routing yet — all R2 traffic still lands in the ENAM shards.
+-- Landed first so when we eventually provision per-region bucket
+-- sets (wnam, weur, apac) existing users are already correctly
+-- tagged and no backfill migration is needed.
+--
+-- CHECK constraint locks the allowed values to the four CF regions
+-- we plan to support. New regions → update the constraint + the
+-- detectRegionFromCountry mapping together.
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS r2_region text NOT NULL DEFAULT 'enam'
+    CHECK (r2_region IN ('enam', 'wnam', 'weur', 'apac'));
+
+CREATE INDEX IF NOT EXISTS users_r2_region_idx ON users (r2_region);
+```
+
 ### Development
 
 ```bash

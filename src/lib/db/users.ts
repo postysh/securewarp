@@ -25,6 +25,10 @@ export interface UserRow {
   totp_pending_secret?: string | null;
   // Unix timestamp of last successful TOTP verification (replay protection).
   totp_last_used_at?: number | null;
+  // Foundation for future multi-region R2. Set at signup from
+  // CF-IPCountry. NOT currently used for routing — all data still
+  // lands in the ENAM bucket set. See src/lib/billing/region.ts.
+  r2_region?: "enam" | "wnam" | "weur" | "apac";
 }
 
 export async function createUser(data: {
@@ -37,6 +41,7 @@ export async function createUser(data: {
   publicKemKey: string;
   recoveryKeyHash?: string;
   recoveryEncryptedData?: string;
+  r2Region?: "enam" | "wnam" | "weur" | "apac";
 }): Promise<UserRow> {
   const { data: user, error } = await supabase
     .from("users")
@@ -50,6 +55,7 @@ export async function createUser(data: {
       public_kem_key: data.publicKemKey,
       recovery_key_hash: data.recoveryKeyHash || null,
       recovery_encrypted_data: data.recoveryEncryptedData || null,
+      r2_region: data.r2Region ?? "enam",
     })
     .select()
     .single();

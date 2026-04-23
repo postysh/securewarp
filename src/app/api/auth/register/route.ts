@@ -9,6 +9,7 @@ import { getBoolFlag } from "@/lib/flags";
 import { auditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/email/send";
 import { logError } from "@/lib/log";
+import { detectRegionFromCountry } from "@/lib/billing/region";
 
 export async function POST(request: Request) {
   try {
@@ -71,6 +72,15 @@ export async function POST(request: Request) {
       );
     }
 
+    // Detect the user's geographic region at signup from the
+    // Cloudflare-injected CF-IPCountry header. Purely foundational
+    // today — not used for routing (all R2 traffic still lands in
+    // the ENAM bucket set). When we eventually provision per-region
+    // bucket sets, existing users are already correctly tagged so
+    // no backfill migration is needed. See src/lib/billing/region.ts.
+    const country = request.headers.get("cf-ipcountry");
+    const r2Region = detectRegionFromCountry(country);
+
     // Create user
     const user = await createUser({
       email,
@@ -84,6 +94,7 @@ export async function POST(request: Request) {
       recoveryEncryptedData: data.recoveryEncryptedData
         ? JSON.stringify(data.recoveryEncryptedData)
         : undefined,
+      r2Region,
     });
 
     // Create session
