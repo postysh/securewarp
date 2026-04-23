@@ -47,9 +47,17 @@ export interface ChunkPool {
 let cached: ChunkPool | null = null;
 
 function detectPoolSize(): number {
+  // `navigator.hardwareConcurrency` is an anti-fingerprinting signal as
+  // much as a hardware one — Safari caps it at 2 on some configs, which
+  // would collapse our pool to 1 worker and re-serialize decrypt (HAR
+  // showed this in practice: 5-way network pipeline but ~400 ms gaps
+  // between batches, matching a single worker draining one chunk at a
+  // time). Floor at 3 so we always get parallelism across cores, cap at
+  // 6 to bound per-worker heap (each holds its own @noble/ciphers JS
+  // state, ~5–10 MB). Missing/unreadable → default to 4.
   const hw =
     (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 4;
-  return Math.max(1, Math.min(4, hw - 1));
+  return Math.max(3, Math.min(6, hw));
 }
 
 function createWorkerPool(): ChunkPool {
