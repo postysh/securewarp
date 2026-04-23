@@ -23,6 +23,8 @@ import Archive01Icon from "@hugeicons/core-free-icons/Archive01Icon";
 import Pdf01Icon from "@hugeicons/core-free-icons/Pdf01Icon";
 import Presentation01Icon from "@hugeicons/core-free-icons/Presentation01Icon";
 import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
+import Flag01Icon from "@hugeicons/core-free-icons/Flag01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import type { FileKind } from "@/components/file-icon";
 import {
   decodeLinkKeyFromFragment,
@@ -193,6 +195,201 @@ function PasswordPrompt({
   );
 }
 
+type ReportCategory = "csam" | "harassment" | "malware" | "copyright" | "illegal" | "other";
+
+const REPORT_CATEGORIES: { value: ReportCategory; label: string }[] = [
+  { value: "csam", label: "Child sexual abuse material (CSAM)" },
+  { value: "harassment", label: "Harassment or targeted abuse" },
+  { value: "malware", label: "Malware, phishing, or scam" },
+  { value: "copyright", label: "Copyright infringement" },
+  { value: "illegal", label: "Other illegal content" },
+  { value: "other", label: "Something else" },
+];
+
+function ReportDialog({
+  linkId,
+  onClose,
+}: {
+  linkId: string;
+  onClose: () => void;
+}) {
+  const [category, setCategory] = useState<ReportCategory>("csam");
+  const [details, setDetails] = useState("");
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const submit = async () => {
+    if (submitting) return;
+    if (details.trim().length < 10) {
+      setError("Please describe the issue in at least 10 characters.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const body: Record<string, unknown> = { linkId, category, details: details.trim() };
+      if (email.trim()) body.reporterEmail = email.trim();
+      const res = await fetch("/api/abuse/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as { error?: string }));
+        throw new Error((data as { error?: string }).error || "Report failed");
+      }
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Report failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.45)" }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !submitting) onClose();
+      }}
+    >
+      <div
+        className="w-full max-w-[440px] rounded-2xl border border-border-tertiary bg-bg-l3 overflow-hidden"
+        style={{ boxShadow: "var(--shadow-l2)" }}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border-tertiary">
+          <div className="flex items-center gap-2">
+            <HugeiconsIcon icon={Flag01Icon} size={15} color="var(--accent-red-primary)" />
+            <div className="text-[13px] font-semibold text-text-primary">Report this content</div>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-bg-cell-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Close"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={14} color="var(--icon-tertiary)" />
+          </button>
+        </div>
+
+        {done ? (
+          <div className="px-5 py-8 text-center">
+            <div className="text-[14px] font-semibold text-text-primary mb-1">Report received</div>
+            <div className="text-[12px] text-text-disabled mb-5">
+              Thank you. Our trust and safety team will review this report.
+            </div>
+            <button
+              onClick={onClose}
+              className="h-[36px] px-5 rounded-[10px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98]"
+            >
+              Close
+            </button>
+          </div>
+        ) : (
+          <div className="px-5 py-4 flex flex-col gap-4">
+            <div className="text-[11px] text-text-disabled leading-relaxed">
+              SecureWarp stores files encrypted. We cannot read the contents. Your report helps our team take action on the share link and the uploader. See our{" "}
+              <Link
+                href="/trust-and-safety"
+                target="_blank"
+                className="text-text-link hover:underline"
+              >
+                trust and safety policy
+              </Link>
+              .
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-mono uppercase tracking-wider text-text-tertiary">
+                Category
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value as ReportCategory)}
+                disabled={submitting}
+                className="w-full px-3 py-2 rounded-[10px] bg-bg-field text-[13px] text-text-primary focus:outline-none focus:ring-2 focus:ring-text-link/25 border border-transparent focus:border-text-link/40 disabled:opacity-60"
+              >
+                {REPORT_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-mono uppercase tracking-wider text-text-tertiary">
+                What is the issue?
+              </label>
+              <textarea
+                value={details}
+                onChange={(e) => setDetails(e.target.value)}
+                disabled={submitting}
+                maxLength={2000}
+                rows={4}
+                placeholder="Describe what you saw, include URLs or context that helps us act quickly."
+                className="w-full px-3 py-2 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 border border-transparent focus:border-text-link/40 resize-none disabled:opacity-60"
+              />
+              <div className="text-[10px] text-text-disabled text-right">
+                {details.length} / 2000
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-mono uppercase tracking-wider text-text-tertiary">
+                Your email (optional)
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={submitting}
+                maxLength={256}
+                placeholder="So we can follow up if needed"
+                className="w-full px-3 py-2 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 border border-transparent focus:border-text-link/40 disabled:opacity-60"
+              />
+            </div>
+
+            {error && <div className="text-[11px] text-accent-red">{error}</div>}
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                onClick={onClose}
+                disabled={submitting}
+                className="h-[36px] px-4 rounded-[10px] text-[12px] font-medium text-text-secondary hover:text-text-primary hover:bg-bg-cell-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submit}
+                disabled={submitting || details.trim().length < 10}
+                className="h-[36px] px-5 rounded-[10px] text-[12px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {submitting ? "Submitting…" : "Submit report"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReportLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-text-disabled hover:text-text-tertiary transition-colors cursor-pointer"
+    >
+      <HugeiconsIcon icon={Flag01Icon} size={11} />
+      Report this content
+    </button>
+  );
+}
+
 export default function SharePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [state, setState] = useState<ShareState>({ kind: "loading" });
@@ -205,6 +402,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
   // downloading; the button/row reads this to render the current
   // chunk-fetch percent so large files don't feel stuck.
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Deriving a linkKey from the link payload + caller's input (URL
   // fragment OR password) is the single decryption entry point. Split
@@ -460,6 +658,9 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-side">
+      {reportOpen && (
+        <ReportDialog linkId={id} onClose={() => setReportOpen(false)} />
+      )}
       {/* Brand bar — ties the anonymous link page back to the
           marketing site so recipients see where the share came from. */}
       <header className="flex items-center justify-between px-6 py-5">
@@ -544,6 +745,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
                       <HugeiconsIcon icon={Download04Icon} size={15} />
                       {downloading ? `Downloading… ${progress}%` : "Download"}
                     </button>
+                    <ReportLink onClick={() => setReportOpen(true)} />
                   </div>
                 </>
               );
@@ -612,8 +814,9 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
                         })}
                       </div>
                     )}
-                    <div className="mt-5 flex justify-center">
+                    <div className="mt-5 flex flex-col items-center gap-3">
                       <TrustPill />
+                      <ReportLink onClick={() => setReportOpen(true)} />
                     </div>
                   </div>
                 </>

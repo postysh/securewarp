@@ -532,6 +532,7 @@ export function MockupFooter() {
         { label: "Privacy", href: "/privacy" },
         { label: "Terms", href: "/terms" },
         { label: "Refunds", href: "/refund" },
+        { label: "Trust & Safety", href: "/trust-and-safety" },
       ],
     },
   ];

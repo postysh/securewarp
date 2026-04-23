@@ -730,6 +730,53 @@ ALTER TABLE users
 CREATE INDEX IF NOT EXISTS users_r2_region_idx ON users (r2_region);
 ```
 
+#### Abuse reports
+
+```sql
+-- Abuse reports surface — users or anonymous share-link visitors can
+-- flag a file. We can't look at content (zero-knowledge), so the
+-- report carries a human-written claim + category + whatever access
+-- proof the reporter had. Admin reviews via metadata + claim and can
+-- terminate the owner's account if warranted.
+--
+-- file_id / link_id are nullable so a report outlives the underlying
+-- row (deleted files / revoked links shouldn't wipe the audit trail).
+-- file_owner_id is snapshotted at report time so we can still act on
+-- the original owner even after the file row is gone.
+CREATE TABLE IF NOT EXISTS file_reports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_id uuid REFERENCES files(id) ON DELETE SET NULL,
+  link_id uuid REFERENCES file_links(id) ON DELETE SET NULL,
+  file_owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  file_workspace_id uuid REFERENCES workspaces(id) ON DELETE SET NULL,
+  reporter_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  reporter_email text,
+  reporter_ip_hash text,
+  category text NOT NULL CHECK (category IN (
+    'csam', 'harassment', 'malware', 'copyright', 'illegal', 'other'
+  )),
+  details text NOT NULL CHECK (length(details) <= 2000),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN (
+    'pending', 'dismissed', 'actioned', 'escalated'
+  )),
+  handled_by_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  handled_at timestamptz,
+  handler_notes text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS file_reports_pending_idx
+  ON file_reports (created_at DESC)
+  WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS file_reports_owner_idx
+  ON file_reports (file_owner_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS file_reports_dedup_idx
+  ON file_reports (reporter_ip_hash, file_id, created_at DESC)
+  WHERE reporter_ip_hash IS NOT NULL;
+
+ALTER TABLE file_reports ENABLE ROW LEVEL SECURITY;
+```
+
 ### Development
 
 ```bash

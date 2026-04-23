@@ -7,6 +7,7 @@ import ArrowUp01Icon from "@hugeicons/core-free-icons/ArrowUp01Icon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import Share01Icon from "@hugeicons/core-free-icons/Share01Icon";
+import Flag01Icon from "@hugeicons/core-free-icons/Flag01Icon";
 import Link03Icon from "@hugeicons/core-free-icons/Link03Icon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
@@ -43,6 +44,7 @@ const StorageQuotaModal = dynamic(() => import("./storage-quota-modal").then((m)
 const VersionHistoryModal = dynamic(() => import("./version-history-modal").then((m) => ({ default: m.VersionHistoryModal })), { ssr: false });
 const UploadPanel = dynamic(() => import("./upload-panel").then((m) => ({ default: m.UploadPanel })), { ssr: false });
 const DownloadPanel = dynamic(() => import("./download-panel").then((m) => ({ default: m.DownloadPanel })), { ssr: false });
+const ReportFileModal = dynamic(() => import("./report-file-modal").then((m) => ({ default: m.ReportFileModal })), { ssr: false });
 import { ConfirmDialog } from "./confirm-dialog";
 import { WorkspaceSettings } from "./workspace-settings";
 import { WorkspaceInviteModal } from "./workspace-invite-modal";
@@ -261,6 +263,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   });
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [shareTarget, setShareTarget] = useState<DecryptedFile | null>(null);
+  const [reportTarget, setReportTarget] = useState<DecryptedFile | null>(null);
   const [versionHistoryTarget, setVersionHistoryTarget] = useState<DecryptedFile | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -479,6 +482,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     !!purgeTarget ||
     bulkPurgeTargets.length > 0 ||
     !!shareTarget ||
+    !!reportTarget ||
     !!moveTarget ||
     !!detailsTarget ||
     emptyTrashOpen ||
@@ -2186,17 +2190,30 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               );
             })()
           ) : fileOps.viewMode === "shared" ? (
-            <button
-              onClick={async () => {
-                if (!contextMenu) return;
-                const fileId = contextMenu.fileId!;
-                setContextMenu(null);
-                await fileOps.leaveShare(fileId);
-              }}
-              className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
-            >
-              <HugeiconsIcon icon={Delete02Icon} size={14} /> Remove from shared
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  if (!contextMenu) return;
+                  const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
+                  if (full) setReportTarget(full);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={Flag01Icon} size={14} color="var(--icon-tertiary)" /> Report
+              </button>
+              <button
+                onClick={async () => {
+                  if (!contextMenu) return;
+                  const fileId = contextMenu.fileId!;
+                  setContextMenu(null);
+                  await fileOps.leaveShare(fileId);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
+              >
+                <HugeiconsIcon icon={Delete02Icon} size={14} /> Remove from shared
+              </button>
+            </>
           ) : fileOps.callerPermission !== "viewer" ? (
             <button
               onClick={() => {
@@ -2338,6 +2355,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       <StorageQuotaModal open={quotaModalOpen} onClose={() => setQuotaModalOpen(false)} />
       <MoveModal file={moveTarget} onClose={() => setMoveTarget(null)} />
       <ShareModal file={shareTarget} onClose={() => setShareTarget(null)} />
+      <ReportFileModal
+        open={!!reportTarget}
+        fileId={reportTarget?.id ?? null}
+        fileName={reportTarget?.name}
+        onClose={() => setReportTarget(null)}
+      />
       {/* Transfer tray — floats in the bottom-right corner. Both panels
           live in the same fixed wrapper so they stack vertically
           (downloads on top, uploads below) when both are active. The

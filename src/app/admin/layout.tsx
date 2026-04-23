@@ -9,6 +9,7 @@ import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import SecurityLockIcon from "@hugeicons/core-free-icons/SecurityLockIcon";
 import MegaphoneIcon01 from "@hugeicons/core-free-icons/Megaphone01Icon";
 import Flag03Icon from "@hugeicons/core-free-icons/Flag03Icon";
+import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
 import MessageMultiple01Icon from "@hugeicons/core-free-icons/MessageMultiple01Icon";
 import DollarCircleIcon from "@hugeicons/core-free-icons/DollarCircleIcon";
 import ArrowLeft02Icon from "@hugeicons/core-free-icons/ArrowLeft02Icon";
@@ -56,6 +57,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [newFeedback, setNewFeedback] = useState(0);
+  const [pendingReports, setPendingReports] = useState(0);
   const [loading, setLoading] = useState(true);
   // Persist under a separate key from the drive's `sidebar_open` so the
   // admin panel remembers its own collapse state independently.
@@ -94,22 +96,30 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, [router]);
 
-  // Poll the feedback count every 60s so the sidebar dot reflects new
-  // submissions without requiring a page reload. Only runs once `me` is
-  // set — avoids a 403 flicker before the auth check resolves.
+  // Poll the feedback + reports counts every 60s so the sidebar dots
+  // reflect new submissions without a page reload. Only runs once `me`
+  // is set — avoids a 403 flicker before the auth check resolves.
   useEffect(() => {
     if (!me) return;
     let cancelled = false;
-    const fetchCount = async () => {
+    const fetchCounts = async () => {
       try {
-        const res = await fetch("/api/admin/feedback/count");
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setNewFeedback(data.newCount ?? 0);
+        const [feedbackRes, reportsRes] = await Promise.all([
+          fetch("/api/admin/feedback/count"),
+          fetch("/api/admin/reports/count"),
+        ]);
+        if (feedbackRes.ok) {
+          const data = await feedbackRes.json();
+          if (!cancelled) setNewFeedback(data.newCount ?? 0);
+        }
+        if (reportsRes.ok) {
+          const data = await reportsRes.json();
+          if (!cancelled) setPendingReports(data.pendingCount ?? 0);
+        }
       } catch { /* swallow */ }
     };
-    fetchCount();
-    const interval = setInterval(fetchCount, 60_000);
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 60_000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [me]);
 
@@ -127,7 +137,12 @@ function AdminShell({ children }: { children: React.ReactNode }) {
       <div className="flex h-full bg-bg-side">
         {/* Sidebar — inline, hidden on mobile. Admin is desktop-first. */}
         <div className="relative z-20 h-full hidden md:block">
-          <AdminSidebar me={me} collapsed={!sidebarOpen} newFeedback={newFeedback} />
+          <AdminSidebar
+            me={me}
+            collapsed={!sidebarOpen}
+            newFeedback={newFeedback}
+            pendingReports={pendingReports}
+          />
         </div>
 
         {/* Main content card */}
@@ -163,6 +178,7 @@ const navItems = [
   { icon: UserGroupIcon, label: "Users", href: "/admin/users", exact: false },
   { icon: DollarCircleIcon, label: "Cost", href: "/admin/costs", exact: false },
   { icon: MessageMultiple01Icon, label: "Feedback", href: "/admin/feedback", exact: false },
+  { icon: AlertCircleIcon, label: "Reports", href: "/admin/reports", exact: false },
   { icon: MegaphoneIcon01, label: "Announcements", href: "/admin/announcements", exact: false },
   { icon: Flag03Icon, label: "Feature flags", href: "/admin/flags", exact: false },
   { icon: SecurityLockIcon, label: "Audit log", href: "/admin/audit", exact: false },
@@ -172,10 +188,12 @@ function AdminSidebar({
   me,
   collapsed,
   newFeedback,
+  pendingReports,
 }: {
   me: Me;
   collapsed: boolean;
   newFeedback: number;
+  pendingReports: number;
 }) {
   const pathname = usePathname();
   const isActive = (href: string, exact: boolean) =>
@@ -204,9 +222,16 @@ function AdminSidebar({
         <div className={`flex flex-col gap-[2px] ${collapsed ? "items-center" : ""}`}>
           {navItems.map((item) => {
             const active = isActive(item.href, item.exact);
-            // "Unread feedback" dot — a small green pip on the icon when
-            // collapsed, and a count chip next to the label when expanded.
-            const hasDot = item.href === "/admin/feedback" && newFeedback > 0;
+            // "Unread count" dot — a small red pip on the icon when
+            // collapsed, and a count chip next to the label when
+            // expanded. Applied to Feedback and Reports.
+            const count =
+              item.href === "/admin/feedback"
+                ? newFeedback
+                : item.href === "/admin/reports"
+                  ? pendingReports
+                  : 0;
+            const hasDot = count > 0;
             const link = (
               <Link
                 key={item.href}
@@ -247,7 +272,7 @@ function AdminSidebar({
                           textAlign: "center",
                         }}
                       >
-                        {newFeedback > 99 ? "99+" : newFeedback}
+                        {count > 99 ? "99+" : count}
                       </span>
                     )}
                   </>
@@ -257,7 +282,7 @@ function AdminSidebar({
             return collapsed ? (
               <Tooltip
                 key={item.href}
-                label={hasDot ? `${item.label} (${newFeedback} new)` : item.label}
+                label={hasDot ? `${item.label} (${count} new)` : item.label}
               >
                 {link}
               </Tooltip>
