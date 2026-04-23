@@ -1324,6 +1324,10 @@ export function useFiles(keys: {
           uploadQueue: s.uploadQueue.filter((r) => r.id !== queueId),
         }));
       }, 5_000);
+      // Server bumped accessed_at on upload finalize — nudge Recent.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("securewarp-recent-dirty"));
+      }
       await fetchFiles(parentId);
     } catch (err) {
       console.error("Upload error:", err);
@@ -2311,6 +2315,12 @@ export function useFiles(keys: {
           ...s,
           files: s.files.map((f) => (f.id === file.id ? { ...f, name: trimmed } : f)),
         }));
+        // Server just bumped user_file_access for the actor. Let any
+        // open Recent view know it's stale so it refetches and this
+        // file floats to the top.
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("securewarp-recent-dirty"));
+        }
         return { ok: true };
       } catch (err) {
         console.error("renameFile", err);

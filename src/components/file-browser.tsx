@@ -90,7 +90,7 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-type SortField = "name" | "type" | "size" | "modified";
+type SortField = "name" | "type" | "size" | "modified" | "recent";
 
 // Thumbnail cache for grid view image previews
 const thumbnailCache = new Map<string, string>();
@@ -280,25 +280,35 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const sortStorageKey = useCallback((view: ViewMode) => {
     return `securewarp_sort_${view}`;
   }, []);
+  const defaultSortFor = (view: ViewMode): { field: SortField; asc: boolean } => {
+    // Recent defaults to "recent" sort (server-provided per-user
+    // access order). Every other view defaults alphabetical.
+    if (view === "recent") return { field: "recent", asc: false };
+    return { field: "name", asc: true };
+  };
   const readSortPref = useCallback(
     (view: ViewMode): { field: SortField; asc: boolean } => {
-      if (typeof window === "undefined") return { field: "name", asc: true };
+      if (typeof window === "undefined") return defaultSortFor(view);
       const raw = localStorage.getItem(sortStorageKey(view));
       if (!raw) {
         // Backfill from the old global keys so users who had a saved
         // preference don't lose it on first load after this change.
-        const legacyField = localStorage.getItem("securewarp_sort_field") as SortField | null;
-        const legacyAsc = localStorage.getItem("securewarp_sort_asc");
-        if (legacyField) {
-          return { field: legacyField, asc: legacyAsc !== "false" };
+        // Recent ignores the legacy fallback because the old global
+        // default was alphabetical, which is wrong for a Recent tab.
+        if (view !== "recent") {
+          const legacyField = localStorage.getItem("securewarp_sort_field") as SortField | null;
+          const legacyAsc = localStorage.getItem("securewarp_sort_asc");
+          if (legacyField) {
+            return { field: legacyField, asc: legacyAsc !== "false" };
+          }
         }
-        return { field: "name", asc: true };
+        return defaultSortFor(view);
       }
       try {
         const parsed = JSON.parse(raw) as { field: SortField; asc: boolean };
         return { field: parsed.field, asc: parsed.asc };
       } catch {
-        return { field: "name", asc: true };
+        return defaultSortFor(view);
       }
     },
     [sortStorageKey],
@@ -515,10 +525,22 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   }, [fileOps.viewMode, fileOps.currentFolder]);
 
   // Load the saved sort preference for whichever view we're in.
-  // Each view (own / recent / starred / shared / trash) gets its
-  // own (field, asc) pair — switching views shouldn't stomp the
-  // other view's choice.
+  // Each view (own / starred / shared / trash) gets its own
+  // (field, asc) pair — switching views shouldn't stomp the other
+  // view's choice.
+  //
+  // Recent is the exception: it always resets to the server's
+  // accessed_at ordering on entry. Matches Drive/Finder conventions
+  // and prevents a stale saved preference ("name asc" from an earlier
+  // session) from hiding the "my renamed file should be at the top"
+  // behavior that the view is named for. Column-header clicks still
+  // work in-session but we do not persist them for Recent.
   useEffect(() => {
+    if (fileOps.viewMode === "recent") {
+      setSortField("recent");
+      setSortAsc(false);
+      return;
+    }
     const pref = readSortPref(fileOps.viewMode);
     setSortField(pref.field);
     setSortAsc(pref.asc);
@@ -695,30 +717,42 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   // uploading placeholders keep their top-of-list position too so
   // users aren't startled by their upload "jumping" as progress
   // updates would otherwise change sort ordering.
-  const sortedFiles = [...filteredFiles].sort((a, b) => {
-    if (a.uploading && !b.uploading) return -1;
-    if (!a.uploading && b.uploading) return 1;
-    if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
-    let cmp = 0;
-    switch (sortField) {
-      case "name":
-        cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
-        break;
-      case "type": {
-        const at = (a.isFolder ? "" : (a.name.split(".").pop() || "")).toLowerCase();
-        const bt = (b.isFolder ? "" : (b.name.split(".").pop() || "")).toLowerCase();
-        cmp = at.localeCompare(bt) || a.name.localeCompare(b.name);
-        break;
-      }
-      case "size":
-        cmp = (a.size || 0) - (b.size || 0);
-        break;
-      case "modified":
-        cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
-        break;
-    }
-    return sortAsc ? cmp : -cmp;
-  });
+  //
+  // Recent view is the exception: server-order == per-user access
+  // order, which would be destroyed by re-sorting client-side. So
+  // "recent" skips the column sort AND the folder-first grouping
+  // (files and folders mix by last access time, matching how Google
+  // Drive / Finder present their Recent views).
+  const sortedFiles = sortField === "recent"
+    ? [...filteredFiles].sort((a, b) => {
+        if (a.uploading && !b.uploading) return -1;
+        if (!a.uploading && b.uploading) return 1;
+        return 0; // preserve server order (accessed_at desc)
+      })
+    : [...filteredFiles].sort((a, b) => {
+        if (a.uploading && !b.uploading) return -1;
+        if (!a.uploading && b.uploading) return 1;
+        if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+        let cmp = 0;
+        switch (sortField) {
+          case "name":
+            cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+            break;
+          case "type": {
+            const at = (a.isFolder ? "" : (a.name.split(".").pop() || "")).toLowerCase();
+            const bt = (b.isFolder ? "" : (b.name.split(".").pop() || "")).toLowerCase();
+            cmp = at.localeCompare(bt) || a.name.localeCompare(b.name);
+            break;
+          }
+          case "size":
+            cmp = (a.size || 0) - (b.size || 0);
+            break;
+          case "modified":
+            cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+            break;
+        }
+        return sortAsc ? cmp : -cmp;
+      });
 
   const displayFiles = sortedFiles.map((f) => ({
     id: f.id,
@@ -969,10 +1003,15 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     const nextAsc = sortField === field ? !sortAsc : true;
     setSortField(nextField);
     setSortAsc(nextAsc);
-    localStorage.setItem(
-      sortStorageKey(fileOps.viewMode),
-      JSON.stringify({ field: nextField, asc: nextAsc }),
-    );
+    // Recent does NOT persist its column-header overrides — re-entry
+    // resets to the server's recency ordering (see the sort-sync
+    // effect above).
+    if (fileOps.viewMode !== "recent") {
+      localStorage.setItem(
+        sortStorageKey(fileOps.viewMode),
+        JSON.stringify({ field: nextField, asc: nextAsc }),
+      );
+    }
   };
 
   const SortArrow = ({ field }: { field: SortField }) => {
