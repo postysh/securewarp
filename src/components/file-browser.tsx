@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useTransition } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -632,6 +632,54 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     );
   }, [fileOps]);
 
+  // React 19 transitions on folder navigation. startTransition with an
+  // async function keeps the current view interactive while the next
+  // folder's fetch + decrypt runs — rapid back-to-back folder clicks
+  // also get coalesced by React's transition scheduler so stale
+  // requests don't land after the latest one. Visible win is small on
+  // a cache hit (near-instant) but real on cold navigations.
+  // (Does NOT unblock main-thread decrypt — that's Phase 5.)
+  //
+  // Browser View Transitions layer on top: wrap the React transition
+  // in document.startViewTransition() when supported so the
+  // cross-fade is handled by the browser's compositor instead of
+  // dropping to a bare swap. Feature-detect — Safari and older
+  // Firefox fall through to the plain startTransition path.
+  const [, startNavTransition] = useTransition();
+  type ViewTransitionDoc = Document & {
+    startViewTransition?: (cb: () => void | Promise<void>) => { finished?: Promise<void> };
+  };
+  const withViewTransition = useCallback((work: () => void) => {
+    if (typeof document === "undefined") { work(); return; }
+    const doc = document as ViewTransitionDoc;
+    // Skip when a modal is open — the view-transition snapshot of
+    // the full document would include the modal and tear visually.
+    const reducedMotion = typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (!doc.startViewTransition || reducedMotion) { work(); return; }
+    doc.startViewTransition(() => { work(); });
+  }, []);
+  const navigateFolder = useCallback(
+    (id: string, name: string) => {
+      withViewTransition(() => {
+        startNavTransition(async () => {
+          await fileOps.navigateToFolder(id, name);
+        });
+      });
+    },
+    [fileOps, withViewTransition],
+  );
+  const navigateBreadcrumb = useCallback(
+    (index: number) => {
+      withViewTransition(() => {
+        startNavTransition(async () => {
+          await fileOps.navigateToBreadcrumb(index);
+        });
+      });
+    },
+    [fileOps, withViewTransition],
+  );
+
   // Tokens from /api/realtime/tokens — user channel + one per
   // workspace membership. Refetched when the active workspace
   // changes so a just-invited workspace picks up its channel
@@ -971,7 +1019,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
         e.preventDefault();
         const file = files[focusedIndex];
         if (file.isFolder && fileOps.viewMode !== "trash") {
-          fileOps.navigateToFolder(file.id, file.name);
+          navigateFolder(file.id, file.name);
         } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
           setPreviewFileId(file.id);
         }
@@ -981,7 +1029,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       // Backspace without selection — navigate up (like going back)
       if (e.key === "Backspace" && selected.size === 0 && fileOps.breadcrumb.length > 1) {
         e.preventDefault();
-        fileOps.navigateToBreadcrumb(fileOps.breadcrumb.length - 2);
+        navigateBreadcrumb(fileOps.breadcrumb.length - 2);
         return;
       }
 
@@ -1029,7 +1077,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [selected, selectAll, selectNone, fileOps, displayFiles, focusedIndex, layout, toggleSelect]);
+  }, [selected, selectAll, selectNone, fileOps, displayFiles, focusedIndex, layout, toggleSelect, navigateFolder, navigateBreadcrumb]);
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1133,7 +1181,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               <button
                 onClick={() => {
                   if (showActivity) { setShowActivity(false); window.dispatchEvent(new Event("securewarp-hide-activity")); }
-                  else fileOps.navigateToBreadcrumb(fileOps.breadcrumb.length - 2);
+                  else navigateBreadcrumb(fileOps.breadcrumb.length - 2);
                 }}
                 className="p-1 rounded-md text-icon-secondary hover:bg-cta-nav-hover transition-colors cursor-pointer shrink-0"
               >
@@ -1177,7 +1225,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   )}
                   {!isLast ? (
                     <button
-                      onClick={() => fileOps.navigateToBreadcrumb(realIndex)}
+                      onClick={() => navigateBreadcrumb(realIndex)}
                       onDragOver={(e) => {
                         if (!dragFileId) return;
                         e.preventDefault();
@@ -1751,7 +1799,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 // NEW badge immediately.
                 newFiles.markSeen(file.id);
                 if (file.isFolder && fileOps.viewMode !== "trash") {
-                  fileOps.navigateToFolder(file.id, file.name);
+                  navigateFolder(file.id, file.name);
                 } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
                   setPreviewFileId(file.id);
                 }
@@ -1899,7 +1947,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 // NEW badge immediately.
                 newFiles.markSeen(file.id);
                 if (file.isFolder && fileOps.viewMode !== "trash") {
-                  fileOps.navigateToFolder(file.id, file.name);
+                  navigateFolder(file.id, file.name);
                 } else if (!file.isFolder && !file.uploading && fileOps.viewMode !== "trash") {
                   setPreviewFileId(file.id);
                 }
@@ -2230,7 +2278,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                   if (!contextMenu) return;
                   const full = fileOps.files.find((f) => f.id === contextMenu.fileId!);
                   if (full?.isFolder) {
-                    fileOps.navigateToFolder(full.id, full.name);
+                    navigateFolder(full.id, full.name);
                   } else if (full) {
                     setPreviewFileId(full.id);
                   }

@@ -229,3 +229,16 @@ body {
   background-size: 200% 100%;
   animation: shimmer 3s linear infinite;
 }
+
+/* View Transitions — tune the default cross-fade used by
+   document.startViewTransition() in the file browser. Browser
+   default is ~250ms which felt sluggish for folder drill-ins; 150ms
+   with a snappy ease-out reads as "instant but not abrupt". Wrapped
+   in a media query so reduced-motion users get no animation. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 150ms;
+    animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+}
