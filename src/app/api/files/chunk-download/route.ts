@@ -90,8 +90,10 @@ export async function GET(request: Request) {
       // Real file read — bump Recent. Only for content paths; the
       // "no content" branch below is used by the client to walk the
       // parent-keys-claim chain during crypto hydration, which isn't
-      // a user-facing "open."
-      recordFileAccess(session.userId, fileId);
+      // a user-facing "open." Awaited so the write commits before
+      // CF Workers tear down the instance (fire-and-forget silently
+      // dropped the row).
+      await recordFileAccess(session.userId, fileId);
 
       return NextResponse.json({ chunks: chunkDownloads, ...base });
     }

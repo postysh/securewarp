@@ -54,8 +54,10 @@ export async function POST(
     await updateFileMetadata(fileId, parsed.data.encryptedMetadata);
 
     // Renaming is an interaction — bump Recent for the actor so the
-    // file they just touched moves to the top of their list.
-    recordFileAccess(session.userId, fileId);
+    // file they just touched moves to the top of their list. Awaited
+    // because CF Workers can terminate the worker as soon as the HTTP
+    // response is sent, which would kill an un-awaited DB write.
+    await recordFileAccess(session.userId, fileId);
 
     auditEvent({
       event: "files.rename",

@@ -1448,9 +1448,18 @@ export async function updateFileMetadata(
   fileId: string,
   encryptedMetadata: string
 ): Promise<void> {
+  // Bump `updated_at` alongside the metadata write so the Recent
+  // view has a usable fallback sort key even if the per-user
+  // user_file_access upsert fails or lags. Postgres does NOT auto-
+  // bump updated_at on UPDATE (no trigger), so without this the
+  // renamed file's updated_at stays stuck at its last real
+  // modification and doesn't float to the top.
   const { error } = await supabase
     .from("files")
-    .update({ encrypted_metadata: encryptedMetadata })
+    .update({
+      encrypted_metadata: encryptedMetadata,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", fileId);
   if (error) throw new Error(`Failed to update metadata: ${error.message}`);
 }

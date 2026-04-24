@@ -174,7 +174,7 @@ export async function POST(
     );
 
     // Moving is an interaction — bump Recent for the actor.
-    recordFileAccess(session.userId, fileId);
+    await recordFileAccess(session.userId, fileId);
 
     auditEvent({
       event: "files.move",

@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     } else {
       files = await getInheritedChildren(parentId, session.userId);
       // Folder navigated into — bump its Recent stamp for this user.
-      recordFileAccess(session.userId, parentId);
+      await recordFileAccess(session.userId, parentId);
     }
 
     // Enrich each file with collaborators, stars, and labels.
