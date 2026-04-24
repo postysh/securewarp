@@ -60,6 +60,9 @@
     "use-scramble": "^2.2.15",
     "zod": "^4.3.6"
   },
+  "overrides": {
+    "uuid": "^14.0.0"
+  },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
