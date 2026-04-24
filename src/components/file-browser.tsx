@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import ArrowUp01Icon from "@hugeicons/core-free-icons/ArrowUp01Icon";
@@ -816,6 +817,30 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const allSelected = displayFiles.length > 0 && selected.size === displayFiles.length;
   const someSelected = selected.size > 0 && !allSelected;
 
+  // Virtualize the list view. Grid view stays non-virtual — it
+  // typically shows ≤ 30 cards at once, and virtualizing a responsive
+  // grid fights with Tailwind's column breakpoints. List view is
+  // where folder-of-500 rendering kills the browser.
+  //
+  // Row height: 56px on desktop (h-[56px]) + 6px spacing (mb-1.5) =
+  // 62px. Mobile is 64+6=70 but the hint is only for the first render;
+  // measureElement corrects once rows mount. Overscan=8 keeps a small
+  // buffer of rendered rows above/below the viewport so arrow-key
+  // navigation + rubber-band drag picks them up without waiting for
+  // a re-render.
+  const rowVirtualizer = useVirtualizer({
+    count: displayFiles.length,
+    getScrollElement: () => fileListRef.current,
+    estimateSize: () => 62,
+    overscan: 8,
+    // Stable id-based keys so React doesn't unmount rows as they
+    // scroll — the inner list-row JSX has event handlers that rely
+    // on stable identity. Without this, a mid-scroll state change
+    // can drop/re-mount the focused row and lose its focus ring.
+    getItemKey: (index) => displayFiles[index]?.id ?? index,
+  });
+  const virtualItems = rowVirtualizer.getVirtualItems();
+
   // Mobile bottom nav search trigger
   useEffect(() => {
     const openSearch = () => setCommandPaletteOpen(true);
@@ -856,6 +881,18 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
 
   // Track the focused file index for arrow key navigation
   const [focusedIndex, setFocusedIndex] = useState(-1);
+
+  // Keep the virtualizer's viewport in sync with keyboard focus —
+  // ArrowDown past the bottom of the rendered window would otherwise
+  // do nothing visible because the target row isn't in the DOM.
+  // Guard on layout === "list" so grid (non-virtualized) isn't
+  // affected. behavior:"auto" avoids smooth-scroll jitter on rapid
+  // presses.
+  useEffect(() => {
+    if (layout !== "list") return;
+    if (focusedIndex < 0 || focusedIndex >= displayFiles.length) return;
+    rowVirtualizer.scrollToIndex(focusedIndex, { align: "auto", behavior: "auto" });
+  }, [focusedIndex, layout, displayFiles.length, rowVirtualizer]);
 
   // Reset focused index when files change
   useEffect(() => { setFocusedIndex(-1); }, [fileOps.currentFolder, fileOps.viewMode]);
@@ -1660,11 +1697,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
           );
         })()}
 
-        <div className={layout === "grid" ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2" : ""}>
+        {layout === "grid" ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
         {displayFiles.map((file, fileIndex) => {
           const isSelected = selected.has(file.id);
           const isFocused = fileIndex === focusedIndex;
-          return layout === "grid" ? (
+          return (
             /* ─── GRID CARD ─── */
             <div
               data-file-item
@@ -1775,12 +1813,44 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <span className="text-[10px] text-text-disabled mt-0.5">{file.size}</span>
               ) : null}
             </div>
-          ) : (
-            /* ─── LIST ROW ─── */
+          );
+        })}
+        </div>
+        ) : (
+        <div
+          style={{
+            height: `${rowVirtualizer.getTotalSize()}px`,
+            width: "100%",
+            position: "relative",
+          }}
+        >
+        {virtualItems.map((vItem) => {
+          const file = displayFiles[vItem.index];
+          const fileIndex = vItem.index;
+          const isSelected = selected.has(file.id);
+          const isFocused = fileIndex === focusedIndex;
+          return (
+          <div
+            key={file.id}
+            ref={rowVirtualizer.measureElement}
+            data-index={vItem.index}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              transform: `translateY(${vItem.start}px)`,
+              // paddingBottom matches the old mb-1.5 so the virtualizer's
+              // measured item height includes the inter-row gap. Without
+              // it rows would visually touch because margin-bottom isn't
+              // in getBoundingClientRect.
+              paddingBottom: "6px",
+            }}
+          >
+            {/* ─── LIST ROW ─── */}
             <div
               data-file-item
               data-file-id={file.id}
-              key={file.id}
               draggable={fileOps.viewMode === "own" && !file.uploading && fileOps.callerPermission !== "viewer"}
               onDragStart={(e) => {
                 setDragFileId(file.id);
@@ -1839,7 +1909,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 newFiles.markSeen(file.id);
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
-              className={`group flex items-center min-h-[64px] md:min-h-[56px] h-[64px] md:h-[56px] px-4 rounded-xl border cursor-pointer transition-colors mb-1.5 shrink-0 ${
+              className={`group flex items-center min-h-[64px] md:min-h-[56px] h-[64px] md:h-[56px] px-4 rounded-xl border cursor-pointer transition-colors shrink-0 ${
                 dropTargetId === file.id
                   ? "border-accent-green bg-accent-green/5"
                   : dragFileId === file.id
@@ -2029,9 +2099,11 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 <HugeiconsIcon icon={MoreHorizontalIcon} size={15} />
               </button>
             </div>
+          </div>
           );
         })}
         </div>
+        )}
 
         {/* Load more button for paginated results */}
         {fileOps.nextCursor && (
