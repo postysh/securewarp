@@ -755,11 +755,22 @@ export function useAuth() {
     //
     // For "forget this device" semantics, see the separate
     // device-wipe flow (settings → security).
+    //
+    // Tell the server to clear the cookie FIRST, then blow away
+    // client state + hard-navigate in one step. Previously we
+    // `router.push("/login")` after sessionStorage was cleared,
+    // which caused drive-client to re-render with keys=null for a
+    // frame — it then mounted the dynamic-imported AuthScreen with
+    // `loading: () => null` as the fallback, producing a visible
+    // white flash before the client-side nav completed.
+    // window.location.replace hard-navigates: the browser keeps the
+    // current paint up until /login finishes loading, then swaps.
+    // No intermediate render.
+    await fetch("/api/auth/logout", { method: "POST" });
     sessionStorage.removeItem("securewarp_keys");
     sessionStorage.removeItem("securewarp_active_workspace");
     sessionStorage.removeItem("securewarp_view_state");
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
+    window.location.replace("/login");
   }
 
   function dismissRecoveryKey() {
