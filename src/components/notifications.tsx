@@ -91,17 +91,20 @@ export function NotificationBell() {
     }
   }, []);
 
-  // Initial fetch + polling + optional Supabase Realtime
+  // Initial fetch + Realtime subscription (with a polling fallback
+  // only when Realtime is unavailable).
   useEffect(() => {
     fetchNotifications();
 
-    // Poll every 10 seconds as the reliable baseline. Realtime
-    // (below) delivers sub-second updates when connected, but
-    // polling covers env-var-missing, connection failures, and
-    // Vercel cold starts where the websocket hasn't connected yet.
-    // 30s poll — realtime websocket handles instant delivery when
-    // connected, polling is just the fallback.
-    const interval = setInterval(fetchNotifications, 30_000);
+    // Polling is now Realtime-gated: we drop the 30s interval when
+    // Supabase Realtime is configured, because the channel below
+    // delivers INSERTs with sub-second latency and the on-open
+    // effect already refetches when the user clicks the bell. If
+    // Realtime isn't configured (env vars missing in preview
+    // deploys), we keep a slow poll as the reliable fallback.
+    const interval = supabaseClient
+      ? null
+      : setInterval(fetchNotifications, 30_000);
 
     // Realtime layer — additive, not a replacement
     let channel: ReturnType<NonNullable<typeof supabaseClient>["channel"]> | null = null;
@@ -149,7 +152,7 @@ export function NotificationBell() {
     }
 
     return () => {
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
       if (channel && supabaseClient) supabaseClient.removeChannel(channel);
     };
   }, [fetchNotifications, userKeys]);

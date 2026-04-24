@@ -1,11 +1,21 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Sidebar } from "@/components/sidebar";
 import { FileBrowser } from "@/components/file-browser";
-import { AuthScreen } from "@/components/auth-screen";
+// AuthScreen is a big component (full auth UI, SRP client, Turnstile,
+// recovery modal). On the happy path — user has keys in sessionStorage
+// — we never render it. Ship it as a separate chunk and load only if
+// the keys-missing branch fires. loading:null → no fallback flash
+// between drive-client mounting and the lazy chunk resolving; the
+// surrounding ThemeProvider still paints the background.
+const AuthScreen = dynamic(
+  () => import("@/components/auth-screen").then((m) => ({ default: m.AuthScreen })),
+  { ssr: false, loading: () => null },
+);
 import { MobileNav } from "@/components/mobile-nav";
 import { AnnouncementBanner } from "@/components/announcement-banner";
 import { UserKeysContext, type UserKeys } from "@/hooks/use-user-keys";
@@ -62,24 +72,41 @@ export default function DriveClient() {
     return () => window.removeEventListener("securewarp-keys-updated", refresh);
   }, []);
 
-  // Zombie-session guard. `middleware.ts` trusts the JWT signature alone
-  // (no DB lookup per request, by design), while `getSession()` in route
-  // handlers requires a matching `sessions` row. After a data wipe or a
-  // revoked session, the cookie's signature still validates → middleware
-  // redirects /login and /signup back to /drive → drive-client sees
-  // empty sessionStorage → renders AuthScreen inline → user clicks
-  // "Sign up" or "Sign in" and nothing appears to happen because the
-  // URL snaps straight back. We detect the zombie state by probing
-  // /api/auth/profile (which uses getSession) — a 401 means the cookie
-  // is dead. Clear it via /api/auth/logout so the next nav attempt is
-  // treated as an unauthenticated request and actually lands.
+  // Single /api/auth/profile probe that services two concerns:
   //
-  // Only runs when we're about to fall back to the inline AuthScreen.
-  // If keys are present in sessionStorage we skip entirely — nothing
-  // to guard against, and profile-probing that path runs in the
-  // onboarding gate below already.
+  //   1. Zombie-session guard — `middleware.ts` trusts the JWT
+  //      signature alone (no DB lookup per request, by design), while
+  //      `getSession()` in route handlers requires a matching
+  //      `sessions` row. After a data wipe or a revoked session, the
+  //      cookie's signature still validates → middleware redirects
+  //      /login and /signup back to /drive → drive-client sees empty
+  //      sessionStorage → renders AuthScreen inline → user clicks
+  //      "Sign up" and nothing appears to happen because the URL
+  //      snaps straight back. A 401 here means the cookie is dead;
+  //      clear it via /api/auth/logout so the next nav attempt
+  //      lands.
+  //
+  //   2. Onboarding gate — returning users who never completed the
+  //      wizard bounce to /welcome. This branch only fires once keys
+  //      are present (we don't redirect a tab that's still on the
+  //      unlock form).
+  //
+  // Previously these were two separate useEffects with two fetches.
+  // The response data is identical (same user, same onboarded flag),
+  // so we cache it in a ref and re-apply the onboarding check when
+  // keys arrive later in the session.
+  const profileRef = useRef<{ onboarded?: boolean } | null>(null);
   useEffect(() => {
-    if (!hydrated || keys) return;
+    if (!hydrated) return;
+    // Already have a fresh profile from an earlier run this mount —
+    // just apply the onboarding gate to the (possibly newly-arrived)
+    // keys without a second network round-trip.
+    if (profileRef.current) {
+      if (keys && profileRef.current.onboarded === false) {
+        router.replace("/welcome");
+      }
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -89,6 +116,13 @@ export default function DriveClient() {
           // Zombie cookie. Clear it so auth-route middleware stops
           // redirecting /login ↔ /signup back to /drive.
           await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+          return;
+        }
+        if (res.ok) {
+          const data = (await res.json()) as { onboarded?: boolean };
+          if (cancelled) return;
+          profileRef.current = data;
+          if (keys && data.onboarded === false) router.replace("/welcome");
         }
       } catch {
         // Network flake — leave cookie in place; user can still
@@ -97,28 +131,7 @@ export default function DriveClient() {
       }
     })();
     return () => { cancelled = true; };
-  }, [hydrated, keys]);
-
-  // Gate: returning users who never onboarded (pre-wizard accounts, or
-  // anyone who closed the tab mid-wizard) get bounced to /welcome. We
-  // only check once keys are present — an unlock-needed state shows
-  // AuthScreen below and should not trigger a redirect.
-  useEffect(() => {
-    if (!keys) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/auth/profile");
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled && data.onboarded === false) router.replace("/welcome");
-      } catch {
-        // Profile fetch failure is non-fatal — drive stays rendered,
-        // user can retry onboarding from settings later.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [keys, router]);
+  }, [hydrated, keys, router]);
 
   // Single useFiles instance shared between sidebar (for "Shared with me"
   // view toggle) and the file browser. Created here so its state outlives
@@ -165,13 +178,56 @@ export default function DriveClient() {
   // page — just the PDF viewer shell, no mammoth/exceljs loaded) which
   // is enough to clear the Cloudflare challenge and cache the shared
   // chunks that all three viewer routes import.
+  //
+  // Deferred: we don't mount the iframe on first render anymore
+  // (users who never open a preview paid the cost). Instead we flip
+  // `preloadViewer` when the first file hover fires, OR on an idle
+  // callback so the warmup still happens for users who go straight
+  // to a download.
   const viewerOrigin = process.env.NEXT_PUBLIC_PDF_VIEWER_ORIGIN?.trim();
+  const [preloadViewer, setPreloadViewer] = useState(false);
+  useEffect(() => {
+    if (!viewerOrigin || !keys || preloadViewer) return;
+    const trigger = () => setPreloadViewer(true);
+    // Any user interaction with the drive shell (hover, touch, key)
+    // is a reasonable signal they might preview something. Listen
+    // once and clean up — no reason to keep listeners wired after
+    // the iframe mounts.
+    const opts: AddEventListenerOptions = { once: true, passive: true };
+    window.addEventListener("pointermove", trigger, opts);
+    window.addEventListener("pointerdown", trigger, opts);
+    window.addEventListener("keydown", trigger, opts);
+    // Idle fallback for users who go straight to a download without
+    // hovering first — still want the iframe warmed up so it's ready
+    // on first actual preview click.
+    let idleHandle: number | null = null;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    type IdleWindow = Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (h: number) => void;
+    };
+    const w = window as IdleWindow;
+    if (typeof w.requestIdleCallback === "function") {
+      idleHandle = w.requestIdleCallback(trigger, { timeout: 4000 });
+    } else {
+      timeoutHandle = setTimeout(trigger, 3000);
+    }
+    return () => {
+      window.removeEventListener("pointermove", trigger);
+      window.removeEventListener("pointerdown", trigger);
+      window.removeEventListener("keydown", trigger);
+      if (idleHandle !== null && typeof w.cancelIdleCallback === "function") {
+        w.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    };
+  }, [viewerOrigin, keys, preloadViewer]);
 
   return (
     <ThemeProvider>
       <UserKeysContext.Provider value={keys}>
         <FilesContext.Provider value={fileOps}>
-          {viewerOrigin && (
+          {viewerOrigin && preloadViewer && (
             <iframe
               src={`${viewerOrigin}/viewer`}
               aria-hidden

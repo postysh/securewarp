@@ -313,8 +313,14 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     },
     [sortStorageKey],
   );
-  const [sortField, setSortField] = useState<SortField>(() => readSortPref("own").field);
-  const [sortAsc, setSortAsc] = useState(() => readSortPref("own").asc);
+  // Merged into a single useState so view-switch sync writes one
+  // update instead of two — avoids a double render per viewMode
+  // change. Destructure into `sortField` / `sortAsc` locals so the
+  // rest of the component reads unchanged.
+  const [sort, setSort] = useState<{ field: SortField; asc: boolean }>(
+    () => readSortPref("own"),
+  );
+  const { field: sortField, asc: sortAsc } = sort;
   const [layout, setLayout] = useState<"list" | "grid">(() => {
     if (typeof window === "undefined") return "list";
     return (localStorage.getItem("securewarp_layout") as "list" | "grid") || "list";
@@ -543,13 +549,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   // and briefly hides the just-renamed file.
   useLayoutEffect(() => {
     if (fileOps.viewMode === "recent") {
-      setSortField("recent");
-      setSortAsc(false);
+      setSort({ field: "recent", asc: false });
       return;
     }
-    const pref = readSortPref(fileOps.viewMode);
-    setSortField(pref.field);
-    setSortAsc(pref.asc);
+    setSort(readSortPref(fileOps.viewMode));
   }, [fileOps.viewMode, readSortPref]);
 
   // Refetch Recent when a preview closes so the file the user just
@@ -1007,8 +1010,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const toggleSort = (field: SortField) => {
     const nextField = field;
     const nextAsc = sortField === field ? !sortAsc : true;
-    setSortField(nextField);
-    setSortAsc(nextAsc);
+    setSort({ field: nextField, asc: nextAsc });
     // Recent does NOT persist its column-header overrides — re-entry
     // resets to the server's recency ordering (see the sort-sync
     // effect above).
