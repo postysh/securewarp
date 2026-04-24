@@ -668,9 +668,24 @@ export function useFiles(keys: {
       // Silent fetches only write to state AFTER the network response
       // arrives, replacing `files` in place.
       if (!silent) {
+        // Detect whether this is a view-switch vs a refresh. When the
+        // viewMode is changing, we MUST clear `files` — otherwise the
+        // previous view's data keeps rendering while the network fetch
+        // is in flight, and the client-side sort re-orders those
+        // stale rows under the new view's saved sort preference (the
+        // Recent → Starred flicker). Cached hits skip this because
+        // they replace `files` with the correct view's data instantly.
+        const nextViewMode =
+          viewModeOverride ?? (mode === "own" && parentId ? undefined : mode);
+        const viewChanging =
+          nextViewMode !== undefined && nextViewMode !== state.viewMode;
         setState((s) => ({
           ...s,
-          ...(cached ? { files: cached, loading: false } : { loading: s.loading || !initialized || s.files.length === 0 }),
+          ...(cached
+            ? { files: cached, loading: false }
+            : viewChanging
+              ? { files: [], loading: true }
+              : { loading: s.loading || !initialized || s.files.length === 0 }),
           error: null,
           currentFolder: mode !== "own" ? null : parentId,
           viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
@@ -3442,13 +3457,22 @@ export function useFiles(keys: {
       activeWorkspace: { id: workspaceId, rootFolderId, name: workspaceName, role: workspaceRole || "editor" },
     }));
     const bc = [{ id: rootFolderId, name: workspaceName }];
-    await fetchFiles(rootFolderId, "own", bc);
+    // Force viewMode back to "own" on workspace switch. Without the
+    // override, fetchFiles preserves s.viewMode when mode==="own" and
+    // parentId is truthy (the "drilled into a folder" case), so a
+    // user coming from Recent/Starred/Shared would land in the new
+    // workspace with a viewMode that the workspace sidebar filters
+    // out — leaving no nav item highlighted.
+    await fetchFiles(rootFolderId, "own", bc, "own");
   }, [fetchFiles]);
 
   const leaveWorkspace = useCallback(() => {
     setState((s) => ({ ...s, files: [], loading: true, callerPermission: null, activeWorkspace: null }));
     const bc = [{ id: null as string | null, name: "My Drive" }];
-    fetchFiles(null, "own", bc);
+    // Same reason as navigateToWorkspace: snap viewMode to "own" so
+    // the personal sidebar highlights My Drive on return from a
+    // workspace view.
+    fetchFiles(null, "own", bc, "own");
   }, [fetchFiles]);
 
   /**
