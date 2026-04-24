@@ -20,8 +20,6 @@ function installFsa(writable: FakeWritable) {
   const handle = { createWritable: vi.fn().mockResolvedValue(writable) };
   const showSaveFilePicker = vi.fn().mockResolvedValue(handle);
   vi.stubGlobal("window", { showSaveFilePicker });
-  // Also mask navigator.storage so we don't accidentally hit the OPFS
-  // path if the test runtime happens to expose it.
   vi.stubGlobal("navigator", {});
   return { showSaveFilePicker, handle };
 }
@@ -35,37 +33,8 @@ function installFsaCancel() {
 }
 
 function installNoFsa() {
-  vi.stubGlobal("window", {});
+  vi.stubGlobal("window", { isSecureContext: true });
   vi.stubGlobal("navigator", {});
-}
-
-interface FakeOpfsWritable extends FakeWritable {}
-interface FakeOpfsHandle {
-  createWritable: ReturnType<typeof vi.fn>;
-  getFile: ReturnType<typeof vi.fn>;
-}
-interface FakeOpfsDirectory {
-  getFileHandle: ReturnType<typeof vi.fn>;
-  removeEntry: ReturnType<typeof vi.fn>;
-}
-
-function installOpfs(
-  writable: FakeOpfsWritable,
-  file: File = new File([new Uint8Array([1, 2, 3, 4])], "tmp"),
-) {
-  const handle: FakeOpfsHandle = {
-    createWritable: vi.fn().mockResolvedValue(writable),
-    getFile: vi.fn().mockResolvedValue(file),
-  };
-  const dir: FakeOpfsDirectory = {
-    getFileHandle: vi.fn().mockResolvedValue(handle),
-    removeEntry: vi.fn().mockResolvedValue(undefined),
-  };
-  vi.stubGlobal("window", {});
-  vi.stubGlobal("navigator", {
-    storage: { getDirectory: vi.fn().mockResolvedValue(dir) },
-  });
-  return { handle, dir, file };
 }
 
 describe("openDownloadSink", () => {
@@ -154,108 +123,10 @@ describe("openDownloadSink", () => {
         openDownloadSink("f", "application/octet-stream"),
       ).rejects.toBeInstanceOf(DownloadCancelled);
     });
-
-    it("falls back to blob sink when FSA throws a non-AbortError and OPFS is unavailable", async () => {
-      const showSaveFilePicker = vi
-        .fn()
-        .mockRejectedValue(Object.assign(new Error("denied"), { name: "SecurityError" }));
-      vi.stubGlobal("window", { showSaveFilePicker, document: globalThis.document });
-      vi.stubGlobal("navigator", {});
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      const sink = await openDownloadSink("f", "application/octet-stream");
-      expect(sink.streaming).toBe(false);
-      expect(warnSpy).toHaveBeenCalled();
-    });
-  });
-
-  describe("OPFS path", () => {
-    it("returns a streaming sink when showSaveFilePicker is absent but OPFS is present", async () => {
-      const writable = makeWritable();
-      installOpfs(writable);
-      const sink = await openDownloadSink("f", "application/octet-stream");
-      expect(sink.streaming).toBe(true);
-    });
-
-    it("writes chunks through to the OPFS writable and zeros the source after write", async () => {
-      const writable = makeWritable();
-      installOpfs(writable);
-
-      const sink = await openDownloadSink("f", "application/octet-stream");
-      const chunk = new Uint8Array([5, 6, 7]);
-      await sink.write(chunk);
-
-      expect(writable.write).toHaveBeenCalledTimes(1);
-      expect(Array.from(chunk)).toEqual([0, 0, 0]);
-    });
-
-    it("close() finalizes the writable, triggers an anchor click with the File, and removes the OPFS temp entry", async () => {
-      vi.useFakeTimers();
-      const writable = makeWritable();
-      const { dir } = installOpfs(writable);
-
-      const clickSpy = vi.fn();
-      const anchor = {
-        set href(_v: string) {},
-        set download(_v: string) {},
-        click: clickSpy,
-      } as unknown as HTMLAnchorElement;
-      const createElement = vi.fn().mockReturnValue(anchor);
-      const appendChild = vi.fn();
-      const removeChild = vi.fn();
-      vi.stubGlobal("document", {
-        createElement,
-        body: { appendChild, removeChild },
-      });
-      const createObjectURL = vi.fn().mockReturnValue("blob:opfs");
-      const revokeObjectURL = vi.fn();
-      vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
-
-      const sink = await openDownloadSink("out.bin", "application/octet-stream");
-      await sink.close();
-
-      expect(writable.close).toHaveBeenCalledTimes(1);
-      expect(createObjectURL).toHaveBeenCalledTimes(1);
-      expect(clickSpy).toHaveBeenCalledTimes(1);
-      expect(appendChild).toHaveBeenCalledTimes(1);
-      expect(removeChild).toHaveBeenCalledTimes(1);
-      // OPFS entry deleted after the anchor download is wired up.
-      expect(dir.removeEntry).toHaveBeenCalledTimes(1);
-      // revokeObjectURL is deferred — not called synchronously.
-      expect(revokeObjectURL).not.toHaveBeenCalled();
-      // After the 60s timer fires it finally runs.
-      vi.advanceTimersByTime(60_000);
-      expect(revokeObjectURL).toHaveBeenCalledWith("blob:opfs");
-    });
-
-    it("abort() aborts the OPFS writable and removes the temp entry", async () => {
-      const writable = makeWritable();
-      const { dir } = installOpfs(writable);
-
-      const sink = await openDownloadSink("f", "application/octet-stream");
-      await sink.abort(new Error("user cancel"));
-
-      expect(writable.abort).toHaveBeenCalledTimes(1);
-      expect(dir.removeEntry).toHaveBeenCalledTimes(1);
-    });
-
-    it("falls through to the blob sink when OPFS setup throws", async () => {
-      vi.stubGlobal("window", {});
-      vi.stubGlobal("navigator", {
-        storage: {
-          getDirectory: vi.fn().mockRejectedValue(new Error("quota")),
-        },
-      });
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      const sink = await openDownloadSink("f", "application/octet-stream");
-      expect(sink.streaming).toBe(false);
-      expect(warnSpy).toHaveBeenCalled();
-    });
   });
 
   describe("Blob fallback", () => {
-    it("returns a non-streaming sink when neither FSA nor OPFS is available", async () => {
+    it("returns a non-streaming sink when neither FSA nor SW is available", async () => {
       installNoFsa();
       const sink = await openDownloadSink("f", "application/octet-stream");
       expect(sink.streaming).toBe(false);
