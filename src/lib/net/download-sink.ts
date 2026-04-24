@@ -66,6 +66,12 @@ function hasFsa(): boolean {
 
 // Lazy SW registration — one promise shared across all download attempts,
 // so parallel downloads don't race `register()` and cancel each other.
+// Resolves to the controlling SW or null. We deliberately do NOT fall
+// back to `reg.active` — only a controller intercepts page fetches. If
+// the page isn't controlled by the time the user clicks Download, the
+// anchor fetch goes to the network, hits Next's 404, and saves that
+// HTML as the "zip" file. Better to fall back to the blob sink than
+// silently produce a broken file.
 let swReadyPromise: Promise<ServiceWorker | null> | null = null;
 
 function canUseSw(): boolean {
@@ -77,6 +83,17 @@ function canUseSw(): boolean {
   return true;
 }
 
+/**
+ * Trigger SW registration eagerly — call this on every drive-page mount
+ * so by the time the user clicks Download (typically several seconds
+ * later) the SW has been activated AND has claimed the document. Without
+ * this, the first-ever download fires the registration race below and
+ * the controller may not exist when we click the anchor.
+ */
+export function prewarmDownloadSw(): void {
+  void ensureSw();
+}
+
 async function ensureSw(): Promise<ServiceWorker | null> {
   if (!canUseSw()) return null;
   if (swReadyPromise) return swReadyPromise;
@@ -85,7 +102,7 @@ async function ensureSw(): Promise<ServiceWorker | null> {
     try {
       // Scope "/" — SW lives at the origin root so it can intercept
       // `/sw-download/*` regardless of which page initiated the download.
-      const reg = await navigator.serviceWorker.register("/download-sw.js", {
+      await navigator.serviceWorker.register("/download-sw.js", {
         scope: "/",
       });
       // `ready` resolves to the active registration; if we just
@@ -93,12 +110,15 @@ async function ensureSw(): Promise<ServiceWorker | null> {
       // because the SW calls self.skipWaiting().
       await navigator.serviceWorker.ready;
 
-      // If this page isn't yet controlled by the SW (first-ever visit
-      // after a fresh install), clients.claim() in the SW's activate
-      // handler dispatches a `controllerchange` event. Wait for it.
+      // Wait for the document to be CONTROLLED — not just for an active
+      // registration. clients.claim() in the SW's activate handler
+      // dispatches a `controllerchange` event when the document is
+      // claimed. Only after that does navigator.serviceWorker.controller
+      // become non-null and is the SW capable of intercepting our
+      // /sw-download/<id> fetch.
       if (!navigator.serviceWorker.controller) {
         await new Promise<void>((res) => {
-          const t = setTimeout(res, 3_000); // bail-out
+          const t = setTimeout(res, 5_000); // bail-out
           navigator.serviceWorker.addEventListener(
             "controllerchange",
             () => {
@@ -110,9 +130,10 @@ async function ensureSw(): Promise<ServiceWorker | null> {
         });
       }
 
-      return (
-        navigator.serviceWorker.controller ?? reg.active ?? null
-      );
+      // Strict: only return a SW if the document is now controlled by it.
+      // reg.active is not enough — that's the SW instance, but the page
+      // fetch wouldn't be intercepted unless the page is controlled.
+      return navigator.serviceWorker.controller ?? null;
     } catch (err) {
       console.warn("[download-sink] SW registration failed:", err);
       return null;
@@ -142,9 +163,21 @@ export async function openDownloadSink(
   }
 
   const sw = await ensureSw();
-  if (sw) {
+  // Re-check at click time: ensureSw() resolved with the controller as
+  // it stood when the promise resolved. If the controller has since
+  // gone away (page reload mid-flight, SW eviction, etc.) we MUST NOT
+  // try to dispatch a fetch through it — the anchor click would hit
+  // the network and the user would save Next's 404 page (~26KB of
+  // marketing-shell HTML) as their "zip". Falling back to the blob
+  // sink at least produces correct output, even if it OOMs on
+  // multi-GB files.
+  const liveController =
+    typeof navigator !== "undefined"
+      ? navigator.serviceWorker?.controller ?? null
+      : null;
+  if (sw && liveController) {
     try {
-      return await makeSwSink(sw, suggestedName, mime);
+      return await makeSwSink(liveController, suggestedName, mime);
     } catch (err) {
       console.warn("[download-sink] SW sink setup failed, using blob fallback:", err);
     }

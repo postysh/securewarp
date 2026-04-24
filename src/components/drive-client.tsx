@@ -26,6 +26,7 @@ import {
   useFiles,
 } from "@/hooks/use-files";
 import { BootContext, type BootPayload } from "@/hooks/use-boot";
+import { prewarmDownloadSw } from "@/lib/net/download-sink";
 
 export default function DriveClient() {
   const router = useRouter();
@@ -53,6 +54,19 @@ export default function DriveClient() {
     window.addEventListener("securewarp-workspace-removed", onRemoved);
     return () =>
       window.removeEventListener("securewarp-workspace-removed", onRemoved);
+  }, []);
+
+  // Pre-warm the streaming-download service worker on every drive
+  // mount. Registration takes a few hundred ms on the first visit
+  // (script fetch + install + activate + clients.claim), and the
+  // download-sink path REQUIRES the document to be controlled by the
+  // SW or it falls back to the in-memory blob (which OOMs on multi-GB
+  // files). Doing this on mount instead of on first download click
+  // means the user has typically been on the page for several seconds
+  // before they hit Download, so the SW is already controlling and
+  // the click → fetch → SW interception path works.
+  useEffect(() => {
+    prewarmDownloadSw();
   }, []);
 
   useEffect(() => {
