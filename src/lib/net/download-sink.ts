@@ -9,31 +9,26 @@
  *    on Chromium without keeping plaintext in tab heap.
  *
  * 2. **Service worker streaming (iframe trigger)**: Safari, Firefox,
- *    any browser with SW support. `public/download-sw.js` intercepts a
- *    same-origin `/sw-download/<id>` URL navigated via a hidden iframe
- *    and answers with a Response whose body is a ReadableStream and
- *    whose Content-Disposition is `attachment`. The browser saves the
- *    streamed response to disk; the page feeds chunks over a
+ *    any browser with SW support. `public/download-sw.js` intercepts
+ *    `/sw-download/<id>` URLs navigated via a hidden iframe and answers
+ *    with a Response whose body is a ReadableStream and whose
+ *    Content-Disposition is `attachment`. The browser saves the streamed
+ *    response straight to disk; the page feeds chunks over a
  *    MessageChannel. Multi-GB downloads land without ever sitting in
- *    the tab heap.
+ *    the tab heap. Iframe rather than anchor: Safari does NOT route
+ *    `<a download>` clicks through the SW fetch handler.
  *
- *    Iframe rather than anchor: Safari historically does NOT route
- *    `<a download>` clicks through the SW fetch handler, so the
- *    earlier anchor-trigger version (commits 19ad10d / 654d78f)
- *    silently produced 404 HTML on the user's disk. iframe
- *    navigations ARE routed through the SW on every browser that
- *    ships SW support — same pattern StreamSaver.js uses.
- *
- * 3. **Blob fallback**: last resort. Accumulates every chunk in a JS
- *    array, hands the array directly to `new Blob`, triggers an
- *    anchor click. Memory-bounded by the tab heap; OOMs on multi-GB
- *    files in Safari/Firefox. Only fires when neither FSA nor a
- *    controlling SW is available.
+ * 3. **Blob fallback**: last resort. Hands all chunks at once to
+ *    `new Blob` and triggers an anchor click. Memory-bounded by tab
+ *    heap; OOMs on multi-GB files in Safari/Firefox. The
+ *    `BLOB_FALLBACK_SIZE_LIMIT` guard refuses to use this path for
+ *    files larger than the limit so the user gets a clear error
+ *    instead of a silent OOM mid-download.
  *
  * Ownership contract: once `write(chunk)` resolves the sink owns
- * `chunk`. Each backend zeros the chunk before returning (the SW path
- * transfers the underlying ArrayBuffer to the worker, which detaches
- * the page-side view — equivalent to zeroing).
+ * `chunk`. The FSA backend zeros after the disk write; the SW backend
+ * transfers the underlying ArrayBuffer (which detaches the page-side
+ * view, equivalent to zeroing); the blob backend zeros at close().
  */
 
 export interface DownloadSink {
@@ -50,6 +45,39 @@ export class DownloadCancelled extends Error {
     this.name = "DownloadCancelled";
   }
 }
+
+/**
+ * Thrown by `openDownloadSink` when the only available path is the
+ * in-memory blob fallback AND the file is large enough that the blob
+ * assembly will OOM the tab. The orchestrator should surface a clear
+ * "this browser can't download files this large — use Chrome" error
+ * instead of fetching gigabytes only to fail at the end.
+ */
+export class BrowserCannotStreamLargeDownload extends Error {
+  readonly suggestedName: string;
+  readonly sizeBytes: number;
+  readonly limitBytes: number;
+  constructor(suggestedName: string, sizeBytes: number, limitBytes: number) {
+    super(
+      `This browser can't download files larger than ${(limitBytes / 1_073_741_824).toFixed(1)} GB. ` +
+        `Use Chrome, Edge, or Brave for "${suggestedName}".`,
+    );
+    this.name = "BrowserCannotStreamLargeDownload";
+    this.suggestedName = suggestedName;
+    this.sizeBytes = sizeBytes;
+    this.limitBytes = limitBytes;
+  }
+}
+
+/**
+ * Hard ceiling for the in-memory blob fallback. Above this we refuse
+ * to start the download — the assembly would OOM the tab. Picked at
+ * 1.5 GB to give Safari a safety margin (single-tab heap is typically
+ * 4 GB on 64-bit macOS, but the parts array + the Blob's internal
+ * copy effectively double the working set). FSA + SW paths have no
+ * such limit.
+ */
+export const BLOB_FALLBACK_SIZE_LIMIT = 1_500_000_000;
 
 interface FsaWritable {
   write(data: Uint8Array): Promise<void>;
@@ -74,6 +102,7 @@ function hasFsa(): boolean {
 // deliberately do NOT fall back to `reg.active` — only a controller
 // can intercept the iframe navigation.
 let swReadyPromise: Promise<ServiceWorker | null> | null = null;
+let swControllerChangeHooked = false;
 
 function canUseSw(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -92,8 +121,28 @@ export function prewarmDownloadSw(): void {
   void ensureSw();
 }
 
+/**
+ * Listen once for `controllerchange` events that NULL the controller
+ * (browser evicted the SW under memory pressure). When that happens,
+ * blow the cached `swReadyPromise` so the next download call
+ * re-registers from scratch instead of using a dead controller. The
+ * live re-check in `openDownloadSink` already protects against this,
+ * but resetting the cache also unblocks recovery without a tab reload.
+ */
+function hookSwControllerChange(): void {
+  if (swControllerChangeHooked) return;
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  swControllerChangeHooked = true;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!navigator.serviceWorker.controller) {
+      swReadyPromise = null;
+    }
+  });
+}
+
 async function ensureSw(): Promise<ServiceWorker | null> {
   if (!canUseSw()) return null;
+  hookSwControllerChange();
   if (swReadyPromise) return swReadyPromise;
 
   swReadyPromise = (async () => {
@@ -132,9 +181,26 @@ async function ensureSw(): Promise<ServiceWorker | null> {
   return swReadyPromise;
 }
 
+/**
+ * Open the right sink for the current browser + file size.
+ *
+ * @param suggestedName  Filename the browser will use in the save dialog.
+ * @param mime           MIME type for the Blob / Response. Should be
+ *                       `application/octet-stream` from `safeMimeForDownload`
+ *                       so middle-click middle-buttons don't inline-render.
+ * @param sizeBytes      File size if known. Used to refuse the blob fallback
+ *                       above `BLOB_FALLBACK_SIZE_LIMIT` so the user gets a
+ *                       clear error instead of a silent OOM. Pass 0 if
+ *                       unknown — the size guard is then skipped.
+ *
+ * @throws DownloadCancelled       — user dismissed the FSA save picker.
+ * @throws BrowserCannotStreamLargeDownload — only blob path available
+ *         and `sizeBytes` exceeds the limit.
+ */
 export async function openDownloadSink(
   suggestedName: string,
   mime: string,
+  sizeBytes: number = 0,
 ): Promise<DownloadSink> {
   if (hasFsa()) {
     try {
@@ -168,6 +234,16 @@ export async function openDownloadSink(
     }
   }
 
+  // Last resort. Refuse the blob path for files we know will OOM
+  // before we fetch a single byte — much better than failing 90%
+  // through a 2.8 GB download.
+  if (sizeBytes > 0 && sizeBytes > BLOB_FALLBACK_SIZE_LIMIT) {
+    throw new BrowserCannotStreamLargeDownload(
+      suggestedName,
+      sizeBytes,
+      BLOB_FALLBACK_SIZE_LIMIT,
+    );
+  }
   return makeBlobSink(suggestedName, mime);
 }
 
@@ -210,18 +286,33 @@ async function makeSwSink(
   // Two-phase ack: post init, wait for SW to confirm `downloads.set(id, ...)`,
   // THEN inject the iframe. Without the wait the iframe navigation can
   // beat the SW's message handler and hit the 404 branch.
+  let initAcked = false;
+  let drainResolve: (() => void) | null = null;
+  const drainWait = new Promise<void>((res) => {
+    drainResolve = res;
+  });
+
   const ackWait = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(
       () => reject(new Error("SW init-ack timeout")),
       5_000,
     );
     channel.port1.onmessage = (msg) => {
-      if (msg.data?.type === "init-ack") {
+      const t = msg.data?.type;
+      if (t === "init-ack" && !initAcked) {
+        initAcked = true;
         clearTimeout(timeout);
-        // Replace the handler — page doesn't process any further
-        // messages from the SW on this port.
-        channel.port1.onmessage = null;
         resolve();
+      } else if (t === "drained") {
+        // SW has called streamController.close() and (best effort)
+        // the browser has consumed everything we enqueued. The
+        // sink.close() promise that's awaiting this resolves so the
+        // orchestrator can mark the row truly done.
+        if (drainResolve) drainResolve();
+      } else if (t === "cancelled") {
+        // Browser cancelled the download (user cancel, disk full).
+        // Nothing the page can do at this point; drainWait stays
+        // pending until the close()'s safety timeout fires.
       }
     };
   });
@@ -266,8 +357,22 @@ async function makeSwSink(
       if (closed) return;
       closed = true;
       channel.port1.postMessage({ type: "close" });
-      // Keep the port + iframe alive long enough for the SW to drain
-      // the stream and the browser to commit the file to disk.
+
+      // Wait for the SW to ack drain (it sends `{ type: "drained" }`
+      // after streamController.close() runs). The browser may still
+      // need a moment to commit the bytes to disk after that signal,
+      // but `drained` is the strongest "done" signal we have without
+      // polling the file system. 10s safety timeout keeps the
+      // orchestrator unstuck if the SW gets evicted.
+      await Promise.race([
+        drainWait,
+        new Promise<void>((res) => setTimeout(res, 10_000)),
+      ]);
+
+      // Tear down the iframe + port. We hold for a few extra seconds
+      // after `drained` because some browsers (Safari) keep reading
+      // from the SW response stream for a moment after the controller
+      // closes — removing the iframe too early can truncate the file.
       setTimeout(() => {
         try {
           channel.port1.close();
@@ -275,7 +380,7 @@ async function makeSwSink(
           // ignore
         }
         if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      }, 30_000);
+      }, 10_000);
     },
     async abort() {
       if (closed) return;

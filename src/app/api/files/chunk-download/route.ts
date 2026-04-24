@@ -78,13 +78,37 @@ export async function GET(request: Request) {
     };
 
     if (chunks && chunks.length > 0) {
-      const chunkDownloads = await Promise.all(
+      // Generate presigned URLs in parallel. Use allSettled so a
+      // single transient R2 signing hiccup doesn't poison the entire
+      // download — we collect the failures, log them with their
+      // chunk numbers (so we can correlate against R2 metrics), and
+      // return a 502 with a clear error code. Promise.all here
+      // would have surfaced the same total failure but without the
+      // chunk identification.
+      const settled = await Promise.allSettled(
         chunks.map(async (chunk: { sequence: number; storage_key: string; encryption_nonce: string; is_final: boolean; shard: number | null }) => ({
           sequence: chunk.sequence,
           downloadUrl: await getDownloadUrl(chunk.shard ?? 0, chunk.storage_key),
           encryptionNonce: chunk.encryption_nonce,
           isFinal: chunk.is_final,
-        }))
+        })),
+      );
+      const failed = settled
+        .map((r, i) => ({ r, seq: chunks[i].sequence }))
+        .filter((x) => x.r.status === "rejected");
+      if (failed.length > 0) {
+        for (const f of failed) {
+          logError(`chunk-download.presign[seq=${f.seq}]`, (f.r as PromiseRejectedResult).reason);
+        }
+        return NextResponse.json(
+          {
+            error: `Couldn't sign ${failed.length} of ${chunks.length} chunks. Try again in a moment.`,
+          },
+          { status: 502 },
+        );
+      }
+      const chunkDownloads = settled.map(
+        (r) => (r as PromiseFulfilledResult<{ sequence: number; downloadUrl: string; encryptionNonce: string; isFinal: boolean }>).value,
       );
 
       // Real file read — bump Recent. Only for content paths; the

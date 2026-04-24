@@ -35,7 +35,14 @@ import {
   decryptMetadata,
   type HybridPrivateKeys,
 } from "@/lib/crypto/file-crypto";
-import { decryptChunk } from "@/lib/crypto/chunked-encryption";
+import { getChunkPool } from "@/lib/crypto/chunk-pool";
+import {
+  openDownloadSink,
+  DownloadCancelled,
+  BrowserCannotStreamLargeDownload,
+  prewarmDownloadSw,
+} from "@/lib/net/download-sink";
+import { safeMimeForDownload } from "@/lib/mime-safety";
 
 interface ChildRow {
   id: string;
@@ -448,6 +455,14 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
     }
   };
 
+  // Prewarm the streaming-download service worker on mount. Visitors
+  // hit "Download" within seconds of landing here; without prewarm the
+  // first click pays the full register-and-claim round-trip while
+  // chunks pile up in memory waiting for a sink.
+  useEffect(() => {
+    prewarmDownloadSw();
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
@@ -571,7 +586,12 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.kind === "folder" ? state.stack[state.stack.length - 1]?.id : null]);
 
-  const downloadFile = async (fileId: string, name: string, mime: string) => {
+  const downloadFile = async (
+    fileId: string,
+    name: string,
+    mime: string,
+    sizeBytes: number = 0,
+  ) => {
     // Every fileId we render is either the link's root file (seeded
     // into the cache on load) or a descendant unwrapped during a child
     // walk (cached when we decrypted its parent_keys_claim). No
@@ -580,6 +600,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
     if (!privHier) return;
     if (downloadProgress[fileId] !== undefined) return; // already in flight
     let sessionKey: Uint8Array | null = null;
+    let sink: Awaited<ReturnType<typeof openDownloadSink>> | null = null;
     try {
       setDownloadProgress((p) => ({ ...p, [fileId]: 0 }));
 
@@ -591,7 +612,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
         data.encryptedSessionKeyByFile,
         data.sessionKeyNonce,
         data.ownerPublicKey,
-        privHier
+        privHier,
       );
 
       const chunks = data.chunks as {
@@ -599,42 +620,75 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
         downloadUrl: string;
         encryptionNonce: string;
         isFinal: boolean;
-      }[];
-      const decryptedChunks: Uint8Array[] = [];
-      const total = chunks.length;
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        const r2Res = await fetch(chunk.downloadUrl);
-        const encrypted = new Uint8Array(await r2Res.arrayBuffer());
-        const decrypted = decryptChunk(
-          encrypted,
-          chunk.encryptionNonce,
-          chunk.sequence,
-          chunk.isFinal,
-          sessionKey
-        );
-        decryptedChunks.push(decrypted);
-        setDownloadProgress((p) => ({ ...p, [fileId]: Math.round(((i + 1) / total) * 100) }));
-      }
-      const totalSize = decryptedChunks.reduce((sum, c) => sum + c.length, 0);
-      const decryptedContent = new Uint8Array(totalSize);
-      let offset = 0;
-      for (const chunk of decryptedChunks) {
-        decryptedContent.set(chunk, offset);
-        offset += chunk.length;
+      }[] | undefined;
+      if (!chunks || chunks.length === 0) {
+        throw new Error("Folders can't be downloaded directly");
       }
 
-      const blob = new Blob([new Uint8Array(decryptedContent)], { type: mime || "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Open the streaming sink BEFORE we start fetching chunks. On
+      // Safari/Firefox this triggers the SW iframe (zero in-page
+      // memory accumulation); on Chromium it shows the FSA save
+      // picker. Refused with a clear error if the file's too big for
+      // the in-memory blob fallback.
+      sink = await openDownloadSink(
+        name,
+        safeMimeForDownload(mime),
+        sizeBytes,
+      );
+
+      // Pipelined chunk fetch + decrypt — same pattern as the drive's
+      // downloadFile. 5 in-flight slots saturate the network without
+      // letting the page heap build up an arbitrary backlog.
+      const CONCURRENCY = 5;
+      const total = chunks.length;
+      const startFetch = (i: number): Promise<Uint8Array> => {
+        const chunk = chunks[i];
+        return (async () => {
+          const r2Res = await fetch(chunk.downloadUrl);
+          if (!r2Res.ok) throw new Error(`chunk ${chunk.sequence} fetch failed`);
+          const encrypted = new Uint8Array(await r2Res.arrayBuffer());
+          return getChunkPool().decrypt(
+            encrypted,
+            chunk.encryptionNonce,
+            chunk.sequence,
+            chunk.isFinal,
+            sessionKey!,
+          );
+        })();
+      };
+      const inflight: (Promise<Uint8Array> | undefined)[] = new Array(total);
+      const windowSize = Math.min(CONCURRENCY, total);
+      for (let i = 0; i < windowSize; i++) inflight[i] = startFetch(i);
+      for (let i = 0; i < total; i++) {
+        const decrypted = await inflight[i]!;
+        inflight[i] = undefined;
+        await sink.write(decrypted);
+        const next = i + CONCURRENCY;
+        if (next < total) inflight[next] = startFetch(next);
+        setDownloadProgress((p) => ({
+          ...p,
+          [fileId]: Math.round(((i + 1) / total) * 100),
+        }));
+      }
+      await sink.close();
+      sink = null;
     } catch (err) {
-      console.error("share download", err);
+      if (sink) {
+        try { await sink.abort(err); } catch { /* terminal */ }
+      }
+      if (err instanceof DownloadCancelled) {
+        // User dismissed the FSA save picker — silent drop.
+      } else if (err instanceof BrowserCannotStreamLargeDownload) {
+        // Surface the message somewhere visible. The share page
+        // doesn't have a toast surface; fall back to alert() so the
+        // user understands why nothing downloaded instead of seeing a
+        // silent no-op.
+        if (typeof window !== "undefined") {
+          window.alert(err.message);
+        }
+      } else {
+        console.error("share download", err);
+      }
     } finally {
       if (sessionKey) sessionKey.fill(0);
       setDownloadProgress((p) => {
@@ -738,7 +792,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
                   <div className="px-6 py-6 flex flex-col items-center gap-4">
                     <TrustPill />
                     <button
-                      onClick={() => downloadFile(state.meta.id, state.meta.name, state.meta.type)}
+                      onClick={() => downloadFile(state.meta.id, state.meta.name, state.meta.type, state.meta.size)}
                       disabled={downloading}
                       className="h-[40px] px-6 rounded-[10px] text-[13px] font-medium text-text-inverse bg-cta-primary hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] flex items-center gap-2 disabled:opacity-80 disabled:cursor-wait disabled:active:scale-100"
                     >
@@ -790,7 +844,7 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
                               onClick={() =>
                                 item.isFolder
                                   ? enterFolder(item.id, item.name)
-                                  : downloadFile(item.id, item.name, item.type)
+                                  : downloadFile(item.id, item.name, item.type, item.size)
                               }
                               disabled={itemDownloading}
                               className="w-full flex items-center gap-3 px-3 py-2.5 border-b border-border-tertiary last:border-b-0 hover:bg-bg-cell-hover transition-colors text-left cursor-pointer disabled:cursor-wait"

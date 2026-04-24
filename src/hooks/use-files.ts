@@ -29,7 +29,11 @@ import { toBase64, fromBase64 } from "@/lib/crypto/utils";
 import { friendlyError } from "@/lib/ui/errors";
 import { safeMimeForBlob, safeMimeForDownload } from "@/lib/mime-safety";
 import { putChunkWithRetry } from "@/lib/net/chunk-upload";
-import { openDownloadSink, DownloadCancelled } from "@/lib/net/download-sink";
+import {
+  openDownloadSink,
+  DownloadCancelled,
+  BrowserCannotStreamLargeDownload,
+} from "@/lib/net/download-sink";
 import { createPreviewCache } from "@/lib/cache/preview-cache";
 import {
   loadAll as loadSearchCache,
@@ -2031,6 +2035,26 @@ export function useFiles(keys: {
         return;
       }
 
+      // Guard before doing any further crypto / sink work: the server
+      // returns `{ noContent: true }` for folder rows and other
+      // file_keys-only fetches that the client uses to walk the
+      // parent-key claim chain. If a folder ID slipped through the UI
+      // (rare: keyboard shortcut on a selection that includes a
+      // folder, or a stale row), we'd otherwise open the FSA picker /
+      // inject the SW iframe and save a 0-byte file with the
+      // folder's name. Bail with a clean error before any of that.
+      if (data.noContent || !data.chunks || !Array.isArray(data.chunks)) {
+        setState((s) => ({
+          ...s,
+          downloadQueue: s.downloadQueue.map((r) =>
+            r.id === queueId
+              ? { ...r, status: "error", error: "Folders can't be downloaded directly" }
+              : r,
+          ),
+        }));
+        return;
+      }
+
       updateProgress(5);
       sessionKey = unwrapSessionKeyFromDownload(data);
 
@@ -2056,15 +2080,21 @@ export function useFiles(keys: {
       // native save picker and streams bytes straight to disk — the
       // only path that works for the 5 GB / 25 GB paid tiers, since
       // buffering a plaintext blob of that size exceeds the tab heap.
-      // On Firefox/Safari, falls back to an in-memory Blob with the
-      // existing memory envelope.
+      // On Firefox/Safari, the SW path streams via a hidden iframe
+      // intercepted by `public/download-sw.js`. The blob fallback
+      // refuses files > BLOB_FALLBACK_SIZE_LIMIT to avoid silently
+      // OOM-ing in the middle of a multi-GB download.
       //
       // Force application/octet-stream on the fallback Blob so that
       // even if a middle-click triggers inline navigation, the browser
       // treats it as a save — never inline rendered as HTML/SVG/XML.
       let sink: Awaited<ReturnType<typeof openDownloadSink>>;
       try {
-        sink = await openDownloadSink(meta.name, safeMimeForDownload(meta.type));
+        sink = await openDownloadSink(
+          meta.name,
+          safeMimeForDownload(meta.type),
+          meta.size ?? 0,
+        );
       } catch (err) {
         if (err instanceof DownloadCancelled) {
           // User dismissed the save picker — silently drop the queue
@@ -2072,6 +2102,20 @@ export function useFiles(keys: {
           setState((s) => ({
             ...s,
             downloadQueue: s.downloadQueue.filter((r) => r.id !== queueId),
+          }));
+          return;
+        }
+        if (err instanceof BrowserCannotStreamLargeDownload) {
+          // Browser can't stream and the file is too large for the
+          // in-memory blob fallback. Surface a specific, actionable
+          // error rather than the generic "Download failed".
+          setState((s) => ({
+            ...s,
+            downloadQueue: s.downloadQueue.map((r) =>
+              r.id === queueId
+                ? { ...r, status: "error", error: err.message }
+                : r,
+            ),
           }));
           return;
         }
@@ -2113,6 +2157,11 @@ export function useFiles(keys: {
         throw err;
       }
 
+      // sink.close() now waits for the SW's "drained" ack (or the FSA
+      // writable to commit) before resolving, so by the time we reach
+      // here the bytes really are on disk — not just queued in the
+      // Response stream the SW handed the browser. The queue can be
+      // marked "done" honestly.
       setState((s) => ({
         ...s,
         downloadQueue: s.downloadQueue.map((r) =>
@@ -2126,13 +2175,17 @@ export function useFiles(keys: {
         window.dispatchEvent(new Event("securewarp-recent-dirty"));
       }
       // Auto-drop the completed row after a beat so the tray doesn't
-      // pile up on bulk downloads. Matches upload-panel behavior.
+      // pile up on bulk downloads. Bumped from 5s to 15s — Safari can
+      // be in the final disk-flush window for a few seconds after
+      // sink.close() resolves on multi-GB files; keep the row visible
+      // long enough that the user sees "Done" rather than "vanished
+      // before I could verify."
       setTimeout(() => {
         setState((s) => ({
           ...s,
           downloadQueue: s.downloadQueue.filter((r) => r.id !== queueId),
         }));
-      }, 5_000);
+      }, 15_000);
     } catch (err) {
       console.error("Download error:", err);
       setState((s) => ({
@@ -4308,18 +4361,38 @@ export function useFiles(keys: {
           return { ok: false, error: "No files could be decrypted" };
         }
 
-        // 4. Build zip and download
+        // 4. Build zip and route through the same sink the
+        //    single-file download path uses. On Chromium we stream
+        //    the zip bytes straight to the user's chosen disk path
+        //    via FSA; on Safari/Firefox the SW iframe streams to
+        //    disk; only when neither is available do we fall back to
+        //    an in-memory anchor-click. The sink's deferred
+        //    URL.revokeObjectURL handles Safari's "kill in-flight
+        //    large-blob reads" bug that the prior synchronous-revoke
+        //    code tripped.
         onProgress?.(92, "Building zip...");
         const zipped = zipSync(zipData);
-        const blob = new Blob([new Uint8Array(zipped)], { type: "application/zip" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `securewarp-export-${new Date().toISOString().slice(0, 10)}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        const totalBytes = zipped.byteLength;
+        const archiveName = `securewarp-export-${new Date().toISOString().slice(0, 10)}.zip`;
+        let sink: Awaited<ReturnType<typeof openDownloadSink>> | null = null;
+        try {
+          sink = await openDownloadSink(archiveName, "application/octet-stream", totalBytes);
+        } catch (err) {
+          if (err instanceof DownloadCancelled) {
+            return { ok: false, error: "Cancelled" };
+          }
+          if (err instanceof BrowserCannotStreamLargeDownload) {
+            return { ok: false, error: err.message };
+          }
+          throw err;
+        }
+        try {
+          await sink.write(new Uint8Array(zipped));
+          await sink.close();
+        } catch (err) {
+          try { await sink.abort(err); } catch { /* terminal */ }
+          throw err;
+        }
         onProgress?.(100, "Done");
         return { ok: true };
       } catch (err) {

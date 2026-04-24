@@ -68,7 +68,8 @@ self.addEventListener("message", (event) => {
       } catch {
         // port closed
       }
-      downloads.delete(id);
+      // No need to remove from `downloads` here — the fetch handler
+      // already deletes when it binds to the stream.
     },
   });
 
@@ -76,8 +77,6 @@ self.addEventListener("message", (event) => {
     filename: typeof filename === "string" ? filename : "download",
     mime: typeof mime === "string" ? mime : "application/octet-stream",
     stream,
-    controller: streamController,
-    port,
   });
 
   // Ack so the page knows it's safe to inject the iframe — without
@@ -89,30 +88,45 @@ self.addEventListener("message", (event) => {
     // ignore — page may have torn down already
   }
 
+  // CLOSE OVER `streamController` directly. The fetch handler deletes
+  // the registry entry the moment the iframe nav matches, so a
+  // `downloads.get(id)` lookup here would return undefined for every
+  // chunk message and the stream would never receive bytes — Safari
+  // would sit at "preparing to download" forever waiting for a body
+  // that never arrives. The closure makes the controller reachable
+  // independent of the registry.
   port.onmessage = (msg) => {
-    const entry = downloads.get(id);
-    if (!entry) return;
     const m = msg.data;
-    if (!m) return;
+    if (!m || !streamController) return;
     if (m.type === "chunk") {
       try {
-        entry.controller.enqueue(m.data);
+        streamController.enqueue(m.data);
       } catch {
-        // stream errored / closed
+        // stream errored / closed — drop silently
       }
     } else if (m.type === "close") {
       try {
-        entry.controller.close();
+        streamController.close();
       } catch {
         // already closed
       }
+      // Tell the page the SW side is done so its sink.close() can
+      // resolve (instead of resolving immediately and lying to the
+      // user that a 2.8GB save is finished while the browser is
+      // still flushing). Best-effort signal — `streamController.close()`
+      // means we won't enqueue any more bytes; the browser still
+      // needs a moment to commit them to disk after this.
+      try {
+        port.postMessage({ type: "drained" });
+      } catch {
+        // port closed by page
+      }
     } else if (m.type === "abort") {
       try {
-        entry.controller.error(new Error("aborted"));
+        streamController.error(new Error("aborted"));
       } catch {
         // already errored
       }
-      downloads.delete(id);
     }
   };
   port.start();
