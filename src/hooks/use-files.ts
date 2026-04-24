@@ -739,7 +739,106 @@ export function useFiles(keys: {
           (b.is_folder ? 1 : 0) - (a.is_folder ? 1 : 0)
         );
 
+        // Off-thread decrypt fast path. The expensive work per row
+        // — unwrapPrivateHierarchicalKey + unwrapSessionKeyFromFile
+        // + decryptMetadata — happens in a Web Worker so the main
+        // thread can keep painting the skeleton + responding to
+        // input. Only direct-access rows qualify (files the caller
+        // has their own file_keys row on); inherited rows that
+        // need a parent_keys_claim walk stay on the main thread
+        // because the walk does async fetches for intermediate
+        // parents. Worker returns are structured-cloned back — the
+        // HybridPrivateKeys blob survives the postMessage boundary
+        // and lands directly in folderPrivHierCache.
+        //
+        // On worker failure (import error, crash, etc.) the whole
+        // batch is skipped and tryDecrypt below handles every row
+        // on the main thread — same behavior as before this fast
+        // path existed.
+        const workerMetas = new Map<
+          string,
+          {
+            name: string;
+            type: string;
+            size: number;
+            privHier?: HybridPrivateKeys;
+            publicHierarchicalKey?: string;
+            publicKemHierarchicalKey?: string;
+            isFolder: boolean;
+          }
+        >();
+        {
+          const directRows = sorted
+            .filter((f: Record<string, unknown>) => !!(f.encrypted_private_hierarchical_key as string | null))
+            .map((f: Record<string, unknown>) => ({
+              fileId: f.id as string,
+              encryptedPrivHier: (f.encrypted_private_hierarchical_key as string) || "",
+              wrappedByPublicKey: (f.wrapped_by_public_key as string) || "",
+              ownerPublicKey: (f.owner_public_key as string) || "",
+              encSessionKeyByFile: (f.encrypted_session_key_by_file as string) || "",
+              sessionKeyNonce: (f.session_key_nonce as string) || "",
+              encryptedMetadata:
+                typeof f.encrypted_metadata === "string"
+                  ? (f.encrypted_metadata as string)
+                  : JSON.stringify(f.encrypted_metadata),
+              publicHierarchicalKey: (f.public_hierarchical_key as string) || "",
+              publicKemHierarchicalKey: (f.public_kem_hierarchical_key as string) || "",
+              isFolder: f.is_folder as boolean,
+            }));
+          if (directRows.length > 0) {
+            try {
+              const { decryptMetadataBatch } = await import("@/lib/crypto/metadata-decrypt");
+              const workPromise = decryptMetadataBatch({
+                files: directRows,
+                encryptionPrivateKey: keys.encryptionPrivateKey,
+                kemPrivateKey: keys.kemPrivateKey,
+              });
+              if (workPromise) {
+                const workerResults = await workPromise;
+                for (const r of workerResults) {
+                  workerMetas.set(r.fileId, {
+                    name: r.name,
+                    type: r.type,
+                    size: r.size,
+                    privHier: r.privHier,
+                    publicHierarchicalKey: r.publicHierarchicalKey,
+                    publicKemHierarchicalKey: r.publicKemHierarchicalKey,
+                    isFolder: r.isFolder,
+                  });
+                  // Pre-populate the folder priv-hier cache so the
+                  // tryDecrypt loop below can unwrap any inherited
+                  // child that points at this folder as its parent.
+                  if (r.isFolder && r.privHier && r.publicHierarchicalKey && r.publicKemHierarchicalKey) {
+                    folderPrivHierCache.current.set(r.fileId, {
+                      publicHierarchicalKey: r.publicHierarchicalKey,
+                      publicKemHierarchicalKey: r.publicKemHierarchicalKey,
+                      privateHierarchicalKeys: r.privHier,
+                    });
+                  }
+                }
+              }
+            } catch {
+              // Worker failed — fall through. tryDecrypt will run
+              // the full decrypt chain on the main thread for these
+              // rows, same as before this optimization.
+            }
+          }
+        }
+
+        // Drop stale responses again AFTER the worker round-trip.
+        // The decrypt batch is fast but not instantaneous; a newer
+        // fetch could have started in the meantime and its view is
+        // the authoritative one. Without this second check we'd
+        // land the previous batch's decoded files on top of the
+        // newer view's state.
+        if (mySeq !== fetchFilesSeqRef.current) return;
+
         // Decrypt helper — extracted so we can retry on the second pass.
+        // Fast path: if the off-thread worker already decrypted this
+        // row (direct-access only), reuse its metadata and skip the
+        // whole unwrap chain. Worker also populated folderPrivHierCache
+        // for folders, so inherited children below can walk the chain
+        // without us doing anything extra here.
         const tryDecrypt = (f: Record<string, unknown>): DecryptedFile | null => {
           const encryptedPrivHier = (f.encrypted_private_hierarchical_key as string) || "";
           const wrappedByPublicKey = (f.wrapped_by_public_key as string) || "";
@@ -753,6 +852,41 @@ export function useFiles(keys: {
           const parentKeysClaimWrappedBy = (f.parent_keys_claim_wrapped_by as string | null) ?? null;
           const rowParentId = (f.parent_id as string | null) ?? null;
           const isFolder = f.is_folder as boolean;
+
+          const workerMeta = workerMetas.get(f.id as string);
+          if (workerMeta) {
+            return {
+              id: f.id as string,
+              isFolder,
+              parentId: rowParentId,
+              ownerId: (f.owner_id as string) || "",
+              ownerEmail: (f.owner_email as string | null) ?? null,
+              ownerDisplayName: (f.owner_display_name as string | null) ?? null,
+              createdAt: f.created_at as string,
+              updatedAt: f.updated_at as string,
+              encryptedPrivateHierarchicalKey: encryptedPrivHier,
+              wrappedByPublicKey,
+              ownerPublicKey,
+              ownerPublicKemKey,
+              publicHierarchicalKey,
+              publicKemHierarchicalKey,
+              encryptedSessionKeyByFile,
+              sessionKeyNonce,
+              parentKeysClaim,
+              parentKeysClaimWrappedBy,
+              workspaceId: (f.workspace_id as string | null) ?? null,
+              isStarred: !!(f.is_starred),
+              hasActiveLink: !!(f.has_active_link),
+              evidenceHoldAt: (f.evidence_hold_at as string | null) ?? null,
+              seenAt: (f.seen_at as string | null) ?? null,
+              fileLabels: (f.file_labels as { id: string; name: string; color: string }[] | undefined) ?? [],
+              isShared: mode === "shared",
+              collaborators: (f.collaborators as FileListCollabShape[] | undefined) ?? [],
+              name: workerMeta.name,
+              type: workerMeta.type,
+              size: workerMeta.size,
+            } as DecryptedFile;
+          }
 
           let sessionKey: Uint8Array;
           let privHier: HybridPrivateKeys | null = null;
