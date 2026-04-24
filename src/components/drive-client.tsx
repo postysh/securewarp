@@ -156,18 +156,6 @@ export default function DriveClient() {
     });
   };
 
-  if (!hydrated) {
-    return null;
-  }
-
-  if (!keys) {
-    return (
-      <ThemeProvider>
-        <AuthScreen mode="login" />
-      </ThemeProvider>
-    );
-  }
-
   // Preload the isolated viewer subdomain in a hidden iframe so the
   // first real preview doesn't have to fight through Cloudflare's bot
   // challenge + cold chunk download while the user is staring at a
@@ -184,6 +172,11 @@ export default function DriveClient() {
   // `preloadViewer` when the first file hover fires, OR on an idle
   // callback so the warmup still happens for users who go straight
   // to a download.
+  //
+  // IMPORTANT: this useState + useEffect MUST be declared above the
+  // `if (!hydrated)` / `if (!keys)` early returns below. Placing
+  // them after would change the hook order between the unlock-form
+  // render and the drive render, which React strictly forbids.
   const viewerOrigin = process.env.NEXT_PUBLIC_PDF_VIEWER_ORIGIN?.trim();
   const [preloadViewer, setPreloadViewer] = useState(false);
   useEffect(() => {
@@ -222,6 +215,18 @@ export default function DriveClient() {
       if (timeoutHandle) clearTimeout(timeoutHandle);
     };
   }, [viewerOrigin, keys, preloadViewer]);
+
+  if (!hydrated) {
+    return null;
+  }
+
+  if (!keys) {
+    return (
+      <ThemeProvider>
+        <AuthScreen mode="login" />
+      </ThemeProvider>
+    );
+  }
 
   return (
     <ThemeProvider>
