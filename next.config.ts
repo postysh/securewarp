@@ -400,6 +400,26 @@ const nextConfig: NextConfig = {
         headers: viewerHeaders,
       },
       {
+        // /login + /signup must NEVER be served from CF's edge cache.
+        // Without this, OpenNext's default `s-maxage=31536000` on
+        // statically prerenderable routes lets CF serve the cached
+        // form to a user who's already authenticated in another tab,
+        // bypassing middleware's authRoute→/drive redirect entirely.
+        // We used to fix that by exporting `dynamic = "force-dynamic"`
+        // on those page files, but force-dynamic disables Next's
+        // `<Link>` prefetch — every click from marketing paid an RSC
+        // round-trip and the user saw 1–2s of blank loading.tsx.
+        // Setting `Cache-Control: no-store` on these routes lets the
+        // page stay statically prerenderable (so prefetch + instant
+        // navigation works) while still forcing CF to invoke the
+        // Worker (and therefore middleware) on every request.
+        source: "/(login|signup)",
+        headers: [
+          ...securityHeaders,
+          { key: "Cache-Control", value: "private, no-store, must-revalidate" },
+        ],
+      },
+      {
         // Apply on every other route. Negative lookahead excludes the
         // /viewer family so its header set isn't clobbered by this
         // catch-all.
