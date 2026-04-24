@@ -8,8 +8,10 @@ import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
+import Key02Icon from "@hugeicons/core-free-icons/Key02Icon";
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
+import { useScramble } from "use-scramble";
 import { useFilesContext } from "@/hooks/use-files";
 import {
   isPreviewableMime,
@@ -155,9 +157,34 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
     return () => el.removeEventListener("wheel", handler);
   });
 
+  // Hoist fileName computation above early return — the scramble
+  // hook below needs the target text and hooks can't be conditional.
+  // Known-file lookup works even while `fileId` is null (returns "File")
+  // and the early-return below still skips the actual render.
+  const fileName = preview?.name ?? fileOps.files.find((f) => f.id === fileId)?.name ?? "File";
+  // Scramble the filename while decryption is in flight. The ref
+  // attaches to the text span below; `text` reruns the animation
+  // whenever the target changes (e.g. navigating between files in
+  // the same preview modal). Overdrive mode keeps cycling even if
+  // the scramble would otherwise finish before the chunk-download
+  // completes, so the animation stays visibly "in motion" until we
+  // flip loading=false.
+  const { ref: scrambleRef } = useScramble({
+    text: fileName,
+    speed: 0.6,
+    tick: 2,
+    step: 1,
+    scramble: 4,
+    chance: 0.7,
+    overdrive: true,
+    // Digits + punctuation + letters — narrow range so the scramble
+    // looks like ciphertext glyphs, not emoji or CJK. 33..122 covers
+    // printable ASCII (! through z).
+    range: [33, 122],
+  });
+
   if (!fileId) return null;
 
-  const fileName = preview?.name ?? fileOps.files.find((f) => f.id === fileId)?.name ?? "File";
   const showZoom = preview && isImage(preview.type);
   const zoomPct = Math.round(zoom * 100);
 
@@ -176,15 +203,41 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
       {/* Top bar */}
       <div className="flex items-center justify-between px-5 h-[56px] shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="inline-flex items-center gap-1.5 px-2 py-[3px] rounded-full bg-white/8 border border-white/10">
-            <HugeiconsIcon icon={Shield01Icon} size={10} color="rgb(239,90,60)" />
+          {/* Radius matches the marketing-page CTAs (8px) so the
+              visual language stays consistent between landing and
+              app surfaces. Key icon (instead of shield) because the
+              credential-under-user-control framing is what this badge
+              is actually about — decrypt happens here because you
+              hold the key, not the server. */}
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-white/8 border border-white/10">
+            <HugeiconsIcon icon={Key02Icon} size={11} color="rgb(239,90,60)" />
             <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-white/60">
               Decrypted locally
             </span>
           </div>
-          <span className="text-[14px] font-medium text-white truncate ml-1">
-            {fileName}
-          </span>
+          {/* Filename: split off the extension into a trailing
+              uppercase-mono chip so the name itself reads clean
+              and the format tag echoes the "DECRYPTED LOCALLY"
+              pill aesthetic. Falls back to just the name when
+              there's no extension (folders, extensionless files). */}
+          {(() => {
+            const dot = fileName.lastIndexOf(".");
+            const hasExt = dot > 0 && dot < fileName.length - 1;
+            const baseName = hasExt ? fileName.slice(0, dot) : fileName;
+            const ext = hasExt ? fileName.slice(dot + 1) : "";
+            return (
+              <div className="flex items-baseline gap-2 min-w-0 ml-1">
+                <span className="text-[14px] font-medium text-white truncate">
+                  {baseName}
+                </span>
+                {ext && (
+                  <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-white/40 shrink-0">
+                    {ext}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {/* Zoom controls — images only */}
@@ -213,17 +266,29 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
           {preview && (
             <button
               onClick={triggerDownload}
-              className="flex items-center gap-1.5 h-[32px] px-3 rounded-[8px] text-[12px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              // Hover effect uses `filter: brightness` (GPU-composited
+              // with no stacking-context reraster) instead of the old
+              // `opacity-90`, which flickered when the cursor skimmed
+              // the button's edge. Transition is scoped to filter only
+              // so layout-affecting properties don't get caught up in
+              // the animation.
+              className="inline-flex items-center gap-2 h-[32px] px-3.5 rounded-[8px] bg-accent-red text-white text-[11px] font-mono uppercase tracking-[0.1em] hover:brightness-110 transition-[filter] duration-150 cursor-pointer"
             >
-              <HugeiconsIcon icon={Download04Icon} size={14} />
+              <HugeiconsIcon icon={Download04Icon} size={13} />
               Download
             </button>
           )}
+          {/* Close: secondary action next to the red primary.
+              Bordered ghost so it reads as interactive without
+              competing with Download for attention. Icon sharpens
+              and bg lifts on hover; slight active-scale gives the
+              same tactile click feedback as the primary. */}
           <button
             onClick={onClose}
-            className="flex items-center justify-center w-[32px] h-[32px] rounded-[8px] text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            aria-label="Close preview"
+            className="inline-flex items-center justify-center w-[32px] h-[32px] rounded-[8px] border border-white/10 text-white/60 hover:text-white hover:bg-white/10 hover:border-white/20 active:scale-[0.96] transition-all cursor-pointer"
           >
-            <HugeiconsIcon icon={Cancel01Icon} size={18} />
+            <HugeiconsIcon icon={Cancel01Icon} size={16} />
           </button>
         </div>
       </div>
@@ -248,27 +313,55 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
           </button>
         )}
 
-        {/* Loading */}
+        {/* Loading — scramble-text "decrypting" animation. The
+            filename glyphs cycle through printable-ASCII ciphertext
+            and settle into their real characters as the decrypt
+            progresses. Tonally honest about what's happening:
+            random bytes becoming a real name. */}
         {loading && (
-          <div className="flex flex-col items-center gap-3">
-            {decryptProgress !== null ? (
-              <>
-                <div className="w-[200px] h-[4px] bg-white/10 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-200"
-                    style={{ width: `${decryptProgress}%`, background: "rgb(239,90,60)" }}
-                  />
-                </div>
-                <span className="text-[13px] text-white/50">
-                  Decrypting… {decryptProgress}%
-                </span>
-              </>
-            ) : (
-              <>
-                <div className="w-8 h-8 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
-                <span className="text-[13px] text-white/50">Decrypting…</span>
-              </>
-            )}
+          <div className="flex flex-col items-center gap-5 max-w-[420px] px-6">
+            {/* Shield with progress ring around it. The ring fills
+                with actual decrypt progress when we have a number
+                from the hook; otherwise spins indefinitely. */}
+            <div className="relative w-14 h-14">
+              <svg
+                viewBox="0 0 40 40"
+                className={`absolute inset-0 w-full h-full ${decryptProgress === null ? "animate-spin" : ""}`}
+                style={decryptProgress === null ? { animationDuration: "2s" } : undefined}
+              >
+                <circle cx="20" cy="20" r="17" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2" />
+                <circle
+                  cx="20" cy="20" r="17" fill="none"
+                  stroke="rgb(239,90,60)"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeDasharray={`${2 * Math.PI * 17 * (decryptProgress !== null ? decryptProgress / 100 : 0.25)} ${2 * Math.PI * 17}`}
+                  style={{
+                    transform: "rotate(-90deg)",
+                    transformOrigin: "center",
+                    transition: decryptProgress !== null ? "stroke-dasharray 150ms linear" : undefined,
+                  }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <HugeiconsIcon icon={Shield01Icon} size={18} color="rgba(255,255,255,0.75)" />
+              </div>
+            </div>
+
+            {/* Scrambled filename. Monospace keeps glyph widths
+                stable during the scramble so the text doesn't
+                jitter horizontally as characters resolve. */}
+            <span
+              ref={scrambleRef}
+              className="font-mono text-[13px] text-white/85 tracking-wide text-center leading-tight break-all"
+            />
+
+            <div className="flex items-center gap-2 text-[11px] text-white/40 font-mono uppercase tracking-[0.2em]">
+              <span>Decrypting</span>
+              {decryptProgress !== null && (
+                <span className="text-white/60">{decryptProgress}%</span>
+              )}
+            </div>
           </div>
         )}
 
