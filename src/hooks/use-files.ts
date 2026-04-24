@@ -1121,20 +1121,41 @@ export function useFiles(keys: {
         // navigated or a modal may have opened between the fetch
         // starting and returning; stomping those fields would be a
         // visible glitch.
-        setState((s) => ({
-          ...s,
-          files: results,
-          callerPermission: data.callerPermission ?? null,
-          nextCursor: data.nextCursor ?? null,
-          ...(silent
-            ? {}
-            : {
-                loading: false,
-                currentFolder: mode !== "own" ? null : parentId,
-                viewMode: viewModeOverride ?? (mode === "own" && parentId ? s.viewMode : mode),
-                ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
-              }),
-        }));
+        //
+        // Preserve in-flight optimistic upload placeholders (rows with
+        // `uploading: true`, id like "uploading-<ts>"). Without this
+        // merge, a user who clicks Upload during the initial mount
+        // fetchFiles gets their placeholder row clobbered when the
+        // fetch returns: the file browser snaps back to "no upload
+        // happening" even though the upload is mid-flight in the
+        // background. Subsequent uploads worked because fetchFiles
+        // was no longer in flight by then. Match by id so the
+        // placeholder doesn't double up if a refetch picks up the
+        // real row before the upload finalises.
+        setState((s) => {
+          const resultIds = new Set(results.map((r) => r.id));
+          const inflightPlaceholders = s.files.filter(
+            (f) => f.uploading && !resultIds.has(f.id),
+          );
+          return {
+            ...s,
+            files: inflightPlaceholders.length
+              ? [...inflightPlaceholders, ...results]
+              : results,
+            callerPermission: data.callerPermission ?? null,
+            nextCursor: data.nextCursor ?? null,
+            ...(silent
+              ? {}
+              : {
+                  loading: false,
+                  currentFolder: mode !== "own" ? null : parentId,
+                  viewMode:
+                    viewModeOverride ??
+                    (mode === "own" && parentId ? s.viewMode : mode),
+                  ...(breadcrumbOverride ? { breadcrumb: breadcrumbOverride } : {}),
+                }),
+          };
+        });
       } catch (err) {
         if (mySeq !== fetchFilesSeqRef.current) return;
         console.error("Fetch files error:", err);
