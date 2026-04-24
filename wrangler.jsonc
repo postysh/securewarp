@@ -105,7 +105,7 @@
       // when no binding), so any syntactically-valid placeholder
       // satisfies the check. Keeps the real password out of git while
       // unblocking CI deploys.
-      "localConnectionString": "postgresql://localhost:5432/postgres"
+      "localConnectionString": "postgresql://placeholder:placeholder@localhost:5432/postgres"
     }
   ],
 
