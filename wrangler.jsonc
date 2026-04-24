@@ -94,12 +94,12 @@
   // every call site falls back to supabase-js — nothing breaks on
   // partially-migrated deploys.
   //
-  // "hyperdrive": [
-  //   {
-  //     "binding": "HYPERDRIVE",
-  //     "id": "<paste-hyperdrive-config-id-here>"
-  //   }
-  // ],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "165787debcba4c4a9a8ca247a5b73231"
+    }
+  ],
 
   "vars": {
     "EMAIL_FROM": "SecureWarp <noreply@mail.securewarp.com>",
