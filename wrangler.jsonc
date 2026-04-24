@@ -97,7 +97,15 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "165787debcba4c4a9a8ca247a5b73231"
+      "id": "165787debcba4c4a9a8ca247a5b73231",
+      // Wrangler's `deploy` step validates the Hyperdrive binding via
+      // getPlatformProxy() and refuses to proceed without SOME local
+      // connection string. We don't actually dev against Hyperdrive
+      // locally (the app uses supabase-js in dev — pg.ts returns null
+      // when no binding), so any syntactically-valid placeholder
+      // satisfies the check. Keeps the real password out of git while
+      // unblocking CI deploys.
+      "localConnectionString": "postgresql://localhost:5432/postgres"
     }
   ],
 
