@@ -1,34 +1,22 @@
 /**
  * Download sink — writes a decrypted file to disk.
  *
- * Three backends, tried in order:
- *
- * 1. **FSA (`showSaveFilePicker`)**: Chromium family. Streams chunks straight
- *    to the user's chosen disk path via `FileSystemWritableFileStream`. Zero
- *    RAM accumulation. The only path that can land a multi-GB download
- *    without ever materialising the plaintext in the tab heap.
- *
- * 2. **Service worker streaming**: Safari / Firefox / any other browser
- *    with SW support. `public/download-sw.js` intercepts a same-origin
- *    `/sw-download/<id>` request and responds with a `ReadableStream`
- *    whose chunks are fed over a `MessageChannel` from this file. The
- *    browser saves the stream as if it were a normal attachment download,
- *    so multi-GB files land without ever sitting in the page heap as one
- *    blob. This replaces the earlier OPFS attempt — Safari's main-thread
- *    `FileSystemWritableFileStream` implementation didn't reliably flush
- *    writes on `close()`, which produced zero-byte downloads.
- *
- * 3. **Blob fallback**: last resort for environments without FSA or a
- *    usable SW (insecure contexts, private browsing with SW disabled,
- *    test harnesses). Accumulates every chunk in a JS array and
- *    concatenates into a single Blob at `close()`. Same memory envelope
- *    as the pre-SW path.
+ * Two backends:
+ * - **Streaming (FSA)**: `showSaveFilePicker` → `FileSystemWritableFileStream`.
+ *   Chunks flow straight to disk with no RAM accumulation. Required for the
+ *   5 GB / 25 GB paid tiers, since a single plaintext blob of that size
+ *   can't live in a browser tab's heap. Chromium-only as of this writing.
+ * - **Blob fallback**: accumulates `Uint8Array` refs until `close()`, then
+ *   assembles one Blob and triggers a synthetic `<a download>` click.
+ *   Memory-bounded by the tab heap; Safari and Firefox use this path
+ *   today. Earlier iterations (60a5529, 19ad10d, 654d78f) tried OPFS and
+ *   service-worker-streaming alternatives for Safari big-file downloads;
+ *   both were unreliable in practice and have been reverted.
  *
  * Ownership contract: once `write(chunk)` resolves, the sink owns `chunk`.
- * Every backend zeros the chunk before returning (either after the disk
- * write, or deferred until close in the blob fallback). The SW sink
- * *transfers* the underlying ArrayBuffer to the worker, which detaches
- * the page-side view and is equivalent to zeroing.
+ * The FSA backend zeros it after the disk write; the blob backend retains
+ * the reference and zeros it in `close()`/`abort()`. Callers must not
+ * reuse or read from `chunk` after awaiting `write()`.
  */
 
 export interface DownloadSink {
@@ -52,95 +40,58 @@ interface FsaWritable {
   abort(reason?: unknown): Promise<void>;
 }
 
-interface FsaFileHandle {
+interface FsaHandle {
   createWritable(): Promise<FsaWritable>;
 }
 
 interface FsaWindow {
-  showSaveFilePicker(opts?: { suggestedName?: string }): Promise<FsaFileHandle>;
+  showSaveFilePicker(opts?: { suggestedName?: string }): Promise<FsaHandle>;
 }
 
 function hasFsa(): boolean {
   return typeof window !== "undefined" && "showSaveFilePicker" in window;
 }
 
-// Lazy SW registration — one promise shared across all download attempts,
-// so parallel downloads don't race `register()` and cancel each other.
-// Resolves to the controlling SW or null. We deliberately do NOT fall
-// back to `reg.active` — only a controller intercepts page fetches. If
-// the page isn't controlled by the time the user clicks Download, the
-// anchor fetch goes to the network, hits Next's 404, and saves that
-// HTML as the "zip" file. Better to fall back to the blob sink than
-// silently produce a broken file.
-let swReadyPromise: Promise<ServiceWorker | null> | null = null;
-
-function canUseSw(): boolean {
-  if (typeof navigator === "undefined") return false;
-  if (!("serviceWorker" in navigator)) return false;
-  // Secure-context requirement: service workers refuse to register over
-  // plain http except on localhost.
-  if (typeof window !== "undefined" && window.isSecureContext === false) return false;
-  return true;
-}
-
 /**
- * Trigger SW registration eagerly — call this on every drive-page mount
- * so by the time the user clicks Download (typically several seconds
- * later) the SW has been activated AND has claimed the document. Without
- * this, the first-ever download fires the registration race below and
- * the controller may not exist when we click the anchor.
+ * Trigger cleanup of any previous-version download service worker that
+ * may have been registered by 19ad10d / 654d78f. The SW file at
+ * /download-sw.js now self-unregisters on activate, so calling
+ * navigator.serviceWorker.getRegistrations() and forcing an update is
+ * enough to make existing clients pick up the new (unregistering)
+ * code. Safe to call repeatedly.
  */
 export function prewarmDownloadSw(): void {
-  void ensureSw();
-}
-
-async function ensureSw(): Promise<ServiceWorker | null> {
-  if (!canUseSw()) return null;
-  if (swReadyPromise) return swReadyPromise;
-
-  swReadyPromise = (async () => {
+  if (typeof navigator === "undefined") return;
+  if (!("serviceWorker" in navigator)) return;
+  void (async () => {
     try {
-      // Scope "/" — SW lives at the origin root so it can intercept
-      // `/sw-download/*` regardless of which page initiated the download.
-      await navigator.serviceWorker.register("/download-sw.js", {
-        scope: "/",
-      });
-      // `ready` resolves to the active registration; if we just
-      // installed for the first time, activate has already fired
-      // because the SW calls self.skipWaiting().
-      await navigator.serviceWorker.ready;
-
-      // Wait for the document to be CONTROLLED — not just for an active
-      // registration. clients.claim() in the SW's activate handler
-      // dispatches a `controllerchange` event when the document is
-      // claimed. Only after that does navigator.serviceWorker.controller
-      // become non-null and is the SW capable of intercepting our
-      // /sw-download/<id> fetch.
-      if (!navigator.serviceWorker.controller) {
-        await new Promise<void>((res) => {
-          const t = setTimeout(res, 5_000); // bail-out
-          navigator.serviceWorker.addEventListener(
-            "controllerchange",
-            () => {
-              clearTimeout(t);
-              res();
-            },
-            { once: true },
-          );
-        });
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const reg of regs) {
+        if (
+          reg.active?.scriptURL?.endsWith("/download-sw.js") ||
+          reg.installing?.scriptURL?.endsWith("/download-sw.js") ||
+          reg.waiting?.scriptURL?.endsWith("/download-sw.js")
+        ) {
+          // The new SW unregisters itself on activate. Forcing an
+          // update makes the browser refetch + re-activate the new
+          // (placeholder) version, which then removes the
+          // registration.
+          try {
+            await reg.update();
+          } catch {
+            // ignore — best-effort cleanup
+          }
+          try {
+            await reg.unregister();
+          } catch {
+            // ignore
+          }
+        }
       }
-
-      // Strict: only return a SW if the document is now controlled by it.
-      // reg.active is not enough — that's the SW instance, but the page
-      // fetch wouldn't be intercepted unless the page is controlled.
-      return navigator.serviceWorker.controller ?? null;
-    } catch (err) {
-      console.warn("[download-sink] SW registration failed:", err);
-      return null;
+    } catch {
+      // SW APIs not available / blocked — nothing to clean up
     }
   })();
-
-  return swReadyPromise;
 }
 
 export async function openDownloadSink(
@@ -158,31 +109,12 @@ export async function openDownloadSink(
       if ((err as { name?: string } | null)?.name === "AbortError") {
         throw new DownloadCancelled();
       }
-      console.warn("[download-sink] FSA open failed, trying SW:", err);
+      // Permission / quota / other FSA-layer failure. Log once and fall
+      // through to the blob path so the download still lands — better a
+      // memory-hungry download than no download at all.
+      console.warn("[download-sink] FSA open failed, using blob fallback:", err);
     }
   }
-
-  const sw = await ensureSw();
-  // Re-check at click time: ensureSw() resolved with the controller as
-  // it stood when the promise resolved. If the controller has since
-  // gone away (page reload mid-flight, SW eviction, etc.) we MUST NOT
-  // try to dispatch a fetch through it — the anchor click would hit
-  // the network and the user would save Next's 404 page (~26KB of
-  // marketing-shell HTML) as their "zip". Falling back to the blob
-  // sink at least produces correct output, even if it OOMs on
-  // multi-GB files.
-  const liveController =
-    typeof navigator !== "undefined"
-      ? navigator.serviceWorker?.controller ?? null
-      : null;
-  if (sw && liveController) {
-    try {
-      return await makeSwSink(liveController, suggestedName, mime);
-    } catch (err) {
-      console.warn("[download-sink] SW sink setup failed, using blob fallback:", err);
-    }
-  }
-
   return makeBlobSink(suggestedName, mime);
 }
 
@@ -215,98 +147,6 @@ function makeFsaSink(writable: FsaWritable): DownloadSink {
   };
 }
 
-async function makeSwSink(
-  sw: ServiceWorker,
-  suggestedName: string,
-  mime: string,
-): Promise<DownloadSink> {
-  const id = cryptoRandomId();
-  const channel = new MessageChannel();
-
-  // Await the SW's init-ack BEFORE triggering the fetch. Without the
-  // handshake the anchor click below could race ahead of the SW's
-  // `downloads.set(id, ...)` call, at which point the fetch handler
-  // 404s and the user sees nothing.
-  const ackWait = new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error("SW init-ack timeout")),
-      5_000,
-    );
-    channel.port1.onmessage = (msg) => {
-      if (msg.data?.type === "init-ack") {
-        clearTimeout(timeout);
-        // Replace the handler — the rest of the exchange is
-        // page → SW only; the page doesn't process any more
-        // messages from the SW on this port.
-        channel.port1.onmessage = null;
-        resolve();
-      }
-    };
-  });
-
-  sw.postMessage(
-    {
-      type: "download-init",
-      id,
-      filename: suggestedName,
-      mime,
-    },
-    [channel.port2],
-  );
-  channel.port1.start();
-
-  await ackWait;
-
-  // Trigger the browser-initiated fetch for /sw-download/<id>. The SW
-  // intercepts it and responds with a streaming Response carrying
-  // Content-Disposition: attachment, so the browser saves it to disk
-  // without navigating the page. Use an anchor rather than an iframe:
-  // iframes with `src=/sw-download/<id>` inherit the page's CSP and
-  // on Safari can block the SW-intercepted response. An anchor with
-  // `download` dispatches reliably to Downloads.
-  const a = document.createElement("a");
-  a.href = `/sw-download/${id}`;
-  a.download = suggestedName;
-  a.rel = "noopener";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    if (a.parentNode) a.parentNode.removeChild(a);
-  }, 1_000);
-
-  let closed = false;
-  return {
-    streaming: true,
-    async write(chunk) {
-      // Transfer the backing buffer so the SW owns the bytes and the
-      // page-side view is detached (length becomes 0). This is
-      // equivalent to .fill(0) for the zero-hygiene contract and
-      // avoids a structured-clone copy of a 8MB buffer per chunk.
-      const buf = chunk.buffer;
-      channel.port1.postMessage({ type: "chunk", data: chunk }, [buf as ArrayBuffer]);
-    },
-    async close() {
-      if (closed) return;
-      closed = true;
-      channel.port1.postMessage({ type: "close" });
-      // Keep the port open long enough for the SW to drain the stream;
-      // closing immediately can race the last enqueue on slow machines.
-      setTimeout(() => channel.port1.close(), 5_000);
-    },
-    async abort() {
-      if (closed) return;
-      closed = true;
-      try {
-        channel.port1.postMessage({ type: "abort" });
-      } catch {
-        // Port may already be gone.
-      }
-      channel.port1.close();
-    },
-  };
-}
-
 function makeBlobSink(suggestedName: string, mime: string): DownloadSink {
   const parts: Uint8Array[] = [];
   let closed = false;
@@ -321,8 +161,7 @@ function makeBlobSink(suggestedName: string, mime: string): DownloadSink {
       // Pass parts directly — the Blob constructor accepts an array of
       // BufferSources and stitches them internally. Allocating a single
       // merged Uint8Array first peaks at ~2x the total payload and is
-      // the main reason very large downloads OOM on browsers that
-      // reach this path.
+      // why very large downloads OOM on Safari.
       const blob = new Blob(parts as BlobPart[], { type: mime });
       for (const p of parts) p.fill(0);
       parts.length = 0;
@@ -333,8 +172,8 @@ function makeBlobSink(suggestedName: string, mime: string): DownloadSink {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      // Defer the revoke — Safari kills in-flight large-blob reads if
-      // the URL is revoked synchronously after click().
+      // Defer revoke — Safari kills in-flight large-blob reads if the
+      // URL is revoked synchronously after click().
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     },
     async abort() {
@@ -344,11 +183,4 @@ function makeBlobSink(suggestedName: string, mime: string): DownloadSink {
       parts.length = 0;
     },
   };
-}
-
-function cryptoRandomId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
