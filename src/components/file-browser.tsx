@@ -52,6 +52,7 @@ import { WorkspaceActivityPage } from "./workspace-activity-modal";
 import { FileDetailsModal } from "./file-details-modal";
 const MembersModal = dynamic(() => import("./members-modal").then((m) => ({ default: m.MembersModal })), { ssr: false });
 import { useFilesContext, type DecryptedFile, type FileCollaboratorPreview, type ViewMode } from "@/hooks/use-files";
+import { useBoot } from "@/hooks/use-boot";
 import { useRealtimeChannel } from "@/hooks/use-realtime";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { userLabel, userInitials, userColor } from "@/lib/display";
@@ -638,8 +639,23 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   const [workspaceChannels, setWorkspaceChannels] = useState<
     Record<string, string>
   >({});
+  // Realtime channel names come from /api/boot if available
+  // (shell-bootstrap path). If the bootstrap hasn't landed yet, fall
+  // back to /api/realtime/tokens. Either way the data shape is
+  // identical. Runs when `keys` lands or when workspaces change.
+  const boot = useBoot();
   useEffect(() => {
     if (!keys) return;
+    // Seed from boot synchronously when available — no network call.
+    if (boot) {
+      const map: Record<string, string> = {};
+      for (const w of boot.realtime.workspaceChannels ?? []) {
+        map[w.workspaceId] = w.channel;
+      }
+      setUserChannel(boot.realtime.userChannel);
+      setWorkspaceChannels(map);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -656,7 +672,7 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
       } catch { /* focus-refresh / reload re-tries */ }
     })();
     return () => { cancelled = true; };
-  }, [keys, fileOps.activeWorkspace?.id]);
+  }, [keys, boot, fileOps.activeWorkspace?.id]);
 
   const activeWorkspaceChannel = fileOps.activeWorkspace
     ? workspaceChannels[fileOps.activeWorkspace.id] ?? null
@@ -697,12 +713,19 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   }, [refreshEnabled, silentRefetch]);
 
 
-  // Fetch pinned IDs on mount
+  // Pinned IDs: seed from /api/boot when available, otherwise hit
+  // /api/pins. The context menu's "Pin/Unpin" label reads from this
+  // set, so we need it populated before the user right-clicks —
+  // boot path avoids the extra fetch on mount.
   useEffect(() => {
+    if (boot) {
+      setPinnedIds(new Set(boot.pins.map((p) => p.file_id)));
+      return;
+    }
     fetch("/api/pins").then((r) => r.json()).then((d) => {
       if (d.pins) setPinnedIds(new Set(d.pins.map((p: { file_id: string }) => p.file_id)));
     }).catch(() => {});
-  }, []);
+  }, [boot]);
 
   // Refetch labels every time context menu opens so newly created
   // labels from the sidebar appear immediately

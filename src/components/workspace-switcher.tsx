@@ -9,6 +9,7 @@ import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
 import Setting07Icon from "@hugeicons/core-free-icons/Setting07Icon";
 import { Tooltip } from "./tooltip";
 import { useFilesContext } from "@/hooks/use-files";
+import { useBoot } from "@/hooks/use-boot";
 import { WorkspaceSettings } from "./workspace-settings";
 import { buildWorkspaceFolder } from "@/lib/crypto/workspace-folder";
 import { useRealtimeChannel } from "@/hooks/use-realtime";
@@ -117,9 +118,20 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
     } catch { /* silent — realtime + focus-refresh retry */ }
   }, []);
 
+  // Seed from /api/boot if already loaded; otherwise kick a full
+  // refresh on mount. Realtime events + focus-refresh still run
+  // the refresh callback for subsequent updates.
+  const boot = useBoot();
   useEffect(() => {
+    if (boot) {
+      // Boot arrived — use its workspaces snapshot and skip the
+      // initial /api/workspaces call. The refreshWorkspaceList
+      // callback stays wired for later updates.
+      setWorkspaces(boot.workspaces as unknown as Workspace[]);
+      return;
+    }
     void refreshWorkspaceList();
-  }, [refreshWorkspaceList]);
+  }, [boot, refreshWorkspaceList]);
 
   // Realtime — subscribe to the caller's personal channel so
   // invite / removal / role-change events arrive in <1s. No
@@ -128,6 +140,10 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   // dropped.
   const [userChannel, setUserChannel] = useState<string | null>(null);
   useEffect(() => {
+    if (boot) {
+      setUserChannel(boot.realtime.userChannel);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -138,7 +154,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
       } catch { /* focus-refresh re-tries */ }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [boot]);
 
   useRealtimeChannel(userChannel, (event) => {
     if (

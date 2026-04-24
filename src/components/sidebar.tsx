@@ -34,6 +34,7 @@ import { useState, useRef, useEffect, useCallback, useLayoutEffect } from "react
 import { createPortal } from "react-dom";
 import { useUserKeys } from "@/hooks/use-user-keys";
 import { useFilesContext } from "@/hooks/use-files";
+import { useBoot } from "@/hooks/use-boot";
 import AnalyticsUpIcon from "@hugeicons/core-free-icons/AnalyticsUpIcon";
 
 function formatStorageBytes(bytes: number): string {
@@ -377,16 +378,33 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   ];
   const [newLabelColor, setNewLabelColor] = useState(labelColors[0]);
 
+  // Pins + labels: seed from BootContext if the shell-bootstrap fetch
+  // has landed; otherwise fall back to the individual endpoints so
+  // this component stays renderable on its own. The dedicated
+  // endpoints are still used for refresh-after-mutation (pin toggle,
+  // label add/rename/delete).
+  const boot = useBoot();
   useEffect(() => {
     const loadPins = () => {
       fetch("/api/pins").then((r) => r.json()).then((d) => {
         if (d.pins) setRawPins(d.pins);
       }).catch(() => {});
     };
-    loadPins();
-    fetch("/api/labels").then((r) => r.json()).then((d) => {
-      if (d.labels) setLabels(d.labels);
-    }).catch(() => {});
+    const loadLabels = () => {
+      fetch("/api/labels").then((r) => r.json()).then((d) => {
+        if (d.labels) setLabels(d.labels);
+      }).catch(() => {});
+    };
+    if (boot) {
+      // Boot data in context — no initial fetch needed.
+      setRawPins(boot.pins.map((p) => ({ file_id: p.file_id, is_folder: p.is_folder })));
+      setLabels(boot.labels.map((l) => ({ id: l.id, name: l.name, color: l.color })));
+    } else {
+      // Boot still in flight — load on our own so we don't block the
+      // sidebar from rendering pinned items.
+      loadPins();
+      loadLabels();
+    }
     // Refetch on pin/unpin (dispatched from the file browser's
     // context menu) so the sidebar reflects the change immediately
     // instead of waiting for a page refresh.
@@ -394,7 +412,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
     return () => {
       window.removeEventListener("securewarp-pins-changed", loadPins);
     };
-  }, []);
+  }, [boot]);
 
   // Re-resolve pin names whenever the file list arrives or changes, so a pin
   // that was unresolvable at sidebar mount (empty fileOps.files, no cache

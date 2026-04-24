@@ -25,6 +25,7 @@ import {
   FilesActionsContext,
   useFiles,
 } from "@/hooks/use-files";
+import { BootContext, type BootPayload } from "@/hooks/use-boot";
 
 export default function DriveClient() {
   const router = useRouter();
@@ -100,22 +101,30 @@ export default function DriveClient() {
   // The response data is identical (same user, same onboarded flag),
   // so we cache it in a ref and re-apply the onboarding check when
   // keys arrive later in the session.
-  const profileRef = useRef<{ onboarded?: boolean } | null>(null);
+  // Bootstrap fetch — one aggregated call that returns profile +
+  // pins + labels + usage + workspaces + realtime channel names.
+  // Replaces the wave of independent fetches that used to fire on
+  // mount from drive-client + sidebar + notifications. Individual
+  // endpoints stay live for refreshes. Also serves the double duty
+  // of the old profile probe (zombie-cookie guard + onboarding gate
+  // + 401-clear) since /api/boot has the same auth check.
+  const [boot, setBoot] = useState<BootPayload | null>(null);
+  const bootFetchedRef = useRef(false);
   useEffect(() => {
     if (!hydrated) return;
-    // Already have a fresh profile from an earlier run this mount —
-    // just apply the onboarding gate to the (possibly newly-arrived)
-    // keys without a second network round-trip.
-    if (profileRef.current) {
-      if (keys && profileRef.current.onboarded === false) {
+    if (bootFetchedRef.current) {
+      // Already fetched this mount. Re-apply the onboarding gate to
+      // the (possibly newly-arrived) keys without a second round-trip.
+      if (keys && boot?.profile?.onboarded === false) {
         router.replace("/welcome");
       }
       return;
     }
+    bootFetchedRef.current = true;
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/auth/profile", { cache: "no-store" });
+        const res = await fetch("/api/boot", { cache: "no-store" });
         if (cancelled) return;
         if (res.status === 401) {
           // Zombie cookie. Clear it so auth-route middleware stops
@@ -124,19 +133,20 @@ export default function DriveClient() {
           return;
         }
         if (res.ok) {
-          const data = (await res.json()) as { onboarded?: boolean };
+          const data = (await res.json()) as BootPayload;
           if (cancelled) return;
-          profileRef.current = data;
-          if (keys && data.onboarded === false) router.replace("/welcome");
+          setBoot(data);
+          if (keys && data.profile?.onboarded === false) {
+            router.replace("/welcome");
+          }
         }
       } catch {
-        // Network flake — leave cookie in place; user can still
-        // attempt login, and the server will reject the duplicate
-        // session if need be.
+        // Network flake — consumers will fall back to their own
+        // per-endpoint fetches since BootContext stays null.
       }
     })();
     return () => { cancelled = true; };
-  }, [hydrated, keys, router]);
+  }, [hydrated, keys, router, boot]);
 
   // Single useFiles instance shared between sidebar (for "Shared with me"
   // view toggle) and the file browser. Created here so its state outlives
@@ -238,6 +248,7 @@ export default function DriveClient() {
   return (
     <ThemeProvider>
       <UserKeysContext.Provider value={keys}>
+        <BootContext.Provider value={boot}>
         <FilesActionsContext.Provider value={filesActions}>
         <FilesStateContext.Provider value={filesState}>
         <FilesContext.Provider value={fileOps}>
@@ -307,6 +318,7 @@ export default function DriveClient() {
         </FilesContext.Provider>
         </FilesStateContext.Provider>
         </FilesActionsContext.Provider>
+        </BootContext.Provider>
       </UserKeysContext.Provider>
     </ThemeProvider>
   );
