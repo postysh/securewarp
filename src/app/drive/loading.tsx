@@ -29,14 +29,27 @@
 export default function DriveLoading() {
   return (
     <>
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `try{if(!sessionStorage.getItem("securewarp_keys"))document.documentElement.classList.add("sw-drive-locked")}catch(e){}`,
-        }}
-      />
+      {/* Defaults the skeleton's children to hidden. Only when the
+          script below confirms keys exist in sessionStorage do we
+          opt in to showing the skeleton. The previous design — show
+          by default, hide if keys are missing — was race-prone:
+          Safari paints mid-parse, so the skeleton flashed for a frame
+          before the script ran and AuthScreen took over. With the
+          inverted default the worst case for a locked-tab user is a
+          plain themed background until AuthScreen mounts; the
+          best case for an authenticated-with-keys user is the
+          script running first and the skeleton appearing under the
+          legitimate drive content. */}
       <style
         dangerouslySetInnerHTML={{
-          __html: `.sw-drive-locked .sw-drive-skeleton>*{display:none}`,
+          __html:
+            `.sw-drive-skeleton>*{visibility:hidden}` +
+            `.sw-drive-show-skeleton .sw-drive-skeleton>*{visibility:visible}`,
+        }}
+      />
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `try{if(sessionStorage.getItem("securewarp_keys"))document.documentElement.classList.add("sw-drive-show-skeleton")}catch(e){}`,
         }}
       />
     <div className="sw-drive-skeleton h-full flex bg-bg-side">
