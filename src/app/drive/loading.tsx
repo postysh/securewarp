@@ -12,10 +12,34 @@
  * means the server cannot know the user's filenames, so the shell
  * is layout only. The real list fills in client-side after keys are
  * loaded from sessionStorage.
+ *
+ * Skeleton visibility gate: a user with a live session cookie but
+ * empty sessionStorage (closed the tab, came back) lands here when
+ * middleware redirects /login → /drive. DriveClient then renders
+ * AuthScreen inline because no keys are present (see rule 20 in
+ * AGENTS.md). Without this gate they'd briefly see a dashboard-
+ * shaped skeleton before AuthScreen paints, which reads as a
+ * dashboard flash on the way to the login/unlock form. The inline
+ * script below synchronously checks sessionStorage BEFORE the body
+ * paints — if no keys, add a class on <html> that hides the
+ * skeleton via CSS and leaves just the themed bg visible. The
+ * script is inline + blocking on purpose; async would run after
+ * the first paint and defeat the point.
  */
 export default function DriveLoading() {
   return (
-    <div className="h-full flex bg-bg-side">
+    <>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `try{if(!sessionStorage.getItem("securewarp_keys"))document.documentElement.classList.add("sw-drive-locked")}catch(e){}`,
+        }}
+      />
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `.sw-drive-locked .sw-drive-skeleton>*{display:none}`,
+        }}
+      />
+    <div className="sw-drive-skeleton h-full flex bg-bg-side">
       {/* Sidebar placeholder */}
       <div className="hidden md:block shrink-0 bg-bg-side" style={{ width: 195 }}>
         <div className="p-3 flex flex-col gap-2">
@@ -89,5 +113,6 @@ export default function DriveLoading() {
         </div>
       </div>
     </div>
+    </>
   );
 }
