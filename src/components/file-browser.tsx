@@ -1809,16 +1809,16 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 newFiles.markSeen(file.id);
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
-              className={`group relative flex flex-col items-center justify-center rounded-xl border cursor-pointer transition-colors p-4 min-h-[130px] ${
+              className={`group relative flex flex-col items-center justify-center rounded-xl border border-border-tertiary cursor-pointer p-4 min-h-[130px] ${
                 dropTargetId === file.id
-                  ? "border-accent-green bg-accent-green/5"
+                  ? "!border-accent-green bg-accent-green/5"
                   : dragFileId === file.id
-                    ? "opacity-40 border-border-tertiary"
+                    ? "opacity-40"
                     : isSelected
-                      ? "border-accent-green/20 bg-bg-overlay-tertiary"
+                      ? "!border-accent-green/20 bg-bg-overlay-tertiary"
                       : isFocused
-                        ? "border-border-secondary bg-bg-overlay-tertiary"
-                        : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
+                        ? "!border-border-secondary bg-bg-overlay-tertiary"
+                        : "hover:!border-border-secondary hover:bg-bg-overlay-tertiary"
               }`}
             >
               {/* Checkbox — top left on hover */}
@@ -1957,16 +1957,16 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 newFiles.markSeen(file.id);
                 setContextMenu({ x: e.clientX, y: e.clientY, fileId: file.id, isFolder: !!file.isFolder });
               }}
-              className={`group flex items-center min-h-[64px] md:min-h-[56px] h-[64px] md:h-[56px] px-4 rounded-xl border cursor-pointer transition-colors shrink-0 ${
+              className={`group flex items-center min-h-[64px] md:min-h-[56px] h-[64px] md:h-[56px] px-4 rounded-xl border border-border-tertiary cursor-pointer shrink-0 ${
                 dropTargetId === file.id
-                  ? "border-accent-green bg-accent-green/5"
+                  ? "!border-accent-green bg-accent-green/5"
                   : dragFileId === file.id
-                    ? "opacity-40 border-border-tertiary"
+                    ? "opacity-40"
                     : isSelected
-                      ? "border-accent-green/20 bg-bg-overlay-tertiary"
+                      ? "!border-accent-green/20 bg-bg-overlay-tertiary"
                       : isFocused
-                        ? "border-border-secondary bg-bg-overlay-tertiary"
-                        : "border-border-tertiary hover:border-border-secondary hover:bg-bg-overlay-tertiary"
+                        ? "!border-border-secondary bg-bg-overlay-tertiary"
+                        : "hover:!border-border-secondary hover:bg-bg-overlay-tertiary"
               }`}
             >
               {/* Checkbox (hidden on mobile) */}
