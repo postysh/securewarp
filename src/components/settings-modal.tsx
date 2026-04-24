@@ -19,7 +19,7 @@ import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import { useTheme } from "./theme-provider";
 import { useUserKeys } from "@/hooks/use-user-keys";
 import { useAuth } from "@/hooks/use-auth";
-import { useFilesContext } from "@/hooks/use-files";
+import { useFilesActions } from "@/hooks/use-files";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { RecoveryKeyModal } from "./recovery-key-modal";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -180,7 +180,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
   const [exportCounts, setExportCounts] = useState<{ done: number; total: number } | null>(null);
   const userKeys = useUserKeys();
   const auth = useAuth();
-  const fileOps = useFilesContext();
+  const fileOps = useFilesActions();
 
   const email = userKeys?.email || "";
   const initials = displayName

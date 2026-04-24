@@ -19,7 +19,12 @@ const AuthScreen = dynamic(
 import { MobileNav } from "@/components/mobile-nav";
 import { AnnouncementBanner } from "@/components/announcement-banner";
 import { UserKeysContext, type UserKeys } from "@/hooks/use-user-keys";
-import { FilesContext, useFiles } from "@/hooks/use-files";
+import {
+  FilesContext,
+  FilesStateContext,
+  FilesActionsContext,
+  useFiles,
+} from "@/hooks/use-files";
 
 export default function DriveClient() {
   const router = useRouter();
@@ -135,8 +140,10 @@ export default function DriveClient() {
 
   // Single useFiles instance shared between sidebar (for "Shared with me"
   // view toggle) and the file browser. Created here so its state outlives
-  // any one child unmounting.
-  const fileOps = useFiles(
+  // any one child unmounting. Returns { api, state, actions } — api is
+  // the legacy flat shape for existing callers; state + actions feed
+  // the split contexts below for perf-sensitive consumers.
+  const { api: fileOps, state: filesState, actions: filesActions } = useFiles(
     keys
       ? {
           encryptionPublicKey: keys.encryptionPublicKey,
@@ -231,6 +238,8 @@ export default function DriveClient() {
   return (
     <ThemeProvider>
       <UserKeysContext.Provider value={keys}>
+        <FilesActionsContext.Provider value={filesActions}>
+        <FilesStateContext.Provider value={filesState}>
         <FilesContext.Provider value={fileOps}>
           {viewerOrigin && preloadViewer && (
             <iframe
@@ -296,6 +305,8 @@ export default function DriveClient() {
             <MobileNav onSearch={() => window.dispatchEvent(new Event("securewarp-open-search"))} />
           </div>
         </FilesContext.Provider>
+        </FilesStateContext.Provider>
+        </FilesActionsContext.Provider>
       </UserKeysContext.Provider>
     </ThemeProvider>
   );

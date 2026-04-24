@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
+import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   generateSessionKey,
   encryptMetadata,
@@ -1083,13 +1083,20 @@ export function useFiles(keys: {
     }));
 
     const updateProgress = (progress: number, step: string) => {
+      // Deliberately does NOT touch state.files. Before this change,
+      // every progress tick ran `files.map(...)` which handed a new
+      // array reference to FileBrowser and re-rendered every row in
+      // the folder — thousands of wasted renders per upload at
+      // ~20-50 ticks/chunk × N rows. The per-file `uploadProgress`
+      // field we were rewriting was never actually rendered (assigned
+      // into displayFiles but no UI reads it), so losing the in-place
+      // bump has zero visual effect. The upload-tray panel still
+      // ticks via uploadQueue below, which is cheap because only the
+      // tray subscribes to it.
       setState((s) => ({
         ...s,
         uploadStep: step,
         uploadProgress: progress,
-        files: s.files.map((f) => f.id === tempId ? { ...f, uploadProgress: progress } : f),
-        // Mirror into the floating panel record so both the file-row
-        // placeholder AND the persistent panel stay in sync.
         uploadQueue: s.uploadQueue.map((r) =>
           r.id === queueId ? { ...r, progress } : r,
         ),
@@ -4245,64 +4252,115 @@ export function useFiles(keys: {
     } catch { /* silent */ }
   }, [keys, state.nextCursor, state.currentFolder]);
 
-  return {
-    ...state,
-    initialized,
-    fetchFiles,
-    uploadFile,
-    replaceFile,
-    dismissUpload,
-    dismissDownload,
-    listVersions,
-    restoreVersion,
-    deleteVersion,
-    resolvePrivHier,
-    downloadFile,
-    previewFile,
-    createFolder,
-    renameFile,
-    moveFile,
-    toggleStar,
-    deleteItem,
-    restoreItem,
-    purgeItem,
-    emptyTrash,
-    shareFile,
-    unshareFile,
-    leaveShare,
-    rotateAndRevoke,
-    rotateAndRevokeFolder,
-    setPermission,
-    createLink,
-    revokeLink,
-    listLinks,
-    loadCollaborators,
-    setViewMode,
-    navigateToFolder,
-    navigateToWorkspace,
-    leaveWorkspace,
-    navigateToBreadcrumb,
-    navigateToSearchResult,
-    clearError,
-    invalidateCache,
-    loadMore,
-    searchFiles,
-    refreshSearchCacheIfStale,
-    rebuildSearchCache,
-    clearSearchIndex,
-    exportAllAsZip,
-    prefetchFolder,
-  };
+  // Stable actions bag — each method is already a useCallback with
+  // stable identity, so this memo only rebuilds when a specific
+  // action's dep changes (rare). Consumers that subscribe via
+  // useFilesActions() skip re-renders on every state tick.
+  const actions = useMemo(
+    () => ({
+      fetchFiles,
+      uploadFile,
+      replaceFile,
+      dismissUpload,
+      dismissDownload,
+      listVersions,
+      restoreVersion,
+      deleteVersion,
+      resolvePrivHier,
+      downloadFile,
+      previewFile,
+      createFolder,
+      renameFile,
+      moveFile,
+      toggleStar,
+      deleteItem,
+      restoreItem,
+      purgeItem,
+      emptyTrash,
+      shareFile,
+      unshareFile,
+      leaveShare,
+      rotateAndRevoke,
+      rotateAndRevokeFolder,
+      setPermission,
+      createLink,
+      revokeLink,
+      listLinks,
+      loadCollaborators,
+      setViewMode,
+      navigateToFolder,
+      navigateToWorkspace,
+      leaveWorkspace,
+      navigateToBreadcrumb,
+      navigateToSearchResult,
+      clearError,
+      invalidateCache,
+      loadMore,
+      searchFiles,
+      refreshSearchCacheIfStale,
+      rebuildSearchCache,
+      clearSearchIndex,
+      exportAllAsZip,
+      prefetchFolder,
+    }),
+    [
+      fetchFiles, uploadFile, replaceFile, dismissUpload, dismissDownload,
+      listVersions, restoreVersion, deleteVersion, resolvePrivHier,
+      downloadFile, previewFile, createFolder, renameFile, moveFile,
+      toggleStar, deleteItem, restoreItem, purgeItem, emptyTrash,
+      shareFile, unshareFile, leaveShare, rotateAndRevoke, rotateAndRevokeFolder,
+      setPermission, createLink, revokeLink, listLinks, loadCollaborators,
+      setViewMode, navigateToFolder, navigateToWorkspace, leaveWorkspace,
+      navigateToBreadcrumb, navigateToSearchResult, clearError, invalidateCache,
+      loadMore, searchFiles, refreshSearchCacheIfStale, rebuildSearchCache,
+      clearSearchIndex, exportAllAsZip, prefetchFolder,
+    ],
+  );
+
+  // State bag — one object containing all reactive state. Memoized
+  // on (state, initialized) so its reference is stable between
+  // renders where neither changed.
+  const stateBag = useMemo(
+    () => ({ ...state, initialized }),
+    [state, initialized],
+  );
+
+  // Legacy flat API — { ...state, ...actions }. Consumers of the
+  // legacy FilesContext continue to see this shape. Re-creates every
+  // render; that's fine because legacy callers already accepted that
+  // cost. New code should prefer useFilesState() / useFilesActions().
+  const api = { ...stateBag, ...actions };
+
+  return { api, state: stateBag, actions };
 }
 
-export type FilesApi = ReturnType<typeof useFiles>;
+export type FilesState = ReturnType<typeof useFiles>["state"];
+export type FilesActions = ReturnType<typeof useFiles>["actions"];
+export type FilesApi = ReturnType<typeof useFiles>["api"];
 
 /**
- * Context used to share the single useFiles() instance between the sidebar,
- * file browser, and modals — so toggling "Shared with me" in one place
- * updates the file list everywhere without prop drilling.
+ * Split contexts: state (changes every tick) vs actions (stable
+ * callbacks). Components that only need actions (modals, share
+ * dialog, command palette) should use useFilesActions() to avoid
+ * re-rendering on every state update. Components that read state
+ * (sidebar, file-browser) use useFilesState(). The combined
+ * useFilesContext() is kept for legacy callers.
  */
+export const FilesStateContext = createContext<FilesState | null>(null);
+export const FilesActionsContext = createContext<FilesActions | null>(null);
 export const FilesContext = createContext<FilesApi | null>(null);
+
+export function useFilesState(): FilesState {
+  const ctx = useContext(FilesStateContext);
+  if (!ctx) throw new Error("useFilesState must be used inside <FilesStateContext.Provider>");
+  return ctx;
+}
+
+export function useFilesActions(): FilesActions {
+  const ctx = useContext(FilesActionsContext);
+  if (!ctx) throw new Error("useFilesActions must be used inside <FilesActionsContext.Provider>");
+  return ctx;
+}
 
 export function useFilesContext(): FilesApi {
   const ctx = useContext(FilesContext);

@@ -7,7 +7,7 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import UserAdd01Icon from "@hugeicons/core-free-icons/UserAdd01Icon";
 import Link04Icon from "@hugeicons/core-free-icons/Link04Icon";
 import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
-import { useFilesContext, type DecryptedFile, type Collaborator, type PermissionLevel } from "@/hooks/use-files";
+import { useFilesActions, type DecryptedFile, type Collaborator, type PermissionLevel } from "@/hooks/use-files";
 import { initialsFromEmail, colorForEmail } from "@/lib/avatar";
 import { userLabel, userInitials, userColor } from "@/lib/display";
 import { RoleDropdown } from "./role-dropdown";
@@ -54,7 +54,7 @@ interface LinkSummary {
 }
 
 export function ShareModal({ file, onClose }: ShareModalProps) {
-  const fileOps = useFilesContext();
+  const fileOps = useFilesActions();
   const [inputValue, setInputValue] = useState("");
   const [inputError, setInputError] = useState("");
   const [info, setInfo] = useState("");
