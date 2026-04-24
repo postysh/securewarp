@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
+import { getPg } from "@/lib/db/pg";
 import { getEntitlements } from "@/lib/billing/customers";
 import { channelForUser, channelForWorkspace } from "@/lib/realtime/channels";
 import { logError } from "@/lib/log";
@@ -104,15 +105,41 @@ export async function GET() {
 }
 
 async function loadProfile(userId: string) {
-  const { data, error } = await supabase
-    .from("users")
-    .select("display_name, notification_prefs, onboarded_at, totp_secret, srp_salt, argon2_salt")
-    .eq("id", userId)
-    .single();
-  if (error) throw error;
+  const pg = getPg();
+  let row: {
+    display_name: string | null;
+    notification_prefs: Record<string, boolean> | null;
+    onboarded_at: string | null;
+    totp_secret: string | null;
+    srp_salt: string | null;
+    argon2_salt: string | null;
+  } | undefined;
+
+  if (pg) {
+    const rows = await pg<Array<{
+      display_name: string | null;
+      notification_prefs: Record<string, boolean> | null;
+      onboarded_at: string | null;
+      totp_secret: string | null;
+      srp_salt: string | null;
+      argon2_salt: string | null;
+    }>>`
+      SELECT display_name, notification_prefs, onboarded_at, totp_secret, srp_salt, argon2_salt
+      FROM users WHERE id = ${userId} LIMIT 1
+    `;
+    row = rows[0];
+  } else {
+    const { data, error } = await supabase
+      .from("users")
+      .select("display_name, notification_prefs, onboarded_at, totp_secret, srp_salt, argon2_salt")
+      .eq("id", userId)
+      .single();
+    if (error) throw error;
+    row = data ?? undefined;
+  }
   return {
-    displayName: data?.display_name ?? "",
-    notificationPrefs: data?.notification_prefs ?? {
+    displayName: row?.display_name ?? "",
+    notificationPrefs: row?.notification_prefs ?? {
       file_shared: true,
       file_unshared: true,
       permission_changed: true,
@@ -121,14 +148,31 @@ async function loadProfile(userId: string) {
       billing_receipts: true,
       billing_renewal_reminder: true,
     },
-    onboarded: data?.onboarded_at != null,
-    totpEnabled: Boolean(data?.totp_secret),
-    srpSalt: data?.srp_salt ?? null,
-    argon2Salt: data?.argon2_salt ?? null,
+    onboarded: row?.onboarded_at != null,
+    totpEnabled: Boolean(row?.totp_secret),
+    srpSalt: row?.srp_salt ?? null,
+    argon2Salt: row?.argon2_salt ?? null,
   };
 }
 
 async function loadPins(userId: string) {
+  const pg = getPg();
+  if (pg) {
+    // One-shot join via direct SQL — beats supabase-js's REST
+    // embed, which issues an N+1 fetch for the embedded relation.
+    const rows = await pg<Array<{ file_id: string; sort_order: number; is_folder: boolean }>>`
+      SELECT p.file_id, p.sort_order, f.is_folder
+      FROM user_pins p
+      JOIN files f ON f.id = p.file_id
+      WHERE p.user_id = ${userId}
+      ORDER BY p.sort_order
+    `;
+    return rows.map((r) => ({
+      file_id: r.file_id,
+      sort_order: r.sort_order,
+      is_folder: r.is_folder,
+    }));
+  }
   const { data, error } = await supabase
     .from("user_pins")
     .select("file_id, sort_order, file:files!user_pins_file_id_fkey(is_folder)")
@@ -143,6 +187,14 @@ async function loadPins(userId: string) {
 }
 
 async function loadLabels(userId: string) {
+  const pg = getPg();
+  if (pg) {
+    const rows = await pg<Array<{ id: string; name: string; color: string; sort_order: number }>>`
+      SELECT id, name, color, sort_order
+      FROM labels WHERE user_id = ${userId} ORDER BY sort_order
+    `;
+    return rows;
+  }
   const { data, error } = await supabase
     .from("labels")
     .select("id, name, color, sort_order")
@@ -157,6 +209,39 @@ async function loadUsage(userId: string) {
   // be fast and the Plan panel already refetches via /api/files/usage
   // when opened, which does the sync. Serving last-known numbers on
   // boot is fine.
+  const pg = getPg();
+  if (pg) {
+    // Push the aggregation into Postgres — one row per bucket
+    // instead of shipping every file's size_bytes back to the
+    // Worker and summing client-side. On large owners (thousands
+    // of files) this is the single biggest win in /api/boot.
+    const rows = await pg<Array<{
+      files_bytes: string;
+      trash_bytes: string;
+      files_count: string;
+      trash_count: string;
+    }>>`
+      SELECT
+        COALESCE(SUM(CASE WHEN deleted_at IS NULL THEN size_bytes END), 0)::text AS files_bytes,
+        COALESCE(SUM(CASE WHEN deleted_at IS NOT NULL THEN size_bytes END), 0)::text AS trash_bytes,
+        COALESCE(COUNT(CASE WHEN deleted_at IS NULL THEN 1 END), 0)::text AS files_count,
+        COALESCE(COUNT(CASE WHEN deleted_at IS NOT NULL THEN 1 END), 0)::text AS trash_count
+      FROM files
+      WHERE owner_id = ${userId} AND upload_complete = true
+    `;
+    const r = rows[0];
+    const filesBytes = r ? Number(r.files_bytes) : 0;
+    const trashBytes = r ? Number(r.trash_bytes) : 0;
+    const filesCount = r ? Number(r.files_count) : 0;
+    const trashCount = r ? Number(r.trash_count) : 0;
+    return {
+      filesBytes,
+      filesCount,
+      trashBytes,
+      trashCount,
+      usedBytes: filesBytes + trashBytes,
+    };
+  }
   const { data, error } = await supabase
     .from("files")
     .select("size_bytes, deleted_at")
@@ -189,6 +274,41 @@ async function loadUsage(userId: string) {
 }
 
 async function loadWorkspaces(userId: string) {
+  const pg = getPg();
+  if (pg) {
+    const rows = await pg<Array<{
+      role: string;
+      id: string; name: string; root_folder_id: string; owner_id: string;
+      color: string; description: string; default_role: string;
+      require_2fa: boolean;
+      links_disabled: boolean;
+      links_require_password: boolean;
+      links_max_expiry_days: number | null;
+    }>>`
+      SELECT
+        m.role,
+        w.id, w.name, w.root_folder_id, w.owner_id, w.color, w.description,
+        w.default_role, w.require_2fa, w.links_disabled,
+        w.links_require_password, w.links_max_expiry_days
+      FROM workspace_members m
+      JOIN workspaces w ON w.id = m.workspace_id
+      WHERE m.user_id = ${userId}
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      rootFolderId: r.root_folder_id,
+      ownerId: r.owner_id,
+      color: r.color,
+      description: r.description,
+      defaultRole: r.default_role,
+      role: r.role,
+      require2fa: r.require_2fa,
+      linksDisabled: r.links_disabled,
+      linksRequirePassword: r.links_require_password,
+      linksMaxExpiryDays: r.links_max_expiry_days,
+    }));
+  }
   const { data, error } = await supabase
     .from("workspace_members")
     .select(
@@ -230,6 +350,13 @@ async function loadWorkspaces(userId: string) {
 }
 
 async function loadTotpFlag(userId: string): Promise<boolean> {
+  const pg = getPg();
+  if (pg) {
+    const rows = await pg<Array<{ totp_secret: string | null }>>`
+      SELECT totp_secret FROM users WHERE id = ${userId} LIMIT 1
+    `;
+    return Boolean(rows[0]?.totp_secret);
+  }
   const { data } = await supabase
     .from("users")
     .select("totp_secret")

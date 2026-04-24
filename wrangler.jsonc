@@ -72,6 +72,35 @@
   // dashboard, leave this empty. The client falls back gracefully to
   // the same-origin inline PDF iframe, which still works correctly;
   // activating it prematurely just means PDFs fail to preview.
+  // Hyperdrive — connection-pooled + edge-cached access to Supabase
+  // Postgres. Used by hot read paths (`/api/boot`, `/api/files/list`)
+  // via `src/lib/db/pg.ts`. Everything else still goes through
+  // @supabase/supabase-js; migration is incremental, not all-or-nothing.
+  //
+  // Setup (one-time):
+  //   1. Grab the DIRECT Postgres connection string from Supabase
+  //      (dashboard → Project Settings → Database → Connection string
+  //      → **Direct connection**, NOT the pooled ones). Hyperdrive
+  //      handles pooling itself.
+  //   2. `wrangler hyperdrive create securewarp-prod \
+  //        --connection-string="postgresql://postgres:PASSWORD@HOST:5432/postgres"`
+  //   3. Paste the returned config id into the `id` field below and
+  //      uncomment this block.
+  //   4. Redeploy. `hasHyperdrive()` in src/lib/db/pg.ts will start
+  //      returning true and hot paths auto-switch from supabase-js
+  //      to pg.
+  //
+  // Until the block below is uncommented, `pg.ts` returns null and
+  // every call site falls back to supabase-js — nothing breaks on
+  // partially-migrated deploys.
+  //
+  // "hyperdrive": [
+  //   {
+  //     "binding": "HYPERDRIVE",
+  //     "id": "<paste-hyperdrive-config-id-here>"
+  //   }
+  // ],
+
   "vars": {
     "EMAIL_FROM": "SecureWarp <noreply@mail.securewarp.com>",
     // Default Reply-To for every transactional email. Users who hit
