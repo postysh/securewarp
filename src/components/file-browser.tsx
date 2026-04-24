@@ -649,6 +649,45 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   type ViewTransitionDoc = Document & {
     startViewTransition?: (cb: () => void | Promise<void>) => { finished?: Promise<void> };
   };
+  // Build a custom drag image for the row being dragged. Phase 4
+  // wraps every row in a virtualizer host with `position: absolute;
+  // transform: translateY(...)`, which Safari captures into the
+  // browser's auto-generated drag image — the preview ends up either
+  // offscreen or at the row's translated coordinate, so the user
+  // can't see anything attached to the cursor while dragging. We
+  // bypass that by cloning the row, positioning it in normal flow
+  // briefly so its bounding box has no ancestor transform, handing
+  // it to setDragImage with cursor-relative offsets, and removing
+  // the clone on the next tick. Works on Chromium / Safari /
+  // Firefox.
+  const setRowDragImage = useCallback(
+    (e: React.DragEvent<HTMLElement>) => {
+      if (typeof document === "undefined") return;
+      const target = e.currentTarget;
+      const rect = target.getBoundingClientRect();
+      const clone = target.cloneNode(true) as HTMLElement;
+      clone.style.position = "absolute";
+      clone.style.top = "-9999px";
+      clone.style.left = "-9999px";
+      clone.style.width = `${rect.width}px`;
+      clone.style.transform = "none";
+      clone.style.pointerEvents = "none";
+      // Remove any opacity treatment the source already has from
+      // an earlier dragstart still in the React render queue.
+      clone.style.opacity = "1";
+      document.body.appendChild(clone);
+      e.dataTransfer.setDragImage(
+        clone,
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+      );
+      // Drag image is captured synchronously by the browser during
+      // dragstart; the clone is safe to remove on the next tick.
+      setTimeout(() => clone.remove(), 0);
+    },
+    [],
+  );
+
   const withViewTransition = useCallback((work: () => void) => {
     if (typeof document === "undefined") { work(); return; }
     const doc = document as ViewTransitionDoc;
@@ -1758,9 +1797,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               key={file.id}
               draggable={fileOps.viewMode === "own" && !file.uploading && fileOps.callerPermission !== "viewer"}
               onDragStart={(e) => {
-                setDragFileId(file.id);
+                setRowDragImage(e);
                 e.dataTransfer.effectAllowed = "move";
                 e.dataTransfer.setData("text/plain", file.id);
+                setDragFileId(file.id);
               }}
               onDragEnd={() => { setDragFileId(null); setDropTargetId(null); }}
               onDragOver={(e) => {
@@ -1901,9 +1941,10 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
               data-file-id={file.id}
               draggable={fileOps.viewMode === "own" && !file.uploading && fileOps.callerPermission !== "viewer"}
               onDragStart={(e) => {
-                setDragFileId(file.id);
+                setRowDragImage(e);
                 e.dataTransfer.effectAllowed = "move";
                 e.dataTransfer.setData("text/plain", file.id);
+                setDragFileId(file.id);
               }}
               onDragEnd={() => {
                 setDragFileId(null);
