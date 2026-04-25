@@ -11,9 +11,10 @@ import Moon02Icon from "@hugeicons/core-free-icons/Moon02Icon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import UserIcon from "@hugeicons/core-free-icons/UserIcon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
+import Mail01Icon from "@hugeicons/core-free-icons/Mail01Icon";
 import { useTheme } from "./theme-provider";
 
-type Step = "name" | "workspace" | "done";
+type Step = "name" | "workspace" | "recovery-email" | "done";
 
 export function OnboardingWizard() {
   const router = useRouter();
@@ -26,6 +27,7 @@ export function OnboardingWizard() {
   const [ready, setReady] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<HTMLInputElement>(null);
+  const recoveryEmailRef = useRef<HTMLInputElement>(null);
 
   // Guard: if the server already marked this user onboarded (e.g. they
   // landed here manually on a subsequent device), bounce to /drive. Also
@@ -53,6 +55,7 @@ export function OnboardingWizard() {
     if (!ready) return;
     if (step === "name") setTimeout(() => nameRef.current?.focus(), 50);
     if (step === "workspace") setTimeout(() => wsRef.current?.focus(), 50);
+    if (step === "recovery-email") setTimeout(() => recoveryEmailRef.current?.focus(), 50);
   }, [step, ready]);
 
   async function saveDisplayName() {
@@ -84,8 +87,7 @@ export function OnboardingWizard() {
   }
 
   async function handleSkipWorkspace() {
-    setBusy(true);
-    await completeOnboarding();
+    setStep("recovery-email");
   }
 
   async function handleCreateWorkspace() {
@@ -112,7 +114,8 @@ export function OnboardingWizard() {
       const wsData = await wsRes.json();
       if (!wsRes.ok) throw new Error(wsData.error || "Failed to create workspace");
 
-      await completeOnboarding();
+      setBusy(false);
+      setStep("recovery-email");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
       setBusy(false);
@@ -121,7 +124,9 @@ export function OnboardingWizard() {
 
   if (!ready) return <div className="h-full bg-bg-side" />;
 
-  const stepIndex = step === "name" ? 0 : step === "workspace" ? 1 : 2;
+  const stepIndex =
+    step === "name" ? 0 : step === "workspace" ? 1 : step === "recovery-email" ? 2 : 3;
+  const totalSteps = 3;
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-side">
@@ -155,11 +160,11 @@ export function OnboardingWizard() {
                   Set up your account
                 </div>
                 <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-tertiary">
-                  Step {stepIndex + 1} of 2
+                  Step {Math.min(stepIndex + 1, totalSteps)} of {totalSteps}
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                {[0, 1].map((i) => (
+                {[0, 1, 2].map((i) => (
                   <div
                     key={i}
                     className="h-[3px] flex-1 rounded-full transition-colors"
@@ -193,6 +198,13 @@ export function OnboardingWizard() {
                   busy={busy}
                   error={error}
                   inputRef={wsRef}
+                />
+              )}
+
+              {step === "recovery-email" && (
+                <StepRecoveryEmail
+                  inputRef={recoveryEmailRef}
+                  onDone={completeOnboarding}
                 />
               )}
             </div>
@@ -327,6 +339,225 @@ function StepWorkspace({
         >
           {busy ? "Creating…" : "Create workspace"}
           {!busy && <HugeiconsIcon icon={Tick01Icon} size={14} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StepRecoveryEmail({
+  inputRef,
+  onDone,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onDone: () => Promise<void>;
+}) {
+  const [mode, setMode] = useState<"intro" | "form" | "skip-confirm" | "success">("intro");
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [phrase, setPhrase] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleSubmit() {
+    setErr(null);
+    const email = recoveryEmail.trim().toLowerCase();
+    if (!email) {
+      setErr("Enter a recovery email.");
+      return;
+    }
+    const cryptoMod = await import("@/lib/auth/recovery-email-crypto");
+    let cleanedPhrase: string;
+    try {
+      cleanedPhrase = cryptoMod.cleanAndValidateMnemonic(phrase);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Phrase doesn't look right.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { hashRecoveryKey } = await import("@/lib/crypto/keys");
+      const wrap = await cryptoMod.wrapMnemonicForEmail(cleanedPhrase);
+      const recoveryKeyHash = await hashRecoveryKey(cleanedPhrase);
+
+      const res = await fetch("/api/auth/recovery-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recoveryEmail: email,
+          recoveryToken: wrap.recoveryToken,
+          confirmToken: wrap.confirmToken,
+          salt: wrap.salt,
+          ciphertext: wrap.ciphertext,
+          recoveryKeyHash,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Setup failed");
+      }
+      setMode("success");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Setup failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (mode === "success") {
+    return (
+      <div className="animate-fade-in">
+        <StepIcon icon={Mail01Icon} />
+        <h1 className="text-[20px] font-semibold text-text-primary mb-1 tracking-[-0.01em]">
+          Check your inbox
+        </h1>
+        <p className="text-[13px] text-text-tertiary leading-relaxed mb-5">
+          We sent a confirmation link to <span className="text-text-primary">{recoveryEmail}</span>.
+          Click it once to activate, then save the email. It contains your one time recovery URL.
+        </p>
+        <div className="flex items-center justify-end mt-6">
+          <button
+            onClick={async () => {
+              setBusy(true);
+              await onDone();
+            }}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-5 h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer active:scale-[0.98] disabled:opacity-50"
+          >
+            {busy ? "Loading…" : "Continue to drive"}
+            <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "skip-confirm") {
+    return (
+      <div className="animate-fade-in">
+        <div className="w-12 h-12 rounded-xl border border-accent-red/30 bg-accent-red/[0.06] flex items-center justify-center mb-4">
+          <HugeiconsIcon icon={Mail01Icon} size={22} color="var(--accent-red-primary)" />
+        </div>
+        <h1 className="text-[20px] font-semibold text-text-primary mb-1 tracking-[-0.01em]">
+          Continue without backup recovery?
+        </h1>
+        <p className="text-[13px] text-text-tertiary leading-relaxed mb-3">
+          Without a recovery email, your 24 word phrase is the only way back into your account if
+          you forget your password.
+        </p>
+        <p className="text-[13px] text-text-primary leading-relaxed mb-5">
+          Lose both, and your data is permanently inaccessible. We can&apos;t override this. That&apos;s
+          how zero knowledge works.
+        </p>
+
+        <div className="flex items-center justify-between mt-6">
+          <button
+            onClick={() => setMode("intro")}
+            disabled={busy}
+            className="text-[13px] text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer disabled:opacity-50"
+          >
+            Go back
+          </button>
+          <button
+            onClick={async () => {
+              setBusy(true);
+              await onDone();
+            }}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-5 h-[40px] rounded-[10px] border border-border-secondary text-text-primary text-[13px] font-medium hover:bg-cta-secondary-hover transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {busy ? "Loading…" : "Skip anyway"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "form") {
+    return (
+      <div className="animate-fade-in">
+        <StepIcon icon={Mail01Icon} />
+        <h1 className="text-[20px] font-semibold text-text-primary mb-1 tracking-[-0.01em]">
+          Set up backup recovery
+        </h1>
+        <p className="text-[13px] text-text-tertiary leading-relaxed mb-5">
+          Paste your 24 words once. We&apos;ll wrap them with a key only you control and email you
+          a one time recovery URL to save.
+        </p>
+
+        <label className="block text-[10px] font-mono uppercase tracking-[0.16em] text-text-disabled mb-1.5">
+          Backup email
+        </label>
+        <input
+          ref={inputRef}
+          type="email"
+          autoComplete="email"
+          value={recoveryEmail}
+          onChange={(e) => setRecoveryEmail(e.target.value)}
+          placeholder="another@example.com"
+          maxLength={254}
+          className="w-full h-[42px] px-3 rounded-[10px] bg-bg-field border border-transparent text-text-primary text-[14px] placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 focus:border-text-link/40 transition-all mb-4"
+        />
+
+        <label className="block text-[10px] font-mono uppercase tracking-[0.16em] text-text-disabled mb-1.5">
+          Your 24 word phrase
+        </label>
+        <textarea
+          value={phrase}
+          onChange={(e) => setPhrase(e.target.value)}
+          rows={4}
+          placeholder="word1 word2 word3 …"
+          className="w-full px-3 py-2 rounded-[10px] bg-bg-field border border-transparent text-text-primary text-[13px] font-mono placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-text-link/25 focus:border-text-link/40 transition-all resize-none"
+        />
+
+        {err && <p className="mt-3 text-[12px] text-accent-red">{err}</p>}
+
+        <div className="flex items-center justify-between mt-6">
+          <button
+            onClick={() => setMode("intro")}
+            disabled={busy}
+            className="text-[13px] text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer disabled:opacity-50"
+          >
+            Back
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-5 h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer active:scale-[0.98] disabled:opacity-50"
+          >
+            {busy ? "Sending…" : "Send confirmation"}
+            {!busy && <HugeiconsIcon icon={ArrowRight01Icon} size={14} />}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-fade-in">
+      <StepIcon icon={Mail01Icon} />
+      <h1 className="text-[20px] font-semibold text-text-primary mb-1 tracking-[-0.01em]">
+        Add a backup recovery email?
+      </h1>
+      <p className="text-[13px] text-text-tertiary leading-relaxed mb-3">
+        Optional. If you ever lose your 24 word phrase, a backup email gives you a second way
+        back in. We never store the part that decrypts. Losing the email loses the backup.
+      </p>
+      <p className="text-[13px] text-text-tertiary leading-relaxed mb-5">
+        You can add or remove this anytime in Settings.
+      </p>
+      <div className="flex items-center justify-between mt-6">
+        <button
+          onClick={() => setMode("skip-confirm")}
+          className="text-[13px] text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer"
+        >
+          Skip
+        </button>
+        <button
+          onClick={() => setMode("form")}
+          className="flex items-center gap-1.5 px-5 h-[40px] rounded-[10px] bg-cta-primary text-text-inverse text-[13px] font-medium hover:opacity-90 transition-opacity cursor-pointer active:scale-[0.98]"
+        >
+          Set up
+          <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
         </button>
       </div>
     </div>

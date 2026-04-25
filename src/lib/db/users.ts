@@ -130,6 +130,28 @@ export async function updateUserAuth(
     // phone) but NOT by change-password (user still has their
     // authenticator).
     clearTotp?: boolean;
+    // Recovery-email handling. Any recoveryKeyHash rotation
+    // invalidates the existing email-recovery wrap because it
+    // seals the OLD phrase. Two callers, two behaviours:
+    //
+    //   - Recovery flow (`/api/auth/recover` action=update): the
+    //     client holds the URL-fragment recovery token and will
+    //     re-wrap the new phrase under the same token immediately
+    //     after this call. We must NOT clear the columns
+    //     `recovery_email`, `recovery_email_verified_at`, or
+    //     `recovery_email_token_hash` — the rewrap endpoint reads
+    //     them to verify the presented token. We DO clear the
+    //     ciphertext + salt so the link fails closed if the
+    //     rewrap never lands.
+    //
+    //   - Change-password flow (`/api/auth/change-password`): the
+    //     user is signed in and chose a new password. They don't
+    //     have the URL-fragment token in scope; even if they did,
+    //     we don't want to silently mutate the wrap state from a
+    //     password change. We clear ALL recovery-email columns
+    //     and the user re-opts-in from Settings under their new
+    //     phrase.
+    preserveRecoveryEmailRow?: boolean;
   }
 ): Promise<void> {
   const updates: Record<string, unknown> = {
@@ -139,7 +161,19 @@ export async function updateUserAuth(
     encrypted_user_data: data.encryptedUserData,
     recovery_key_hash: data.recoveryKeyHash || null,
     recovery_encrypted_data: data.recoveryEncryptedData || null,
+    // Stale-wrap material: cleared on every call. The recovery
+    // flow re-fills these immediately via /rewrap; change-password
+    // leaves them null until the user re-opts-in.
+    recovery_email_wrapped_recovery_key: null,
+    recovery_email_kdf_salt: null,
+    recovery_email_confirm_token_hash: null,
+    recovery_email_confirm_expires_at: null,
   };
+  if (!data.preserveRecoveryEmailRow) {
+    updates.recovery_email = null;
+    updates.recovery_email_verified_at = null;
+    updates.recovery_email_token_hash = null;
+  }
   if (data.clearTotp) {
     updates.totp_secret = null;
     updates.totp_pending_secret = null;

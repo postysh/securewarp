@@ -23,6 +23,10 @@ import {
   type BillingRenewalReminderData,
 } from "./billing-renewal-reminder";
 import { abuseReportedTemplate, type AbuseReportedData } from "./abuse-reported";
+import {
+  recoveryEmailSetupTemplate,
+  type RecoveryEmailSetupData,
+} from "./recovery-email-setup";
 
 export const Templates = {
   welcome: welcomeTemplate,
@@ -32,6 +36,7 @@ export const Templates = {
   "billing-payment-failed": billingPaymentFailedTemplate,
   "billing-renewal-reminder": billingRenewalReminderTemplate,
   "abuse-reported": abuseReportedTemplate,
+  "recovery-email-setup": recoveryEmailSetupTemplate,
 } as const;
 
 export type TemplateName = keyof typeof Templates;
@@ -44,4 +49,5 @@ export type TemplateData = {
   "billing-payment-failed": BillingPaymentFailedData;
   "billing-renewal-reminder": BillingRenewalReminderData;
   "abuse-reported": AbuseReportedData;
+  "recovery-email-setup": RecoveryEmailSetupData;
 };

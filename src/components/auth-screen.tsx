@@ -54,6 +54,26 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
   const [recoveryWords, setRecoveryWords] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  // Email-recovery via URL fragment. The setup email's "save this"
+  // URL points at /recover#rt=<token>; we read the fragment on
+  // mount, switch the recovery modal into a phrase-less mode, and
+  // unwrap the stored mnemonic at submit time so the existing
+  // recover() pipeline can run.
+  const [emailRecoveryToken, setEmailRecoveryToken] = useState<string | null>(null);
+  const [emailRecoveryError, setEmailRecoveryError] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash;
+    if (!hash || !hash.startsWith("#")) return;
+    const params = new URLSearchParams(hash.slice(1));
+    const rt = params.get("rt");
+    if (!rt) return;
+    setEmailRecoveryToken(rt);
+    setShowRecovery(true);
+    // Clear the fragment from the URL bar so the token doesn't sit
+    // visible in the user's history once we've captured it.
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
   const { theme, toggle } = useTheme();
   const auth = useAuth();
 
@@ -107,6 +127,13 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
   // endpoint replaces the prior session on success.
   useEffect(() => {
     if (mode === "signup") return;
+    // Recovery via email-link path: the user clicked the URL we
+    // sent them ("/login#rt=<token>") and wants to reset their
+    // password. Even if a stale session cookie is still live on
+    // this device, do NOT redirect to /drive — let the recovery
+    // modal open so they can complete the reset. The hash reader
+    // below picks the token up.
+    if (typeof window !== "undefined" && /[#&]rt=/.test(window.location.hash)) return;
     let cancelled = false;
     fetch("/api/auth/profile", { cache: "no-store" })
       .then((res) => {
@@ -561,10 +588,42 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                 e.preventDefault();
                 if (newPassword !== confirmNewPassword) return;
                 if (newPassword.length < 8) return;
+                setEmailRecoveryError(null);
+                let phrase = recoveryWords;
+                if (emailRecoveryToken) {
+                  try {
+                    const initRes = await fetch("/api/auth/recovery-email/init", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ email: recoveryEmail }),
+                    });
+                    const initData = await initRes.json();
+                    if (!initData?.available) {
+                      setEmailRecoveryError(
+                        "We couldn't match this recovery link to that account. Use your 24 word phrase instead, or check the email matches."
+                      );
+                      return;
+                    }
+                    const { unwrapMnemonicFromEmail } = await import(
+                      "@/lib/auth/recovery-email-crypto"
+                    );
+                    phrase = await unwrapMnemonicFromEmail({
+                      recoveryToken: emailRecoveryToken,
+                      salt: initData.salt,
+                      ciphertext: initData.ciphertext,
+                    });
+                  } catch {
+                    setEmailRecoveryError(
+                      "Could not unwrap your recovery email. The link may be corrupt. Fall back to your 24 word phrase."
+                    );
+                    return;
+                  }
+                }
                 await auth.recover(
                   recoveryEmail,
-                  recoveryWords,
+                  phrase,
                   newPassword,
+                  emailRecoveryToken ?? undefined
                 );
               }}
               className="px-5 py-5 space-y-4"
@@ -572,6 +631,17 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
               {auth.error && (
                 <div className="p-3 rounded-lg bg-accent-red/10 border border-accent-red/20 text-[12px] text-accent-red">
                   {auth.error}
+                </div>
+              )}
+              {emailRecoveryToken && (
+                <div className="p-3 rounded-lg bg-accent-green/10 border border-accent-green/20 text-[12px] text-text-primary">
+                  Using your saved recovery link. We&apos;ll unwrap your phrase from the URL and reset
+                  your password. Just confirm your account email and pick a new one.
+                </div>
+              )}
+              {emailRecoveryError && (
+                <div className="p-3 rounded-lg bg-accent-red/10 border border-accent-red/20 text-[12px] text-accent-red">
+                  {emailRecoveryError}
                 </div>
               )}
 
@@ -588,19 +658,21 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                 />
               </div>
 
-              <div>
-                <label className="block text-[11px] font-medium text-text-disabled uppercase tracking-wider mb-1.5 font-mono">Recovery Phrase</label>
-                <textarea
-                  value={recoveryWords}
-                  onChange={(e) => setRecoveryWords(e.target.value)}
-                  placeholder="Paste your 24-word recovery phrase here..."
-                  required
-                  disabled={auth.loading}
-                  rows={3}
-                  className="w-full px-3.5 py-2.5 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40 disabled:opacity-50 resize-none font-mono"
-                />
-                <p className="text-[10px] text-text-disabled mt-1 px-1">Paste the entire phrase as copied or from your backup file</p>
-              </div>
+              {!emailRecoveryToken && (
+                <div>
+                  <label className="block text-[11px] font-medium text-text-disabled uppercase tracking-wider mb-1.5 font-mono">Recovery Phrase</label>
+                  <textarea
+                    value={recoveryWords}
+                    onChange={(e) => setRecoveryWords(e.target.value)}
+                    placeholder="Paste your 24-word recovery phrase here..."
+                    required
+                    disabled={auth.loading}
+                    rows={3}
+                    className="w-full px-3.5 py-2.5 rounded-[10px] bg-bg-field text-[13px] text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-green/25 transition-all border border-transparent focus:border-accent-green/40 disabled:opacity-50 resize-none font-mono"
+                  />
+                  <p className="text-[10px] text-text-disabled mt-1 px-1">Paste the entire phrase as copied or from your backup file</p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[11px] font-medium text-text-disabled uppercase tracking-wider mb-1.5 font-mono">New Password</label>
@@ -645,8 +717,8 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
                   type="submit"
                   disabled={
                     auth.loading ||
-                    (newPassword !== confirmNewPassword) ||
-                    !recoveryWords.trim()
+                    newPassword !== confirmNewPassword ||
+                    (!emailRecoveryToken && !recoveryWords.trim())
                   }
                   className="h-[34px] px-4 rounded-[8px] text-[12px] font-medium bg-cta-primary text-text-inverse hover:opacity-90 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
                 >

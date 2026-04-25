@@ -926,6 +926,34 @@ CREATE INDEX IF NOT EXISTS changelog_published_idx
   ON changelog_entries (published_at DESC NULLS LAST);
 
 ALTER TABLE changelog_entries ENABLE ROW LEVEL SECURITY;
+
+-- Recovery email — second recovery factor besides the 24-word phrase.
+-- Optional; users who skip it stay on strict zero-knowledge with the
+-- phrase as the only path back. Cryptographic shape: at opt-in the
+-- client generates a random recovery token, derives an Argon2id wrap
+-- key from it, and encrypts the BIP39 entropy under that key. The
+-- server stores the ciphertext + hash(token) + salt; the plaintext
+-- token is briefly handled by the server only during email send and
+-- is delivered to the user via a URL fragment so it never re-enters
+-- a request body. A separate confirm token (single-use, 7-day
+-- expiry) gates `verified_at` to prove the user actually controls
+-- the recovery inbox before the row counts for recovery.
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS recovery_email text,
+  ADD COLUMN IF NOT EXISTS recovery_email_verified_at timestamptz,
+  ADD COLUMN IF NOT EXISTS recovery_email_token_hash text,
+  ADD COLUMN IF NOT EXISTS recovery_email_wrapped_recovery_key text,
+  ADD COLUMN IF NOT EXISTS recovery_email_kdf_salt text,
+  ADD COLUMN IF NOT EXISTS recovery_email_confirm_token_hash text,
+  ADD COLUMN IF NOT EXISTS recovery_email_confirm_expires_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS users_recovery_email_idx
+  ON users (recovery_email)
+  WHERE recovery_email IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS users_recovery_confirm_token_idx
+  ON users (recovery_email_confirm_token_hash)
+  WHERE recovery_email_confirm_token_hash IS NOT NULL;
 ```
 
 ### Development

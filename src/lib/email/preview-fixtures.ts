@@ -51,4 +51,9 @@ export const EMAIL_PREVIEW_FIXTURES: Record<TemplateName, unknown> = {
     category: "csam",
     referenceId: "b72f1c8e-3d4a-4e82-9a6b-2c5f9e0d7a1c",
   },
+  "recovery-email-setup": {
+    confirmUrl:
+      "https://www.securewarp.com/recovery-email/confirm?ct=demo-confirm-token-base64url",
+    recoveryUrl: "https://www.securewarp.com/login#rt=demo-recovery-token-base64url",
+  },
 };

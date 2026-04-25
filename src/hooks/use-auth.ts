@@ -361,7 +361,19 @@ export function useAuth() {
     }
   }
 
-  async function recover(email: string, recoveryWordsRaw: string, newPassword: string) {
+  async function recover(
+    email: string,
+    recoveryWordsRaw: string,
+    newPassword: string,
+    // Optional: when the user reached this flow via an email-link
+    // recovery URL (`#rt=<token>`), passing the token through here
+    // lets us re-wrap the freshly-generated phrase under the same
+    // token so the saved URL keeps working for future recoveries.
+    // Best-effort: a rewrap failure does NOT undo the password
+    // reset; we just leave the email link stale and the user can
+    // re-opt-in from Settings.
+    emailRecoveryToken?: string
+  ) {
     setState({ loading: true, error: null, step: "Verifying recovery key...", recoveryKey: null, userKeys: null, suspended: null, pending2FA: null });
 
     try {
@@ -490,6 +502,33 @@ export function useAuth() {
 
       // Success — show new recovery key
       setState({ loading: false, error: null, step: null, recoveryKey: newRecoveryKey, userKeys: recoveredKeys, suspended: null, pending2FA: null });
+
+      // Best-effort rewrap of the email-recovery URL. The session
+      // is now live (createSession ran on the server during the
+      // update step), so the rewrap endpoint will accept this
+      // request. Failure is intentionally silent — the password
+      // reset already succeeded; a stale email link is a
+      // recoverable settings-page chore, not an error worth
+      // surfacing in the recovery success modal.
+      if (emailRecoveryToken) {
+        try {
+          const { rewrapMnemonicWithToken } = await import(
+            "@/lib/auth/recovery-email-crypto"
+          );
+          const next = await rewrapMnemonicWithToken(newRecoveryKey, emailRecoveryToken);
+          await fetch("/api/auth/recovery-email/rewrap", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recoveryToken: emailRecoveryToken,
+              salt: next.salt,
+              ciphertext: next.ciphertext,
+            }),
+          });
+        } catch {
+          // Silent — see comment above.
+        }
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Recovery failed";
       setError(message);

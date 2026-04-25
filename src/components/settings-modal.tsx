@@ -25,6 +25,7 @@ import { RecoveryKeyModal } from "./recovery-key-modal";
 import { ConfirmDialog } from "./confirm-dialog";
 import { PlanBillingPanel } from "./plan-billing-panel";
 import { ActiveSessions } from "./active-sessions";
+import { RecoveryEmailCard } from "./recovery-email-card";
 import { clearLockCache } from "@/lib/auth/lock-cache";
 
 interface SettingsModalProps {
@@ -559,6 +560,12 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                 <span className="flex items-center gap-1 text-[11px] text-accent-green"><HugeiconsIcon icon={Shield01Icon} size={12} /> Active</span>
               </div>
             </SettingRow>
+
+            {/* Backup recovery email — optional second factor.
+                Wraps the BIP39 phrase under a token delivered via
+                URL fragment to a recovery email. See
+                src/lib/auth/recovery-email-crypto.ts. */}
+            <RecoveryEmailCard />
 
             {/* Active sessions — lists signed-in devices with UA +
                 country + timestamps; per-row Revoke + "Sign out

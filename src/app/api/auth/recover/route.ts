@@ -146,7 +146,10 @@ export async function POST(request: Request) {
         );
       }
 
-      // Update user credentials
+      // Update user credentials. Preserve the recovery_email row
+      // so the client's follow-up rewrap can verify the URL-fragment
+      // token. The wrap ciphertext + salt are still cleared inside
+      // updateUserAuth — they re-fill via the rewrap call.
       await updateUserAuth(userId, {
         srpSalt: data.newSrpSalt,
         srpVerifier: data.newSrpVerifier,
@@ -155,6 +158,7 @@ export async function POST(request: Request) {
         recoveryKeyHash: data.newRecoveryKeyHash,
         recoveryEncryptedData: data.newRecoveryEncryptedData,
         clearTotp: true,
+        preserveRecoveryEmailRow: true,
       });
 
       // Create session
