@@ -2449,6 +2449,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 if (!contextMenu) return;
                 const fileId = contextMenu.fileId!;
                 setContextMenu(null);
+                setSelected((prev) => {
+                  if (!prev.has(fileId)) return prev;
+                  const next = new Set(prev);
+                  next.delete(fileId);
+                  return next;
+                });
                 await fileOps.restoreItem(fileId);
               }}
               className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-text-secondary hover:bg-bg-cell-hover transition-colors cursor-pointer"
@@ -2568,6 +2574,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
                 if (!contextMenu) return;
                 const fileId = contextMenu.fileId!;
                 setContextMenu(null);
+                setSelected((prev) => {
+                  if (!prev.has(fileId)) return prev;
+                  const next = new Set(prev);
+                  next.delete(fileId);
+                  return next;
+                });
                 await fileOps.leaveShare(fileId);
               }}
               className="w-full flex items-center gap-2.5 px-3 h-[44px] md:h-[30px] text-[14px] md:text-[12px] text-accent-red hover:bg-bg-cell-hover transition-colors cursor-pointer"
@@ -2578,7 +2590,14 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
             <button
               onClick={() => {
                 if (contextMenu) {
-                  fileOps.deleteItem(contextMenu.fileId!);
+                  const fileId = contextMenu.fileId!;
+                  setSelected((prev) => {
+                    if (!prev.has(fileId)) return prev;
+                    const next = new Set(prev);
+                    next.delete(fileId);
+                    return next;
+                  });
+                  fileOps.deleteItem(fileId);
                   setContextMenu(null);
                 }
               }}
