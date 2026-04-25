@@ -8,6 +8,7 @@ import DashboardCircleIcon from "@hugeicons/core-free-icons/DashboardCircleIcon"
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import SecurityLockIcon from "@hugeicons/core-free-icons/SecurityLockIcon";
 import MegaphoneIcon01 from "@hugeicons/core-free-icons/Megaphone01Icon";
+import News01Icon from "@hugeicons/core-free-icons/News01Icon";
 import Flag03Icon from "@hugeicons/core-free-icons/Flag03Icon";
 import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
 import ShieldUserIcon from "@hugeicons/core-free-icons/ShieldUserIcon";
@@ -184,6 +185,7 @@ const navItems = [
   { icon: ShieldUserIcon, label: "Forensic", href: "/admin/forensic", exact: false },
   { icon: CourtLawIcon, label: "Legal process", href: "/admin/le-requests", exact: false },
   { icon: MegaphoneIcon01, label: "Announcements", href: "/admin/announcements", exact: false },
+  { icon: News01Icon, label: "Changelog", href: "/admin/changelog", exact: false },
   { icon: Flag03Icon, label: "Feature flags", href: "/admin/flags", exact: false },
   { icon: SecurityLockIcon, label: "Audit log", href: "/admin/audit", exact: false },
 ];

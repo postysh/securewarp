@@ -903,6 +903,29 @@ CREATE INDEX IF NOT EXISTS le_requests_status_idx
   ON law_enforcement_requests (status, received_at DESC);
 
 ALTER TABLE law_enforcement_requests ENABLE ROW LEVEL SECURITY;
+
+-- Public changelog entries. Admin-authored, rendered on /changelog
+-- and listed in /admin/changelog. Drafts have `published_at IS NULL`
+-- and are not returned by the public endpoint. `category` controls
+-- the badge colour on the public page (matching the marketing
+-- design tokens). Plain-text body — same convention as
+-- announcements; rich formatting is intentionally out of scope.
+CREATE TABLE IF NOT EXISTS changelog_entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_by_email text,
+  title text NOT NULL CHECK (char_length(title) BETWEEN 1 AND 140),
+  body text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 8000),
+  category text NOT NULL CHECK (category IN ('feature','improvement','fix','security')),
+  published_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS changelog_published_idx
+  ON changelog_entries (published_at DESC NULLS LAST);
+
+ALTER TABLE changelog_entries ENABLE ROW LEVEL SECURITY;
 ```
 
 ### Development

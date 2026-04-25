@@ -513,7 +513,7 @@ export function MockupFooter() {
       links: [
         { label: "Features", href: "/features" },
         { label: "Pricing", href: "/pricing" },
-        { label: "Changelog", href: "#", soon: true },
+        { label: "Changelog", href: "/changelog" },
         { label: "Roadmap", href: "#", soon: true },
       ],
     },

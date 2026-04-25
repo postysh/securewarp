@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
@@ -8,6 +9,7 @@ import FolderShared01Icon from "@hugeicons/core-free-icons/FolderShared01Icon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import CheckmarkCircle01Icon from "@hugeicons/core-free-icons/CheckmarkCircle01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import News01Icon from "@hugeicons/core-free-icons/News01Icon";
 import { supabaseClient } from "@/lib/db/supabase-client";
 import { useUserKeys } from "@/hooks/use-user-keys";
 
@@ -45,6 +47,8 @@ function typeIcon(type: string) {
       return Cancel01Icon;
     case "permission_changed":
       return UserGroupIcon;
+    case "changelog_published":
+      return News01Icon;
     default:
       return CheckmarkCircle01Icon;
   }
@@ -60,6 +64,8 @@ function typeColor(type: string): string {
       return "var(--accent-red-primary)";
     case "permission_changed":
       return "var(--accent-yellow-primary)";
+    case "changelog_published":
+      return "var(--text-link)";
     default:
       return "var(--accent-green-primary)";
   }
@@ -73,6 +79,7 @@ export function NotificationBell() {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, right: 0 });
   const userKeys = useUserKeys();
+  const router = useRouter();
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -281,6 +288,10 @@ export function NotificationBell() {
                     key={n.id}
                     onClick={() => {
                       if (!n.read) markRead(n.id);
+                      if (n.type === "changelog_published") {
+                        setOpen(false);
+                        router.push("/changelog");
+                      }
                     }}
                     className={`w-full flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-bg-cell-hover cursor-pointer ${
                       !n.read ? "bg-accent-green/[0.03]" : ""

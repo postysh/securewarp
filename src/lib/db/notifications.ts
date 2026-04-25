@@ -29,7 +29,8 @@ export type NotificationType =
   | "permission_changed"
   | "collaborator_joined"
   | "collaborator_left"
-  | "workspace_transferred";
+  | "workspace_transferred"
+  | "changelog_published";
 
 export interface NotificationRow {
   id: string;
@@ -72,6 +73,56 @@ export async function createNotification(params: {
   });
   if (error) {
     console.error("Failed to create notification:", error.message);
+  }
+}
+
+/**
+ * Fan-out a "new changelog entry" notification to every active
+ * (non-suspended) user — including the admin who published it
+ * (they're a user too, and seeing the row is useful confirmation
+ * that the publish landed). Honours
+ * `notification_prefs.changelog_published === false` as opt-out
+ * (matches the existing per-type-key convention in createNotification).
+ *
+ * Inserts run in batches of 1k rows so a large user base doesn't blow
+ * past Supabase's payload limit. Errors are logged and swallowed —
+ * a publish should not 500 because the broadcast hit a transient
+ * insert error; the changelog page itself is the source of truth.
+ */
+export async function broadcastChangelogPublished(params: {
+  title: string;
+}): Promise<void> {
+  const { data: users, error: usersErr } = await supabase
+    .from("users")
+    .select("id, notification_prefs")
+    .is("suspended_at", null);
+  if (usersErr || !users) {
+    console.error("changelog broadcast: load users failed", usersErr?.message);
+    return;
+  }
+
+  const recipients = users.filter((u) => {
+    const prefs = (u.notification_prefs as Record<string, boolean> | null) ?? {};
+    return prefs.changelog_published !== false;
+  });
+  if (recipients.length === 0) return;
+
+  const rows = recipients.map((u) => ({
+    user_id: u.id,
+    type: "changelog_published" as const,
+    title: "What's new on SecureWarp",
+    description: params.title,
+    file_id: null,
+    actor_user_id: null,
+  }));
+
+  const BATCH = 1000;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const slice = rows.slice(i, i + BATCH);
+    const { error } = await supabase.from("notifications").insert(slice);
+    if (error) {
+      console.error("changelog broadcast: insert batch failed", error.message);
+    }
   }
 }
 
