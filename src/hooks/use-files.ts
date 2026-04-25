@@ -33,6 +33,7 @@ import {
   openDownloadSink,
   DownloadCancelled,
   BrowserCannotStreamLargeDownload,
+  DownloadCancelledByBrowser,
 } from "@/lib/net/download-sink";
 import { createPreviewCache } from "@/lib/cache/preview-cache";
 import {
@@ -2064,7 +2065,7 @@ export function useFiles(keys: {
       // folder, or a stale row), we'd otherwise open the FSA picker /
       // inject the SW iframe and save a 0-byte file with the
       // folder's name. Bail with a clean error before any of that.
-      if (data.noContent || !data.chunks || !Array.isArray(data.chunks)) {
+      if (data.noContent || !data.chunks || !Array.isArray(data.chunks) || data.chunks.length === 0) {
         setState((s) => ({
           ...s,
           downloadQueue: s.downloadQueue.map((r) =>
@@ -2208,16 +2209,33 @@ export function useFiles(keys: {
         }));
       }, 15_000);
     } catch (err) {
-      console.error("Download error:", err);
-      setState((s) => ({
-        ...s,
-        error: "Download failed",
-        downloadQueue: s.downloadQueue.map((r) =>
-          r.id === queueId
-            ? { ...r, status: "error", error: "Download failed" }
-            : r,
-        ),
-      }));
+      // Browser-side cancel (user cancel in the download tray, disk
+      // full, tab navigated away mid-flight) is a distinct failure
+      // mode from "the network died." Surface it as a calm
+      // "Cancelled" so the user doesn't see a scary "Download failed"
+      // for an action they took deliberately. Don't set state.error
+      // (the global toast) for this case either.
+      if (err instanceof DownloadCancelledByBrowser) {
+        setState((s) => ({
+          ...s,
+          downloadQueue: s.downloadQueue.map((r) =>
+            r.id === queueId
+              ? { ...r, status: "error", error: "Download cancelled" }
+              : r,
+          ),
+        }));
+      } else {
+        console.error("Download error:", err);
+        setState((s) => ({
+          ...s,
+          error: "Download failed",
+          downloadQueue: s.downloadQueue.map((r) =>
+            r.id === queueId
+              ? { ...r, status: "error", error: "Download failed" }
+              : r,
+          ),
+        }));
+      }
     } finally {
       if (sessionKey) sessionKey.fill(0);
     }

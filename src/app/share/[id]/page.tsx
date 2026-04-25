@@ -40,6 +40,7 @@ import {
   openDownloadSink,
   DownloadCancelled,
   BrowserCannotStreamLargeDownload,
+  DownloadCancelledByBrowser,
   prewarmDownloadSw,
 } from "@/lib/net/download-sink";
 import { safeMimeForDownload } from "@/lib/mime-safety";
@@ -678,6 +679,9 @@ export default function SharePage({ params }: { params: Promise<{ id: string }> 
       }
       if (err instanceof DownloadCancelled) {
         // User dismissed the FSA save picker — silent drop.
+      } else if (err instanceof DownloadCancelledByBrowser) {
+        // User cancelled the download in the browser's tray. Silent
+        // drop; progress UI is reset in the finally block below.
       } else if (err instanceof BrowserCannotStreamLargeDownload) {
         // Surface the message somewhere visible. The share page
         // doesn't have a toast surface; fall back to alert() so the

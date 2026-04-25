@@ -53,6 +53,22 @@ export class DownloadCancelled extends Error {
  * "this browser can't download files this large — use Chrome" error
  * instead of fetching gigabytes only to fail at the end.
  */
+/**
+ * Thrown when the browser cancels an in-flight SW download (the user
+ * hit cancel in the download tray, the disk filled, the tab was
+ * closed, etc.). The SW dispatches a `cancel` event on the response
+ * stream which we forward to the page via the message channel; the
+ * sink's `write` and `close` then throw this so the orchestrator
+ * stops feeding chunks AND knows to mark the queue row "cancelled"
+ * rather than the previous (incorrect) "done".
+ */
+export class DownloadCancelledByBrowser extends Error {
+  constructor(reason?: string) {
+    super(reason || "Download cancelled by the browser");
+    this.name = "DownloadCancelledByBrowser";
+  }
+}
+
 export class BrowserCannotStreamLargeDownload extends Error {
   readonly suggestedName: string;
   readonly sizeBytes: number;
@@ -291,6 +307,13 @@ async function makeSwSink(
   const drainWait = new Promise<void>((res) => {
     drainResolve = res;
   });
+  // Flipped when the SW posts `cancelled` (browser cancel — user
+  // cancel in the download tray, disk full, etc.). `write()` and
+  // `close()` consult this so the orchestrator surfaces an error
+  // instead of marking the queue row "done" while half a file sits
+  // on disk. We also resolve drainWait in the cancel branch so
+  // close() doesn't hang on its safety timeout.
+  let browserCancelled = false;
 
   const ackWait = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(
@@ -311,8 +334,12 @@ async function makeSwSink(
         if (drainResolve) drainResolve();
       } else if (t === "cancelled") {
         // Browser cancelled the download (user cancel, disk full).
-        // Nothing the page can do at this point; drainWait stays
-        // pending until the close()'s safety timeout fires.
+        // Latch the flag so the next write()/close() call throws
+        // DownloadCancelledByBrowser, AND resolve drainWait so
+        // close() doesn't sit on its 10s safety timeout when we
+        // already know the destination stream is gone.
+        browserCancelled = true;
+        if (drainResolve) drainResolve();
       }
     };
   });
@@ -346,6 +373,13 @@ async function makeSwSink(
   return {
     streaming: true,
     async write(chunk) {
+      if (browserCancelled) {
+        // Destination stream is gone — don't burn cycles enqueueing
+        // bytes the SW will silently drop. Zero our copy and bail
+        // so the orchestrator's catch path tears the rest down.
+        chunk.fill(0);
+        throw new DownloadCancelledByBrowser();
+      }
       // Transfer the backing buffer so the SW owns the bytes and the
       // page-side view is detached (length becomes 0). Equivalent to
       // .fill(0) for the zero-hygiene contract and saves a structured-
@@ -381,6 +415,16 @@ async function makeSwSink(
         }
         if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
       }, 10_000);
+
+      // If the browser cancelled the destination stream while we
+      // were writing (or even after the for-loop finished but before
+      // close() ran), drainWait may have resolved cleanly and the
+      // SW may have acked drain on a dead stream. Throw here so the
+      // orchestrator marks the queue row as cancelled instead of
+      // claiming a partial file is "done."
+      if (browserCancelled) {
+        throw new DownloadCancelledByBrowser();
+      }
     },
     async abort() {
       if (closed) return;
