@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -15,8 +15,21 @@ import { BrandMark } from "@/components/brand-mark";
  * success/expired feedback. The recovery token (the OTHER token in
  * the email) lives in the email's URL fragment for /recover —
  * never sent here, never stored on this page.
+ *
+ * Page-level export wraps the inner component in `<Suspense>`
+ * because `useSearchParams()` triggers a client-side bailout
+ * during prerender; without a boundary Next refuses to
+ * statically render the route at all.
  */
 export default function RecoveryEmailConfirmPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-bg-side" />}>
+      <ConfirmInner />
+    </Suspense>
+  );
+}
+
+function ConfirmInner() {
   const params = useSearchParams();
   const ct = params?.get("ct") ?? "";
   const [state, setState] = useState<"loading" | "ok" | "fail">("loading");

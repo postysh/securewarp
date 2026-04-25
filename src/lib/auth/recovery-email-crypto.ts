@@ -168,7 +168,19 @@ export function cleanAndValidateMnemonic(raw: string): string {
     .normalize("NFKC")
     // Zero-width joiners + bidi marks can ride along on copy/paste
     // from rich text and are invisible to the user. Strip them.
-    .replace(/[​-‏‪-‮⁠-⁯﻿]/g, "")
+    // Built from a `new RegExp(...)` so the literal bidi
+    // characters never appear in source — semgrep's
+    // bidi-injection rule (rightly) flags any file that contains
+    // them, and an audit-grade source file should be reviewable
+    // without a hex dump. Covers U+200B–U+200F, U+202A–U+202E,
+    // U+2060–U+206F, and U+FEFF.
+    .replace(
+      new RegExp(
+        "[\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u206f\\ufeff]",
+        "g"
+      ),
+      ""
+    )
     // Numbered list prefixes ("1. ", "12. ").
     .replace(/\d+\.\s*/g, "")
     // Common separators users substitute for spaces.

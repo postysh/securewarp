@@ -68,7 +68,11 @@ describe("recovery-email wrap", () => {
 
   it("cleanAndValidateMnemonic strips numbered lines, NBSP, and ZWSP", () => {
     const messy =
-      "1. abandon 2. abandon​ 3. abandon, 4. abandon; 5. abandon | 6. abandon\n" +
+      // Built with explicit \u00a0 (NBSP) and \u200b (ZWSP) escapes
+      // so the source file stays free of literal invisible
+      // characters (semgrep's generic.unicode.security.bidi rule
+      // blocks them).
+      `1. abandon\u00a02. abandon\u200b 3. abandon, 4. abandon; 5. abandon | 6. abandon\n` +
       "7. abandon 8. abandon 9. abandon 10. abandon 11. abandon 12. abandon\n" +
       "13. abandon 14. abandon 15. abandon 16. abandon 17. abandon 18. abandon\n" +
       "19. abandon 20. abandon 21. abandon 22. abandon 23. abandon 24. art";
