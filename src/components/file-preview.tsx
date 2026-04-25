@@ -68,8 +68,20 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
   const [zoom, setZoom] = useState(1);
   const blobUrlRef = useRef<string | null>(null);
   const imgContainerRef = useRef<HTMLDivElement>(null);
+  // Generation counter — bumped every time we start a new load OR
+  // tear one down via cleanup(). Each loadPreview captures its own
+  // gen at start; any state setter or progress callback fired after
+  // the gen advances is silently dropped. Without this, a stale
+  // load that resolved on a different file (close X, open Y mid-
+  // decrypt of X) would still call setPreview/setTextContent on the
+  // current view, AND the % handed to setDecryptProgress would be
+  // for a file the user no longer has open — that was the source of
+  // the "% goes all over the place" report on reopen.
+  const loadGenRef = useRef(0);
 
   const cleanup = useCallback(() => {
+    // Bump first so any in-flight load's setters become no-ops.
+    loadGenRef.current++;
     if (blobUrlRef.current) {
       URL.revokeObjectURL(blobUrlRef.current);
       blobUrlRef.current = null;
@@ -78,14 +90,25 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
     setTextContent(null);
     setError(null);
     setZoom(1);
+    // Reset loading + progress so the SVG ring unmounts cleanly on
+    // close. CSS transitions on stroke-dasharray would otherwise
+    // animate backwards from the last % to the new one when the
+    // user reopens, which is the visible "ring goes all over the
+    // place" symptom.
+    setLoading(false);
+    setDecryptProgress(null);
   }, []);
 
   const loadPreview = useCallback(
     async (id: string) => {
       cleanup();
+      const myGen = loadGenRef.current;
       setLoading(true);
       setDecryptProgress(null);
-      const result = await fileOps.previewFile(id, (pct) => setDecryptProgress(pct));
+      const result = await fileOps.previewFile(id, (pct) => {
+        if (loadGenRef.current === myGen) setDecryptProgress(pct);
+      });
+      if (loadGenRef.current !== myGen) return;
       setLoading(false);
       setDecryptProgress(null);
       if (!result.ok) {
@@ -98,10 +121,12 @@ export function FilePreview({ fileId, fileIds, onClose, onNavigate }: FilePrevie
       if (isText(result.type)) {
         try {
           const res = await fetch(result.blobUrl);
+          if (loadGenRef.current !== myGen) return;
           const text = await res.text();
+          if (loadGenRef.current !== myGen) return;
           setTextContent(text.slice(0, 500_000));
         } catch {
-          setTextContent("[Could not read file]");
+          if (loadGenRef.current === myGen) setTextContent("[Could not read file]");
         }
       }
     },
