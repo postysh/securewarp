@@ -7,6 +7,28 @@ import { channelForUser, channelForWorkspace } from "@/lib/realtime/channels";
 import { logError } from "@/lib/log";
 
 /**
+ * Hard ceiling per loader. Workers' hang detector kills the whole
+ * invocation around 30s — capping each loader well below that means
+ * one slow leg degrades just that slot (returns its empty fallback)
+ * instead of taking the entire /drive boot down with it. CF
+ * observability was showing recurring `code had hung` errors here
+ * before this guard.
+ */
+const LOADER_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`boot.timeout:${label} after ${LOADER_TIMEOUT_MS}ms`)),
+        LOADER_TIMEOUT_MS,
+      ),
+    ),
+  ]);
+}
+
+/**
  * Shell-bootstrap aggregator. Opening /drive used to fire a wave of
  * independent fetches on mount — profile, usage, billing-ish entitlements,
  * pins, labels, workspaces, realtime tokens — each its own round-trip,
@@ -44,31 +66,31 @@ export async function GET() {
       workspaces,
       me,
     ] = await Promise.all([
-      loadProfile(userId).catch((e) => {
+      withTimeout(loadProfile(userId), "profile").catch((e) => {
         logError("boot.profile", e);
         return null;
       }),
-      getEntitlements(userId).catch((e) => {
+      withTimeout(getEntitlements(userId), "entitlements").catch((e) => {
         logError("boot.entitlements", e);
         return null;
       }),
-      loadPins(userId).catch((e) => {
+      withTimeout(loadPins(userId), "pins").catch((e) => {
         logError("boot.pins", e);
         return [];
       }),
-      loadLabels(userId).catch((e) => {
+      withTimeout(loadLabels(userId), "labels").catch((e) => {
         logError("boot.labels", e);
         return [];
       }),
-      loadUsage(userId).catch((e) => {
+      withTimeout(loadUsage(userId), "usage").catch((e) => {
         logError("boot.usage", e);
         return null;
       }),
-      loadWorkspaces(userId).catch((e) => {
+      withTimeout(loadWorkspaces(userId), "workspaces").catch((e) => {
         logError("boot.workspaces", e);
         return [];
       }),
-      loadTotpFlag(userId).catch(() => false),
+      withTimeout(loadTotpFlag(userId), "totp").catch(() => false),
     ]);
 
     // Workspace channels depend on the workspaces list — mint them

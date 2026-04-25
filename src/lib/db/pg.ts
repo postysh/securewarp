@@ -69,6 +69,17 @@ function getClient(): Sql | null {
     // recommend this exact setting for PgBouncer/Hyperdrive transaction
     // pooling.
     prepare: false,
+    // Server-side ceiling per query. Belt-and-braces with the
+    // per-loader Promise.race timeout in /api/boot/route.ts — that
+    // one stops the Worker from waiting; this one stops Postgres
+    // from doing wasted work after the Worker has already moved on.
+    // 15s sits below CF's ~30s hang detector and well above any
+    // healthy query (boot's heaviest leg, the per-owner files
+    // SUM/COUNT, runs in tens of ms in steady state). Sent in the
+    // startup packet so transaction-mode pooling can't strand it.
+    connection: {
+      statement_timeout: 15000,
+    },
   });
   return _client;
 }
