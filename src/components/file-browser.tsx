@@ -728,16 +728,19 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
     Record<string, string>
   >({});
   // Realtime channel names come from /api/boot if available
-  // (shell-bootstrap path). If the bootstrap hasn't landed yet, fall
+  // (shell-bootstrap path). If the bootstrap hasn't landed yet, or
+  // its workspaces loader failed (workspaceChannels === null), fall
   // back to /api/realtime/tokens. Either way the data shape is
   // identical. Runs when `keys` lands or when workspaces change.
   const boot = useBoot();
   useEffect(() => {
     if (!keys) return;
     // Seed from boot synchronously when available — no network call.
-    if (boot) {
+    // Skip when the workspaces loader timed out (workspaceChannels
+    // is null) so we don't bind to an empty channel set.
+    if (boot && boot.realtime.workspaceChannels) {
       const map: Record<string, string> = {};
-      for (const w of boot.realtime.workspaceChannels ?? []) {
+      for (const w of boot.realtime.workspaceChannels) {
         map[w.workspaceId] = w.channel;
       }
       setUserChannel(boot.realtime.userChannel);

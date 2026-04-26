@@ -72,7 +72,10 @@ export interface BootEntitlements {
 
 export interface BootRealtime {
   userChannel: string;
-  workspaceChannels: { workspaceId: string; channel: string }[];
+  // `null` when the workspaces loader failed — consumers fall back
+  // to /api/realtime/tokens. `[]` means the user has no workspace
+  // memberships yet (legitimate state).
+  workspaceChannels: { workspaceId: string; channel: string }[] | null;
 }
 
 export interface BootPayload {
@@ -82,11 +85,12 @@ export interface BootPayload {
   // user genuinely has none). Consumers MUST fall back to the
   // dedicated endpoint on null — overwriting local state with a
   // failed loader's "empty" value caused the sidebar's PINNED +
-  // LABELS sections to flicker and disappear in production.
+  // LABELS sections (and the workspace switcher) to flicker and
+  // disappear in production.
   pins: BootPin[] | null;
   labels: BootLabel[] | null;
   usage: BootUsage | null;
-  workspaces: BootWorkspace[];
+  workspaces: BootWorkspace[] | null;
   realtime: BootRealtime;
 }
 

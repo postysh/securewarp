@@ -90,30 +90,43 @@ export async function GET() {
         logError("boot.usage", e);
         return null;
       }),
+      // `null` on failure (NOT `[]`) so the client can distinguish
+      // "loader timed out" from "user has no extra workspaces" and
+      // fall back to /api/workspaces. Returning [] caused workspace-
+      // switcher to clobber its already-populated list a few seconds
+      // after login.
       withTimeout(loadWorkspaces(userId), "workspaces").catch((e) => {
         logError("boot.workspaces", e);
-        return [];
+        return null;
       }),
       withTimeout(loadTotpFlag(userId), "totp").catch(() => false),
     ]);
 
     // Workspace channels depend on the workspaces list — mint them
     // here so the client doesn't need to re-hit /api/realtime/tokens
-    // right after parsing the boot response.
+    // right after parsing the boot response. When the workspaces
+    // loader failed (workspaces === null), surface that to the
+    // client by passing null through for both fields so consumers
+    // fall back to the dedicated endpoints instead of binding to an
+    // empty channel set.
     const userChannel = channelForUser(userId);
-    const workspaceChannels = workspaces.map((w) => ({
-      workspaceId: w.id,
-      channel: channelForWorkspace(w.id),
-    }));
+    const workspaceChannels = workspaces
+      ? workspaces.map((w) => ({
+          workspaceId: w.id,
+          channel: channelForWorkspace(w.id),
+        }))
+      : null;
 
     // Finish the workspace rows with `lockedByTwoFactor` now that we
     // know the caller's TOTP state — same field /api/workspaces
     // returns, computed here instead of a second join.
     const hasTotp = me;
-    const workspacesWithLocks = workspaces.map((w) => ({
-      ...w,
-      lockedByTwoFactor: w.require2fa && !hasTotp,
-    }));
+    const workspacesWithLocks = workspaces
+      ? workspaces.map((w) => ({
+          ...w,
+          lockedByTwoFactor: w.require2fa && !hasTotp,
+        }))
+      : null;
 
     return NextResponse.json({
       profile,

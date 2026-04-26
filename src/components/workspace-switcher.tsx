@@ -121,12 +121,13 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   // Seed from /api/boot if already loaded; otherwise kick a full
   // refresh on mount. Realtime events + focus-refresh still run
   // the refresh callback for subsequent updates.
+  //
+  // `boot.workspaces` is `null` (not `[]`) when the loader timed
+  // out — fall back to /api/workspaces in that case so we don't
+  // overwrite an already-loaded list with the failure sentinel.
   const boot = useBoot();
   useEffect(() => {
-    if (boot) {
-      // Boot arrived — use its workspaces snapshot and skip the
-      // initial /api/workspaces call. The refreshWorkspaceList
-      // callback stays wired for later updates.
+    if (boot && boot.workspaces) {
       setWorkspaces(boot.workspaces as unknown as Workspace[]);
       return;
     }
