@@ -383,6 +383,12 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   // this component stays renderable on its own. The dedicated
   // endpoints are still used for refresh-after-mutation (pin toggle,
   // label add/rename/delete).
+  //
+  // `boot.pins`/`boot.labels` are `null` (not `[]`) when their slot
+  // in /api/boot timed out — we fall back to the dedicated endpoint
+  // in that case rather than overwriting state with the failure
+  // sentinel. Production was hitting `boot.timeout:pins` ~20×/week,
+  // which previously wiped both sections a few seconds after login.
   const boot = useBoot();
   useEffect(() => {
     const loadPins = () => {
@@ -395,14 +401,14 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
         if (d.labels) setLabels(d.labels);
       }).catch(() => {});
     };
-    if (boot) {
-      // Boot data in context — no initial fetch needed.
+    if (boot && boot.pins) {
       setRawPins(boot.pins.map((p) => ({ file_id: p.file_id, is_folder: p.is_folder })));
+    } else {
+      loadPins();
+    }
+    if (boot && boot.labels) {
       setLabels(boot.labels.map((l) => ({ id: l.id, name: l.name, color: l.color })));
     } else {
-      // Boot still in flight — load on our own so we don't block the
-      // sidebar from rendering pinned items.
-      loadPins();
       loadLabels();
     }
     // Refetch on pin/unpin (dispatched from the file browser's

@@ -78,8 +78,13 @@ export interface BootRealtime {
 export interface BootPayload {
   profile: BootProfile | null;
   entitlements: BootEntitlements | null;
-  pins: BootPin[];
-  labels: BootLabel[];
+  // `null` when the loader failed/timed out (distinct from `[]` =
+  // user genuinely has none). Consumers MUST fall back to the
+  // dedicated endpoint on null — overwriting local state with a
+  // failed loader's "empty" value caused the sidebar's PINNED +
+  // LABELS sections to flicker and disappear in production.
+  pins: BootPin[] | null;
+  labels: BootLabel[] | null;
   usage: BootUsage | null;
   workspaces: BootWorkspace[];
   realtime: BootRealtime;

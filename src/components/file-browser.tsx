@@ -805,8 +805,12 @@ export function FileBrowser({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boo
   // /api/pins. The context menu's "Pin/Unpin" label reads from this
   // set, so we need it populated before the user right-clicks —
   // boot path avoids the extra fetch on mount.
+  //
+  // `boot.pins` is `null` (not `[]`) when the boot loader timed out;
+  // fall back to /api/pins in that case so we don't clobber an
+  // already-loaded set with an empty one.
   useEffect(() => {
-    if (boot) {
+    if (boot && boot.pins) {
       setPinnedIds(new Set(boot.pins.map((p) => p.file_id)));
       return;
     }

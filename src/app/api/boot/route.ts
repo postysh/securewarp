@@ -74,13 +74,17 @@ export async function GET() {
         logError("boot.entitlements", e);
         return null;
       }),
+      // `null` on failure (NOT `[]`) so the client can distinguish
+      // "loader timed out" from "user has zero pins/labels" and fall
+      // back to /api/pins or /api/labels instead of clobbering its
+      // already-populated sidebar state.
       withTimeout(loadPins(userId), "pins").catch((e) => {
         logError("boot.pins", e);
-        return [];
+        return null;
       }),
       withTimeout(loadLabels(userId), "labels").catch((e) => {
         logError("boot.labels", e);
-        return [];
+        return null;
       }),
       withTimeout(loadUsage(userId), "usage").catch((e) => {
         logError("boot.usage", e);
