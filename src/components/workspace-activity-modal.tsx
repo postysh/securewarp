@@ -181,14 +181,14 @@ export function WorkspaceActivityPage({ workspaceId }: ActivityPageProps) {
   return (
     <div className="flex-1 flex flex-col overflow-y-auto px-3 md:px-5 pt-1 pb-4">
       {loading ? (
-        <div className="space-y-1.5">
-          {Array.from({ length: 6 }).map((_, i) => (
+        <div className="space-y-1.5 overflow-hidden">
+          {Array.from({ length: 20 }).map((_, i) => (
             <div key={i} className="flex items-center h-[56px] px-4 rounded-xl border border-border-tertiary">
-              <div className="skeleton w-8 h-8 rounded-lg mr-3" style={{ animationDelay: `${i * 0.15}s` }} />
+              <div className="skeleton w-8 h-8 rounded-lg mr-3" />
               <div className="flex-1">
-                <div className="skeleton h-3 rounded-md" style={{ width: `${140 + i * 20}px`, animationDelay: `${i * 0.15 + 0.05}s` }} />
+                <div className="skeleton h-3 w-40 rounded-md" />
               </div>
-              <div className="skeleton h-3 w-14 rounded-md ml-4" style={{ animationDelay: `${i * 0.15 + 0.1}s` }} />
+              <div className="skeleton h-3 w-14 rounded-md ml-4" />
             </div>
           ))}
         </div>
