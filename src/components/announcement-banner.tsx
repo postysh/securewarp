@@ -66,7 +66,7 @@ export function AnnouncementBanner() {
   const hasMultiple = total > 1;
 
   return (
-    <div className="shrink-0 p-1.5 border-b border-border-secondary bg-bg-main">
+    <div className="shrink-0 p-1.5 bg-bg-main">
       <div
         className="flex items-center gap-3 px-4 py-2.5 rounded-[10px]"
         style={{ background: styles.bg, border: `1px solid ${styles.border}` }}
