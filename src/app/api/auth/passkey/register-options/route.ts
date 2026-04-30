@@ -31,11 +31,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // 10 attempts per 5 min — matches the 2FA setup/disable cadence.
+    // Per-hour was too long a recovery window for someone iterating
+    // through enrollment (cancel-and-retry on the platform UI counts
+    // each attempt) and didn't add real protection over the shorter
+    // window: enrolling a passkey requires an authed session, so the
+    // realistic abuse case is "stolen session spamming enrollments",
+    // which 10/5min still blocks.
     if (
-      !(await checkRateLimit(`passkey-register:${session.userId}`, 10, 60 * 60 * 1000))
+      !(await checkRateLimit(
+        `passkey-register:${session.userId}`,
+        10,
+        5 * 60 * 1000,
+      ))
     ) {
       return NextResponse.json(
-        { error: "Too many enrollment attempts. Try again later." },
+        { error: "Too many enrollment attempts. Try again in a few minutes." },
         { status: 429 },
       );
     }
