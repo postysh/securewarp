@@ -954,6 +954,59 @@ CREATE INDEX IF NOT EXISTS users_recovery_email_idx
 CREATE INDEX IF NOT EXISTS users_recovery_confirm_token_idx
   ON users (recovery_email_confirm_token_hash)
   WHERE recovery_email_confirm_token_hash IS NOT NULL;
+
+-- WebAuthn / passkey credentials.
+-- Each row is one enrolled authenticator (platform or roaming) for a
+-- user. Login with a passkey skips both the SRP password step and the
+-- TOTP gate — the credential itself is multi-factor (device + biometric
+-- or PIN). The PRF extension returns a deterministic 32-byte secret per
+-- (credential, prf_salt) pair on every assertion; that secret is run
+-- through HKDF on the client and used to seal a per-credential copy of
+-- the user's encrypted_user_data blob (`wrapped_user_data`). The PRF
+-- output never leaves the browser — the server only stores the
+-- ciphertext + the salt. If the user later disables a passkey, only
+-- this row is removed; the password/recovery paths are unaffected.
+CREATE TABLE IF NOT EXISTS user_passkeys (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- WebAuthn credential id, base64url-encoded.
+  credential_id text NOT NULL UNIQUE,
+  -- COSE-encoded public key bytes, base64url-encoded.
+  public_key text NOT NULL,
+  -- Signature counter the authenticator reports. Bumped on every
+  -- successful assertion. A regression (new < stored) indicates a
+  -- cloned credential and MUST reject the assertion.
+  counter bigint NOT NULL DEFAULT 0,
+  -- Hints from the authenticator about how to talk to it next time
+  -- (`internal`, `usb`, `nfc`, `ble`, `hybrid`). Stored as text[] to
+  -- match the WebAuthn array type.
+  transports text[] NOT NULL DEFAULT '{}',
+  -- Per-credential PRF salt (32 bytes random, base64url-encoded).
+  -- Sent with every assertion options response so the authenticator
+  -- can re-derive the same PRF output. NEVER rotate — rotating the
+  -- salt invalidates the wrap and locks the user out of this passkey.
+  prf_salt text NOT NULL,
+  -- The user's encrypted_user_data blob, sealed under HKDF(PRF_output)
+  -- with XChaCha20-Poly1305. Server never sees the plaintext PRF
+  -- output or the unwrapped key material.
+  wrapped_user_data text NOT NULL,
+  wrapped_user_data_nonce text NOT NULL,
+  -- WebAuthn flags surfaced to the client so the UI can warn when a
+  -- credential is non-syncing (single device only) or single-device
+  -- but eligible to become multi-device later.
+  is_backup_eligible boolean NOT NULL DEFAULT false,
+  is_backup_state boolean NOT NULL DEFAULT false,
+  -- User-supplied label ("MacBook", "iPhone 15", "YubiKey"). Plaintext
+  -- on the server — no zero-knowledge cost: the user picked it.
+  nickname text NOT NULL CHECK (char_length(nickname) BETWEEN 1 AND 64),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_used_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS user_passkeys_user_id_idx
+  ON user_passkeys (user_id);
+
+ALTER TABLE user_passkeys ENABLE ROW LEVEL SECURITY;
 ```
 
 ### Development
