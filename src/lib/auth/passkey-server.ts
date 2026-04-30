@@ -8,6 +8,12 @@ import { SignJWT, jwtVerify } from "jose";
  * round-tripping the WebAuthn challenge as a signed JWT so we don't
  * need a server-side challenge table.
  *
+ * Note: passkey deletion intentionally has no last-factor lockout
+ * guard. The user's password + BIP39 recovery phrase paths can
+ * always re-derive their keys, so removing every enrolled passkey
+ * doesn't actually lock anyone out. The earlier guard was added on
+ * spec-review and removed once the threat model was clearer.
+ *
  * Why a signed challenge instead of a DB row:
  *   - Challenges are single-use, short-lived, and not user-bound on
  *     the discoverable-credentials login path. A JWT carries the

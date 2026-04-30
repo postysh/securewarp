@@ -388,15 +388,14 @@ email paths keep working independently.
     ones. Don't change the constant without versioning it; an
     info-string change orphans every existing passkey wrap.
 
-27. **Last-passkey deletion is server-guarded.** `DELETE
-    /api/auth/passkey/[id]` returns 409 when removing the row
-    would leave the user with no second factor on a 2FA-required
-    workspace (no other passkey AND no TOTP). The client must
-    surface the 409 as an actionable error — "enrol another
-    passkey or set up an authenticator app first". The user still
-    has the password + recovery phrase as fallback, so this isn't
-    a hard lockout, but silently dropping the last second factor
-    reads as a foot-gun.
+27. **Passkey deletion has no last-factor guard.** The password +
+    BIP39 recovery phrase paths can always re-derive the user's
+    keys, so removing every enrolled passkey doesn't lock anyone
+    out. `DELETE /api/auth/passkey/[id]` only enforces ownership
+    (the row must belong to the caller) — there's no minimum-
+    factor count to maintain. If a future workspace policy
+    requires two factors at the *workspace* level, gate access on
+    the workspace boundary, not on the user's passkey count.
 
 28. **Passkey login never refreshes the lock-cache.** `lock-cache.ts`
     is sealed under `unlockCacheKey` derived from the password's

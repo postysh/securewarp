@@ -71,7 +71,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Invalid id" }, { status: 400 });
     }
 
-    // Confirm the row belongs to this user before counting / deleting.
+    // Confirm the row belongs to this user before deleting. The
+    // password + BIP39 recovery phrase paths are unaffected by passkey
+    // removal — both routes can re-derive the user's keys from
+    // scratch — so there's no lockout to guard against here. Users
+    // can freely delete any passkey they enrolled.
     const { data: target } = await supabase
       .from("user_passkeys")
       .select("id, nickname")
@@ -80,36 +84,6 @@ export async function DELETE(
       .single();
     if (!target) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-
-    // Lockout guard: if this is the user's only passkey AND TOTP is
-    // not enrolled, refuse the delete. The user always has the
-    // password + recovery phrase as a fallback, so this isn't a
-    // hard lockout — but removing the last second factor without an
-    // explicit acknowledgement reads as a foot-gun.
-    const [{ count: passkeyCount }, { data: user }] = await Promise.all([
-      supabase
-        .from("user_passkeys")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", session.userId),
-      supabase
-        .from("users")
-        .select("totp_secret")
-        .eq("id", session.userId)
-        .single(),
-    ]);
-
-    const isLastPasskey = (passkeyCount ?? 0) <= 1;
-    const hasTotp = !!user?.totp_secret;
-    if (isLastPasskey && !hasTotp) {
-      return NextResponse.json(
-        {
-          error:
-            "This is your last second factor. Enrol another passkey or set up an authenticator app before removing it.",
-          code: "last_factor",
-        },
-        { status: 409 },
-      );
     }
 
     const { error: delErr } = await supabase

@@ -26,6 +26,7 @@ import { ConfirmDialog } from "./confirm-dialog";
 import { PlanBillingPanel } from "./plan-billing-panel";
 import { ActiveSessions } from "./active-sessions";
 import { RecoveryEmailCard } from "./recovery-email-card";
+import { PasskeysCard } from "./passkeys-card";
 import { clearLockCache } from "@/lib/auth/lock-cache";
 
 interface SettingsModalProps {
@@ -554,6 +555,24 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                 <p className="text-[12px] text-accent-green">{totpStatus}</p>
               </div>
             )}
+
+            {/* Passkeys: WebAuthn / PRF-wrapped per-device sign-in.
+                Renders enrolled credentials, an "Add a passkey" button,
+                and the post-enrollment "keep TOTP / drop TOTP" prompt
+                when applicable. The "Turn TOTP off" branch routes back
+                to the existing /api/auth/2fa/disable flow rather than
+                a parallel passkey-attested disable — the user must
+                still enter their TOTP code (acceptable UX since they
+                just had their authenticator out for the passkey
+                enrollment). */}
+            <PasskeysCard
+              totpEnabled={totpEnabled}
+              onTotpDisableRequest={() => {
+                setTotpStatus(
+                  "Enter your authenticator code below to disable TOTP.",
+                );
+              }}
+            />
 
             <SettingRow label="Zero knowledge architecture" description="Your data is encrypted client side before it reaches our servers">
               <div className="flex items-center gap-2">

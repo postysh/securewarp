@@ -224,25 +224,14 @@ describe("DELETE /api/auth/passkey/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 409 when removing the user's last passkey with no TOTP", async () => {
+  it("deletes a passkey owned by the caller", async () => {
     mockSession = { userId: "u1", email: "e@x.com" };
-    let firstLookup = true;
-    tableHandlers["user_passkeys"] = () => {
-      if (firstLookup) {
-        firstLookup = false;
-        return { data: { id: validId, nickname: "Mac" }, error: null };
-      }
-      // Subsequent count() call.
-      return { data: null, error: null, count: 1 };
-    };
-    tableHandlers["users"] = () => ({
-      data: { totp_secret: null },
+    tableHandlers["user_passkeys"] = () => ({
+      data: { id: validId, nickname: "Mac" },
       error: null,
     });
     const { DELETE } = await import("./[id]/route");
     const res = await DELETE(deleteReq(), ctx());
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.code).toBe("last_factor");
+    expect(res.status).toBe(200);
   });
 });

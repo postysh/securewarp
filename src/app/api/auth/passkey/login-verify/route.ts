@@ -76,7 +76,7 @@ export async function POST(request: Request) {
     });
     if (!expectedChallenge) {
       return NextResponse.json(
-        { error: "Challenge expired. Restart sign-in." },
+        { error: "Challenge expired. Restart sign in." },
         { status: 400 },
       );
     }
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
         event: "auth.passkey.login.fail",
         detail: "credential_not_found",
       });
-      return NextResponse.json({ error: "Sign-in failed" }, { status: 401 });
+      return NextResponse.json({ error: "Sign in failed" }, { status: 401 });
     }
 
     const { rpID, expectedOrigin } = getRpConfig(request);
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
         detail: "assertion_invalid",
       });
       logError("passkey.login-verify.assertion", err);
-      return NextResponse.json({ error: "Sign-in failed" }, { status: 401 });
+      return NextResponse.json({ error: "Sign in failed" }, { status: 401 });
     }
 
     if (!verification.verified) {
@@ -132,7 +132,7 @@ export async function POST(request: Request) {
         actorUserId: row.user_id,
         detail: "verification_failed",
       });
-      return NextResponse.json({ error: "Sign-in failed" }, { status: 401 });
+      return NextResponse.json({ error: "Sign in failed" }, { status: 401 });
     }
 
     // Suspension check after verification (matches login/verify
@@ -145,7 +145,7 @@ export async function POST(request: Request) {
       .eq("id", row.user_id)
       .single();
     if (!user) {
-      return NextResponse.json({ error: "Sign-in failed" }, { status: 401 });
+      return NextResponse.json({ error: "Sign in failed" }, { status: 401 });
     }
     if (user.suspended_at) {
       auditEvent({
@@ -202,6 +202,6 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     logError("passkey.login-verify", err);
-    return NextResponse.json({ error: "Sign-in failed" }, { status: 500 });
+    return NextResponse.json({ error: "Sign in failed" }, { status: 500 });
   }
 }

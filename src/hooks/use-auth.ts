@@ -885,7 +885,7 @@ export function useAuth() {
       router.push("/drive");
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "Sign-in failed";
+        err instanceof Error ? err.message : "Sign in failed";
       setError(msg);
     }
   }

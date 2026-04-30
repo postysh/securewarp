@@ -147,31 +147,23 @@ export function unwrapUserData(
 }
 
 /**
- * Returns true when the browser supports WebAuthn AND the PRF
- * extension. Without PRF support we can't derive a stable wrap key,
- * so passkey enrollment isn't safe to offer. Callers should hide the
- * "Add a passkey" button when this returns false.
+ * Returns true when the browser exposes WebAuthn at all. We
+ * deliberately don't probe the PRF capability up front:
+ * `getClientCapabilities()` is inconsistent across browsers (Chrome
+ * 133+ exposes it but doesn't always report `extension:prf`; Safari
+ * exposes it differently again), and the only reliable test is to
+ * actually run a ceremony and inspect `clientExtensionResults.prf`.
+ *
+ * Consequence: on a browser without PRF support the "Add a passkey"
+ * button stays visible, and the ceremony surfaces a clear error
+ * ("This authenticator doesn't support the PRF extension. Try a
+ * different device or password manager"). That's better UX than
+ * hiding the option entirely on browsers that probably do support
+ * it but report capabilities ambiguously.
  */
 export async function passkeyPrfSupported(): Promise<boolean> {
   if (typeof window === "undefined") return false;
-  if (!window.PublicKeyCredential) return false;
-  // getClientCapabilities is the explicit support probe, but it's
-  // recent (Chrome 133+, Safari 18+). Older browsers without it but
-  // with a platform authenticator + PRF support exist; treat the
-  // missing API as "unknown — try it" rather than a hard no.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cap = (window.PublicKeyCredential as any).getClientCapabilities;
-  if (typeof cap === "function") {
-    try {
-      const caps = await cap();
-      // The PRF capability is reported as `extension:prf`. Unsupported
-      // browsers omit it from the result map entirely.
-      return Boolean(caps && caps["extension:prf"]);
-    } catch {
-      return false;
-    }
-  }
-  return true;
+  return !!window.PublicKeyCredential;
 }
 
 interface EnrollPasskeyParams {
@@ -212,11 +204,20 @@ export async function enrollPasskey(params: EnrollPasskeyParams): Promise<void> 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     extensions: {
       ...(options.extensions ?? {}),
-      prf: { eval: { first: PASSKEY_PRF_SALT_BASE64URL } },
+      // PRF eval salt MUST be a BufferSource — the SDK only converts
+      // the standard fields (challenge, user.id, etc.) before calling
+      // navigator.credentials.get/create. A string here trips a
+      // TypeError inside the browser.
+      prf: { eval: { first: PASSKEY_PRF_SALT_BYTES } },
     } as any,
   };
 
-  const attestation = await startRegistration({ optionsJSON: optionsWithPrf });
+  let attestation;
+  try {
+    attestation = await startRegistration({ optionsJSON: optionsWithPrf });
+  } catch (err) {
+    throw new Error(friendlyWebAuthnError(err, "enroll"));
+  }
 
   const prfOutput = extractPrfOutput(attestation);
   if (!prfOutput) {
@@ -273,7 +274,7 @@ export async function loginWithPasskey(): Promise<PasskeyLoginResult> {
     body: "{}",
   });
   if (!optionsRes.ok) {
-    throw new Error("Failed to start sign-in");
+    throw new Error("Failed to start sign in");
   }
   const { options, challengeToken } = (await optionsRes.json()) as {
     options: PublicKeyCredentialRequestOptionsJSON;
@@ -285,11 +286,20 @@ export async function loginWithPasskey(): Promise<PasskeyLoginResult> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     extensions: {
       ...(options.extensions ?? {}),
-      prf: { eval: { first: PASSKEY_PRF_SALT_BASE64URL } },
+      // PRF eval salt MUST be a BufferSource — the SDK only converts
+      // the standard fields (challenge, user.id, etc.) before calling
+      // navigator.credentials.get/create. A string here trips a
+      // TypeError inside the browser.
+      prf: { eval: { first: PASSKEY_PRF_SALT_BYTES } },
     } as any,
   };
 
-  const assertion = await startAuthentication({ optionsJSON: optionsWithPrf });
+  let assertion;
+  try {
+    assertion = await startAuthentication({ optionsJSON: optionsWithPrf });
+  } catch (err) {
+    throw new Error(friendlyWebAuthnError(err, "signin"));
+  }
 
   const prfOutput = extractPrfOutput(assertion);
   if (!prfOutput) {
@@ -311,7 +321,7 @@ export async function loginWithPasskey(): Promise<PasskeyLoginResult> {
       const body = (await verifyRes.json().catch(() => ({}))) as {
         error?: string;
       };
-      throw new Error(body.error ?? "Sign-in failed");
+      throw new Error(body.error ?? "Sign in failed");
     }
     const data = (await verifyRes.json()) as {
       wrappedUserData: string;
@@ -340,10 +350,61 @@ export async function loginWithPasskey(): Promise<PasskeyLoginResult> {
 }
 
 /**
+ * Convert a WebAuthn-thrown error into a user-friendly message. The
+ * browser's spec-mandated `NotAllowedError` is the same string for
+ * "user cancelled", "no credentials match", "user-verification
+ * timed out", and a few other states — there's no way to tell them
+ * apart programmatically. Lump them under a single readable message
+ * and let the user retry.
+ */
+function friendlyWebAuthnError(
+  err: unknown,
+  ctx: "enroll" | "signin",
+): string {
+  const name =
+    err && typeof err === "object" && "name" in err
+      ? String((err as { name?: unknown }).name)
+      : "";
+  if (name === "NotAllowedError") {
+    return ctx === "signin"
+      ? "Sign in cancelled or no passkey available on this device."
+      : "Passkey enrollment was cancelled or blocked by your device.";
+  }
+  if (name === "InvalidStateError") {
+    return "This passkey is already registered on this account.";
+  }
+  if (name === "SecurityError") {
+    return "Your browser blocked the passkey request. Try again over HTTPS.";
+  }
+  if (name === "AbortError") {
+    return ctx === "signin"
+      ? "Sign in was cancelled."
+      : "Enrollment was cancelled.";
+  }
+  // NotSupportedError typically means the requested credential type
+  // (resident keys, PRF extension, etc.) isn't available on this
+  // device. The user's only path forward is a different device.
+  if (name === "NotSupportedError") {
+    return "This device or browser doesn't support the required passkey features. Try a different device.";
+  }
+  // Generic fallback. Keep it short and avoid leaking the internal
+  // error message — many of those are confusing or expose UA details
+  // we don't need on screen.
+  return ctx === "signin"
+    ? "Couldn't sign in with passkey. Use your password to continue."
+    : "Couldn't enroll passkey. Try again.";
+}
+
+/**
  * Pull the PRF output from a WebAuthn response's clientExtensionResults.
  * Returns a fresh Uint8Array the caller owns (and must zero). Returns
  * null when the authenticator didn't surface a PRF result — usually
  * means the extension isn't supported on this device.
+ *
+ * The shape varies by browser SDK version: @simplewebauthn/browser v13
+ * passes `getClientExtensionResults()` through unchanged, so PRF
+ * results arrive as raw `ArrayBuffer`. Older docs/examples assume the
+ * library serializes to base64url; we handle both shapes defensively.
  */
 function extractPrfOutput(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -351,7 +412,9 @@ function extractPrfOutput(
 ): Uint8Array | null {
   const ext = response?.clientExtensionResults;
   const first = ext?.prf?.results?.first;
-  if (typeof first !== "string") return null;
-  return fromBase64Url(first);
+  if (first instanceof ArrayBuffer) return new Uint8Array(first);
+  if (first instanceof Uint8Array) return new Uint8Array(first);
+  if (typeof first === "string") return fromBase64Url(first);
+  return null;
 }
 

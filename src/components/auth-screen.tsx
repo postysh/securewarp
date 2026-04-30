@@ -24,6 +24,7 @@ import Key02Icon from "@hugeicons/core-free-icons/Key02Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import { useTheme } from "./theme-provider";
 import { useAuth } from "@/hooks/use-auth";
+import { passkeyPrfSupported } from "@/lib/auth/passkey-client";
 import { RecoveryKeyModal } from "./recovery-key-modal";
 
 type Mode = "login" | "signup";
@@ -85,6 +86,17 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
   // normal login/signup form.
   const [lockCache, setLockCache] = useState<LockCacheMeta | null>(null);
   const [unlockPassword, setUnlockPassword] = useState("");
+
+  // Probe WebAuthn / PRF availability so we only render the
+  // "Sign in with passkey" button on browsers that can complete the
+  // ceremony. `null` = still probing; we render nothing in that
+  // window so the button doesn't pop in late.
+  const [passkeySupported, setPasskeySupported] = useState<boolean | null>(
+    null,
+  );
+  useEffect(() => {
+    void passkeyPrfSupported().then(setPasskeySupported);
+  }, []);
 
   // Public feature-flag snapshot. `null` = still loading (don't render
   // the signup form yet or we'd briefly show it just to replace it
@@ -371,6 +383,32 @@ export function AuthScreen({ mode = "login" }: { mode?: Mode }) {
               <div className="mb-4 p-3 rounded-lg bg-accent-red/10 border border-accent-red/20 text-[12px] text-accent-red">
                 {auth.error}
               </div>
+            )}
+
+            {/* Passkey sign-in shortcut. Only on the login + unlock
+                paths (signup wouldn't have a credential yet). The
+                browser's discoverable-credentials picker handles
+                identifying which user is signing in — no email entry
+                needed. Hidden when WebAuthn/PRF isn't available. */}
+            {mode === "login" && passkeySupported && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void auth.loginWithPasskey()}
+                  disabled={auth.loading}
+                  className="w-full mb-4 flex items-center justify-center gap-2 h-[40px] rounded-[10px] border border-border-secondary bg-bg-field text-[13px] font-medium text-text-primary hover:bg-bg-cell-hover transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <HugeiconsIcon icon={Key02Icon} size={16} />
+                  Sign in with passkey
+                </button>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="flex-1 h-px bg-border-tertiary" />
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-text-disabled">
+                    or
+                  </span>
+                  <div className="flex-1 h-px bg-border-tertiary" />
+                </div>
+              </>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
