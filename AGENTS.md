@@ -358,6 +358,58 @@ the password alone — no SRP, no server round-trip.
     NOT add a `router.push` to /drive from unlock — it's a no-op
     when you're already there and hides the event wiring.
 
+## Passkey invariants (WebAuthn / PRF)
+
+A passkey login is a third unlock path alongside password+SRP and
+the lock-cache. It's additive: enrollment requires the user to
+already be unlocked, and the password / recovery-phrase / backup-
+email paths keep working independently.
+
+25. **The PRF output never leaves the browser.** It lives only in
+    `clientExtensionResults.prf.results.first` (already a
+    browser-only field), is HKDF-derived to a 32-byte wrap key,
+    and used to seal the user's plaintext private keys via
+    XChaCha20-Poly1305. Server only stores the ciphertext + nonce
+    + the non-secret PRF salt. If a code path would forward the
+    PRF output to the server, redesign — that breaks the
+    zero-knowledge invariant on the passkey path.
+
+26. **The PRF eval salt is a fixed application constant.** Defined
+    in `src/lib/auth/passkey-client.ts` as `sha256("securewarp-
+    passkey-prf-eval-v1")`. Per-credential salts would force a
+    two-pass WebAuthn dance (one assertion to identify the
+    credential, a second to derive its secret) — two biometric
+    prompts per login, terrible UX. The credential's own secret
+    already provides per-user uniqueness of the PRF output, so the
+    salt only scopes the derivation to "this app". The DB column
+    `user_passkeys.prf_salt` carries the constant for forward-
+    compat — if we ever move to per-credential salts, newly
+    enrolled rows can store a fresh value without breaking older
+    ones. Don't change the constant without versioning it; an
+    info-string change orphans every existing passkey wrap.
+
+27. **Last-passkey deletion is server-guarded.** `DELETE
+    /api/auth/passkey/[id]` returns 409 when removing the row
+    would leave the user with no second factor on a 2FA-required
+    workspace (no other passkey AND no TOTP). The client must
+    surface the 409 as an actionable error — "enrol another
+    passkey or set up an authenticator app first". The user still
+    has the password + recovery phrase as fallback, so this isn't
+    a hard lockout, but silently dropping the last second factor
+    reads as a foot-gun.
+
+28. **Passkey login never refreshes the lock-cache.** `lock-cache.ts`
+    is sealed under `unlockCacheKey` derived from the password's
+    Argon2id output. Passkey login has no access to the password,
+    so it can neither refresh the cache nor tear it down. The two
+    paths coexist: a returning user who password-logged-in once
+    keeps the cache for fast unlocks; a passkey-only user has no
+    cache and gets the AuthScreen "sign in with passkey" button on
+    every tab reopen. Don't try to seal a parallel cache under a
+    PRF-derived key — that creates a long-lived disk-attackable
+    artifact whose unlock requires the passkey, which is already
+    available for the same ceremony.
+
 ## Security hardening rules
 
 - **Email canonicalization.** Every auth boundary (register, login,

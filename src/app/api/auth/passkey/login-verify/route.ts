@@ -139,7 +139,9 @@ export async function POST(request: Request) {
     // ordering — don't expose account state to unauthenticated callers).
     const { data: user } = await supabase
       .from("users")
-      .select("id, email, suspended_at, suspended_reason")
+      .select(
+        "id, email, suspended_at, suspended_reason, public_encryption_key, public_kem_key",
+      )
       .eq("id", row.user_id)
       .single();
     if (!user) {
@@ -194,6 +196,9 @@ export async function POST(request: Request) {
       wrappedUserData: row.wrapped_user_data,
       wrappedUserDataNonce: row.wrapped_user_data_nonce,
       prfSalt: row.prf_salt,
+      email: user.email,
+      publicEncryptionKey: user.public_encryption_key,
+      publicKemKey: user.public_kem_key,
     });
   } catch (err) {
     logError("passkey.login-verify", err);

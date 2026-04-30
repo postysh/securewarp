@@ -26,6 +26,10 @@ import {
   readLockCacheMeta,
   unlockKeys,
 } from "@/lib/auth/lock-cache";
+import {
+  enrollPasskey as enrollPasskeyClient,
+  loginWithPasskey as loginWithPasskeyClient,
+} from "@/lib/auth/passkey-client";
 import { clearMetadataCache } from "@/lib/cache/metadata-cache";
 
 import type { UserKeys } from "./use-user-keys";
@@ -812,6 +816,80 @@ export function useAuth() {
     window.location.replace("/login");
   }
 
+  /**
+   * Enroll a passkey on the current device. Caller must already be
+   * unlocked — we read the decrypted private keys out of
+   * sessionStorage to seal a per-credential copy under the PRF-
+   * derived wrap key. The plaintext keys never leave the browser.
+   *
+   * Throws on any failure; the caller's UI catches and surfaces.
+   * Triggers the post-enrollment "keep TOTP / drop TOTP" prompt
+   * upstream — that lives in the settings UI, not here.
+   */
+  async function enrollPasskey(nickname: string): Promise<void> {
+    const stored = sessionStorage.getItem("securewarp_keys");
+    if (!stored) {
+      throw new Error("Sign in before enrolling a passkey.");
+    }
+    const keys = JSON.parse(stored) as UserKeys;
+    await enrollPasskeyClient({
+      nickname,
+      plaintext: {
+        encryptionPrivateKey: keys.encryptionPrivateKey,
+        kemPrivateKey: keys.kemPrivateKey,
+      },
+    });
+  }
+
+  /**
+   * Sign in with a passkey. Mirrors the password-login flow's
+   * post-success steps: writes UserKeys to sessionStorage and
+   * dispatches `securewarp-keys-updated` so drive-client re-reads.
+   *
+   * Lock cache is intentionally NOT touched — it's the
+   * password-fallback path, sealed under a key derived from the
+   * password. A passkey login has no access to the password, so it
+   * can neither refresh nor invalidate that blob. If the user
+   * password-logged-in here previously, the cache survives untouched.
+   */
+  async function loginWithPasskey(): Promise<void> {
+    setState({
+      loading: true,
+      error: null,
+      step: "Waiting for passkey…",
+      recoveryKey: null,
+      userKeys: null,
+      suspended: null,
+      pending2FA: null,
+    });
+    try {
+      const result = await loginWithPasskeyClient();
+      const keys: UserKeys = {
+        encryptionPublicKey: result.encryptionPublicKey,
+        encryptionPrivateKey: result.encryptionPrivateKey,
+        kemPublicKey: result.kemPublicKey,
+        kemPrivateKey: result.kemPrivateKey,
+        email: result.email,
+      };
+      sessionStorage.setItem("securewarp_keys", JSON.stringify(keys));
+      window.dispatchEvent(new Event("securewarp-keys-updated"));
+      setState({
+        loading: false,
+        error: null,
+        step: null,
+        recoveryKey: null,
+        userKeys: keys,
+        suspended: null,
+        pending2FA: null,
+      });
+      router.push("/drive");
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Sign-in failed";
+      setError(msg);
+    }
+  }
+
   function dismissRecoveryKey() {
     setState((s) => ({ ...s, recoveryKey: null }));
     // Fresh signup lands on /welcome — the wizard handles display name +
@@ -831,5 +909,7 @@ export function useAuth() {
     changePassword,
     logout,
     dismissRecoveryKey,
+    enrollPasskey,
+    loginWithPasskey,
   };
 }
