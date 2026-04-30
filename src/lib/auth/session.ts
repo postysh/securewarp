@@ -122,6 +122,13 @@ export async function createSession(
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_MAX_AGE,
+    // Cookie is intentionally host-locked (no `domain` attribute).
+    // Broadening to `.securewarp.com` would send the session to
+    // every subdomain — including `cdn.securewarp.com` (R2) and
+    // `pdf.securewarp.com` (isolated viewer) — which is a privacy
+    // and confused-deputy risk. Instead, middleware canonicalizes
+    // `www.securewarp.com` → `securewarp.com` so all traffic lands
+    // on a single host.
   });
 }
 
