@@ -618,12 +618,20 @@ function IsolatedPreview({
   useEffect(() => {
     if (!viewerOrigin) return;
     let cancelled = false;
+    // Dedupe viewer-ready. The viewer page retries every 150ms until
+    // bytes arrive; during the round-trip the parent receives several
+    // pings, and re-shipping bytes on each one causes the viewer to
+    // revoke + recreate its blob URL repeatedly (visible as PDF
+    // flicker). Set the guard synchronously, before the await, so a
+    // second message racing in during the fetch can't slip past.
+    let shipped = false;
 
     const handler = async (e: MessageEvent) => {
-      if (cancelled) return;
+      if (cancelled || shipped) return;
       if (e.origin !== viewerOrigin) return;
       if (!e.data || typeof e.data !== "object") return;
       if ((e.data as { type?: unknown }).type !== "viewer-ready") return;
+      shipped = true;
       // viewer-ready means the iframe is alive — cancel the readiness
       // timeout so a slow renderer (mammoth/exceljs) can't trigger the
       // fallback after we've already shipped bytes successfully.
