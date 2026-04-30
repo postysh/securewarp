@@ -18,6 +18,7 @@ const AuthScreen = dynamic(
 );
 import { MobileNav } from "@/components/mobile-nav";
 import { AnnouncementBanner } from "@/components/announcement-banner";
+import { UpdateBanner } from "@/components/update-banner";
 import { UserKeysContext, type UserKeys } from "@/hooks/use-user-keys";
 import {
   FilesContext,
@@ -321,6 +322,7 @@ export default function DriveClient() {
             {/* Mobile sidebar is replaced by MobileNav bottom bar */}
             <div className={`flex-1 p-2 ${sidebarOpen ? "md:pl-0" : ""} relative z-10 pb-[72px] md:pb-2`}>
               <div className="h-full rounded-xl border border-border-secondary bg-bg-main overflow-hidden flex flex-col">
+                <UpdateBanner />
                 <AnnouncementBanner />
                 <div className="flex-1 min-h-0 flex flex-col">
                   <FileBrowser sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
