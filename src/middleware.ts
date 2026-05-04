@@ -34,7 +34,13 @@ export async function middleware(request: NextRequest) {
   // user with a cookie on the bare host who lands on www gets a 401
   // on every authed request. Always redirect to bare so the cookie
   // is sent. Localhost / preview hosts pass through unchanged.
-  if (host === "www.securewarp.com") {
+  //
+  // Webhook paths are exempt: external providers (Stripe, etc.) call
+  // them with no cookie, and most don't follow redirects on POST —
+  // a stale URL in a provider dashboard would silently 308-fail
+  // every delivery. Serve these on www too so a misconfiguration
+  // doesn't take down billing sync.
+  if (host === "www.securewarp.com" && !pathname.startsWith("/api/billing/webhook")) {
     return NextResponse.redirect(
       new URL(`${pathname}${search}`, "https://securewarp.com"),
       308,
