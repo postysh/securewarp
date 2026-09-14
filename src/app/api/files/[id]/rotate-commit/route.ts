@@ -3,8 +3,9 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getOwnedFile, revokeLinksCreatedByInSubtree } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
-import { deleteBlobs, shardForChunk } from "@/lib/db/r2";
+import { deleteBlobs, shardForChunk, measureBlobSizes } from "@/lib/db/r2";
 import { parseChunkStorageKey } from "@/lib/db/storage-key";
+import { assertWithinQuota } from "@/lib/db/quota";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -205,6 +206,46 @@ export async function POST(
       }
     }
 
+    // Measure the rotated blobs in R2 and enforce quota on the REAL
+    // total. `sizeBytes` in the body is the client's word and the
+    // presigned PUT has no Content-Length condition; recording it
+    // would let an owner store unlimited bytes at a declared 1 byte
+    // per rotation. Same rule as chunk-upload finalize. Runs before
+    // any mutation so a rejection leaves the file untouched; the new
+    // blobs are removed (best-effort) so they can't be parked in R2.
+    const newItems = data.newChunks.map((c) => ({
+      shard: shardForChunk(c.sequence),
+      storageKey: c.storageKey,
+    }));
+    const measured = await measureBlobSizes(newItems);
+    const measuredSizes: number[] = [];
+    let measuredTotal = 0;
+    for (const c of data.newChunks) {
+      const size = measured.get(c.storageKey);
+      if (size === undefined) {
+        return NextResponse.json(
+          { error: `Chunk ${c.sequence} was not uploaded` },
+          { status: 400 }
+        );
+      }
+      measuredSizes.push(size);
+      measuredTotal += size;
+    }
+    try {
+      await assertWithinQuota(session.userId, measuredTotal, {
+        replacesFileId: file.id,
+        skipFileCount: true,
+      });
+    } catch (e) {
+      try {
+        await deleteBlobs(newItems);
+      } catch (err) {
+        logError("files.rotate-commit.quota-cleanup", { fileId: file.id, err });
+      }
+      const status = (e as { status?: number }).status ?? 500;
+      return NextResponse.json({ error: (e as Error).message }, { status });
+    }
+
     // ── mutation sequence ───────────────────────────────────────────
     // Rotation wipes the past: a revoked collaborator's cached
     // session key / priv hier can still decrypt whatever they
@@ -256,7 +297,7 @@ export async function POST(
         file_id: file.id,
         version_number: nextVersionNumber,
         encrypted_metadata: data.encryptedMetadata,
-        size_bytes: data.newChunks.reduce((n, c) => n + c.sizeBytes, 0),
+        size_bytes: measuredTotal,
         chunk_count: data.newChunks.length,
         created_by_user_id: session.userId,
         encrypted_session_key_by_file: data.encryptedSessionKeyByFile,
@@ -273,12 +314,12 @@ export async function POST(
     // upload URLs, so the blobs that were uploaded under bucket
     // shard-N are recorded with shard=N in the DB.
     const { error: insChunksErr } = await supabase.from("file_chunks").insert(
-      data.newChunks.map((c) => ({
+      data.newChunks.map((c, i) => ({
         file_id: file.id,
         version_id: newVersionId,
         sequence: c.sequence,
         is_final: c.isFinal,
-        size_bytes: c.sizeBytes,
+        size_bytes: measuredSizes[i],
         storage_key: c.storageKey,
         encryption_nonce: c.encryptionNonce,
         shard: shardForChunk(c.sequence),
@@ -300,7 +341,7 @@ export async function POST(
         current_version_number: nextVersionNumber,
         version_count: 1,
         chunk_count: data.newChunks.length,
-        size_bytes: data.newChunks.reduce((n, c) => n + c.sizeBytes, 0),
+        size_bytes: measuredTotal,
         updated_at: new Date().toISOString(),
       })
       .eq("id", file.id);
