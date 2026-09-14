@@ -73,6 +73,14 @@ export async function POST(request: Request) {
         .eq("id", fileId)
         .single();
       if (!fileRow) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      // The non-owner branch exists for WORKSPACE files only (mixed-
+      // owner subtrees trashed atomically). A personal-drive file is
+      // owner-only to trash — an editor on a shared personal file must
+      // not be able to soft-delete the owner's data. Mirrors the gate
+      // in /restore.
+      if (!fileRow.workspace_id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
       if (fileRow.is_workspace_root) {
         return NextResponse.json({ error: "Cannot delete a workspace folder. Delete the workspace instead." }, { status: 400 });
       }

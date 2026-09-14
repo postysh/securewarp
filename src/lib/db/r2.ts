@@ -213,3 +213,115 @@ function escapeXml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
+
+function unescapeXml(s: string): string {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+// ─── Server-side size verification ───────────────────────────────────
+//
+// The client PUTs ciphertext straight to R2 via presigned URLs, and the
+// presigned PUT carries no Content-Length condition, so the byte
+// counts the client later reports at finalize are unverifiable on
+// their own. Quota and per-file caps are only meaningful if the server
+// measures what actually landed. ListObjectsV2 on the version prefix
+// returns every key + size in one round-trip per shard (≤1000 keys per
+// page), which is far cheaper than a HEAD per chunk.
+
+export interface ListedObject {
+  key: string;
+  size: number;
+}
+
+/**
+ * Parse the subset of a ListObjectsV2 response we need. Pure so it can
+ * be unit-tested without R2. Keys are XML-unescaped.
+ */
+export function parseListObjectsXml(xml: string): {
+  objects: ListedObject[];
+  nextContinuationToken: string | null;
+} {
+  const objects: ListedObject[] = [];
+  const contentsRe = /<Contents>([\s\S]*?)<\/Contents>/g;
+  let m: RegExpExecArray | null;
+  while ((m = contentsRe.exec(xml)) !== null) {
+    const block = m[1];
+    const key = /<Key>([\s\S]*?)<\/Key>/.exec(block)?.[1];
+    const size = /<Size>(\d+)<\/Size>/.exec(block)?.[1];
+    if (key === undefined || size === undefined) continue;
+    const n = Number(size);
+    if (!Number.isSafeInteger(n) || n < 0) continue;
+    objects.push({ key: unescapeXml(key), size: n });
+  }
+  const truncated = /<IsTruncated>true<\/IsTruncated>/.test(xml);
+  const token = /<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/.exec(xml)?.[1];
+  return {
+    objects,
+    nextContinuationToken: truncated && token ? unescapeXml(token) : null,
+  };
+}
+
+/**
+ * List every object under `prefix` in one shard's bucket, following
+ * continuation tokens. Returns key → size.
+ */
+export async function listBlobSizes(shard: number, prefix: string): Promise<Map<string, number>> {
+  const u = new URL(process.env.R2_ENDPOINT!);
+  const sizes = new Map<string, number>();
+  let token: string | null = null;
+  // Hard page cap so a pathological prefix can't spin the Worker.
+  for (let page = 0; page < 64; page++) {
+    const url = new URL(`${u.protocol}//${bucketForShard(shard)}.${u.host}/`);
+    url.searchParams.set("list-type", "2");
+    url.searchParams.set("prefix", prefix);
+    url.searchParams.set("max-keys", "1000");
+    if (token) url.searchParams.set("continuation-token", token);
+    const res = await getClient().fetch(url.toString(), { method: "GET" });
+    if (!res.ok) {
+      throw new Error(`R2 list failed on shard ${shard}: ${res.status} ${res.statusText}`);
+    }
+    const parsed = parseListObjectsXml(await res.text());
+    for (const o of parsed.objects) sizes.set(o.key, o.size);
+    token = parsed.nextContinuationToken;
+    if (!token) break;
+  }
+  return sizes;
+}
+
+/**
+ * Authoritative sizes for a set of chunk blobs, keyed by storage key.
+ * Groups the requested keys by (shard, directory prefix) so each
+ * distinct version prefix costs one list call per shard. Keys that do
+ * not exist in R2 are simply absent from the result — callers treat
+ * that as "chunk was never uploaded".
+ */
+export async function measureBlobSizes(
+  items: { shard: number; storageKey: string }[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (items.length === 0) return out;
+  const groups = new Map<string, { shard: number; prefix: string; keys: string[] }>();
+  for (const it of items) {
+    const slash = it.storageKey.lastIndexOf("/");
+    const prefix = slash >= 0 ? it.storageKey.slice(0, slash + 1) : "";
+    const gk = `${it.shard}:${prefix}`;
+    const g = groups.get(gk) ?? { shard: it.shard, prefix, keys: [] };
+    g.keys.push(it.storageKey);
+    groups.set(gk, g);
+  }
+  await Promise.all(
+    [...groups.values()].map(async (g) => {
+      const listed = await listBlobSizes(g.shard, g.prefix);
+      for (const k of g.keys) {
+        const size = listed.get(k);
+        if (size !== undefined) out.set(k, size);
+      }
+    }),
+  );
+  return out;
+}

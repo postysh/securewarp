@@ -106,12 +106,12 @@ export async function POST(
     // 2. Destination must be a folder the caller can write to (or null for root).
     let destWorkspaceId: string | null = null;
     if (newParentId !== null) {
-      let dest: { id: string; is_folder: boolean; deleted_at: string | null; workspace_id: string | null } | null = await (async () => {
+      let dest: { id: string; owner_id: string; is_folder: boolean; deleted_at: string | null; workspace_id: string | null } | null = await (async () => {
         const owned = await getOwnedFile(newParentId, session.userId);
         if (!owned) return null;
         const { data } = await supabase
           .from("files")
-          .select("id, is_folder, deleted_at, workspace_id")
+          .select("id, owner_id, is_folder, deleted_at, workspace_id")
           .eq("id", newParentId)
           .single();
         return data;
@@ -123,7 +123,7 @@ export async function POST(
         }
         const { data } = await supabase
           .from("files")
-          .select("id, is_folder, deleted_at, workspace_id")
+          .select("id, owner_id, is_folder, deleted_at, workspace_id")
           .eq("id", newParentId)
           .single();
         if (!data) return NextResponse.json({ error: "Destination not found" }, { status: 404 });
@@ -137,6 +137,19 @@ export async function POST(
         return NextResponse.json({ error: "Destination is in trash" }, { status: 400 });
       }
       destWorkspaceId = (dest.workspace_id as string | null) ?? null;
+
+      // Personal-drive cross-owner guard. The workspace-boundary check
+      // below passes trivially when both sides are null, which let a
+      // non-owner editor move the owner's file into a folder in the
+      // EDITOR's drive — the owner's root listing loses it and they
+      // can't navigate to where it went. Outside a workspace, a non-
+      // owner may only move within the owner's own tree.
+      if (!isOwner && !file.workspace_id && dest.owner_id !== file.owner_id) {
+        return NextResponse.json(
+          { error: "Only the file owner can move this file into another user's folder" },
+          { status: 403 }
+        );
+      }
 
       // 3. Cycle check — can't move a folder into itself or any descendant.
       if (file.is_folder) {

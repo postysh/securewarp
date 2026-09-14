@@ -17,6 +17,8 @@ import { supabase } from "@/lib/db/supabase";
 import { respondWithETag } from "@/lib/http/etag";
 import { logError } from "@/lib/log";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function GET(request: Request) {
   try {
     const session = await getSession();
@@ -34,6 +36,27 @@ export async function GET(request: Request) {
     const parentId = searchParams.get("parentId") || null;
     const cursor = searchParams.get("cursor") || undefined;
     const workspaceId = searchParams.get("workspaceId") || null;
+
+    // Workspace trash lists every trashed file in the workspace
+    // regardless of owner, so the caller must actually be a member.
+    // Without this a removed member (who still knows the workspace id)
+    // could keep pulling the workspace's trash — sharing graph, member
+    // emails, ciphertext + parent_keys_claim blobs — indefinitely.
+    // Mirrors the membership probe used for `callerPermission` below.
+    if (trash && workspaceId) {
+      if (!UUID_RE.test(workspaceId)) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const { data: membership } = await supabase
+        .from("workspace_members")
+        .select("role")
+        .eq("workspace_id", workspaceId)
+        .eq("user_id", session.userId)
+        .maybeSingle();
+      if (!membership) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+    }
 
     let files: FileRowWithKey[];
     let nextCursor: string | null = null;

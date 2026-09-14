@@ -7,7 +7,8 @@ import {
   createFileVersion,
   getEffectivePermission,
 } from "@/lib/db/files";
-import { getUploadUrl, shardForChunk } from "@/lib/db/r2";
+import { getUploadUrl, shardForChunk, measureBlobSizes, deleteBlobs } from "@/lib/db/r2";
+import { chunkStorageKey } from "@/lib/db/storage-key";
 import { supabase } from "@/lib/db/supabase";
 import { assertWithinQuota } from "@/lib/db/quota";
 import { pruneVersionsForFile } from "@/lib/db/version-prune";
@@ -22,8 +23,10 @@ const InitSchema = z.object({
   action: z.literal("init"),
   encryptedMetadata: z.string().min(1),
   parentId: z.string().uuid().nullable(),
+  // Declared size — a cheap pre-check only. The authoritative size is
+  // measured in R2 at finalize (see `measureBlobSizes`).
   totalSizeBytes: z.number().positive(),
-  chunkCount: z.number().int().positive(),
+  chunkCount: z.number().int().positive().max(10000),
   // Phase 2 hierarchical key payload — all client-generated.
   publicHierarchicalKey: z.string().min(1),
   // Crypto v2 Phase 2b — ML-KEM half of the file's hybrid hier keypair.
@@ -61,7 +64,11 @@ const InitSchema = z.object({
 const FinalizeChunkSchema = z.object({
   sequence: z.number().int().min(0),
   shard: z.number().int().min(0).max(63),
-  storageKey: z.string().min(1),
+  // Informational only. The server re-derives every chunk's storage
+  // key from (owner, fileId, version_number, sequence) and rejects
+  // the request if a supplied value disagrees — the recorded key is
+  // never taken from the body. See src/lib/db/storage-key.ts.
+  storageKey: z.string().min(1).optional(),
   encryptionNonce: z.string().min(1),
   sizeBytes: z.number().int().positive(),
   isFinal: z.boolean(),
@@ -107,7 +114,7 @@ const NewVersionInitSchema = z.object({
   fileId: z.string().uuid(),
   encryptedMetadata: z.string().min(1),
   totalSizeBytes: z.number().positive(),
-  chunkCount: z.number().int().positive(),
+  chunkCount: z.number().int().positive().max(10000),
   encryptedSessionKeyByFile: z.string().min(1),
   sessionKeyNonce: z.string(),
   // When the file has a parent, the client re-wraps its
@@ -226,7 +233,7 @@ export async function POST(request: Request) {
       const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
       for (let i = 0; i < data.chunkCount; i++) {
         const shard = shardForChunk(i);
-        const storageKey = `${session.userId}/${file.id}/v${version.version_number}/chunk-${i}`;
+        const storageKey = chunkStorageKey(session.userId, file.id, version.version_number, i);
         const uploadUrl = await getUploadUrl(shard, storageKey);
         chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
       }
@@ -298,7 +305,7 @@ export async function POST(request: Request) {
       const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
       for (let i = 0; i < data.chunkCount; i++) {
         const shard = shardForChunk(i);
-        const storageKey = `${session.userId}/${data.fileId}/v${version.version_number}/chunk-${i}`;
+        const storageKey = chunkStorageKey(session.userId, data.fileId, version.version_number, i);
         const uploadUrl = await getUploadUrl(shard, storageKey);
         chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
       }
@@ -334,7 +341,7 @@ export async function POST(request: Request) {
       // there's no legitimate reason to refresh a URL here.
       const { data: file } = await supabase
         .from("files")
-        .select("id, owner_id")
+        .select("id, owner_id, chunk_count, upload_complete")
         .eq("id", data.fileId)
         .eq("owner_id", session.userId)
         .single();
@@ -346,10 +353,12 @@ export async function POST(request: Request) {
       // client supplied versionId, trust it (and validate it belongs
       // to this file); otherwise default to v1.
       let versionNumber = 1;
+      let versionChunkCount = file.chunk_count as number;
+      let versionRowId: string | null = null;
       if (data.versionId) {
         const { data: version } = await supabase
           .from("file_versions")
-          .select("version_number")
+          .select("id, version_number, chunk_count")
           .eq("id", data.versionId)
           .eq("file_id", data.fileId)
           .single();
@@ -357,12 +366,35 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Version not found" }, { status: 404 });
         }
         versionNumber = version.version_number as number;
+        versionChunkCount = version.chunk_count as number;
+        versionRowId = version.id as string;
+      }
+
+      // A fresh PUT URL is only legitimate for an upload still in
+      // flight. Once a version is finalized its sizes have been
+      // measured and accounted; re-minting a PUT for it would let the
+      // owner overwrite live ciphertext with a blob of any size that
+      // never hits quota. Also bound the indexes to the declared
+      // chunk count so no keys outside the version's range get minted.
+      if (versionRowId) {
+        const { count: registered } = await supabase
+          .from("file_chunks")
+          .select("id", { count: "exact", head: true })
+          .eq("version_id", versionRowId);
+        if ((registered ?? 0) > 0) {
+          return NextResponse.json({ error: "Version already finalized" }, { status: 409 });
+        }
+      } else if (file.upload_complete) {
+        return NextResponse.json({ error: "Upload already finalized" }, { status: 409 });
+      }
+      if (data.chunkIndexes.some((i) => i >= versionChunkCount)) {
+        return NextResponse.json({ error: "Chunk index out of range" }, { status: 400 });
       }
 
       const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
       for (const i of data.chunkIndexes) {
         const shard = shardForChunk(i);
-        const storageKey = `${session.userId}/${data.fileId}/v${versionNumber}/chunk-${i}`;
+        const storageKey = chunkStorageKey(session.userId, data.fileId, versionNumber, i);
         const uploadUrl = await getUploadUrl(shard, storageKey);
         chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
       }
@@ -410,6 +442,79 @@ export async function POST(request: Request) {
         }
       }
 
+      // Derive every chunk's R2 key on the server. The stored key is
+      // trusted by chunk-download (presigned GET) and by every blob
+      // delete path (trash-empty, purge, crons), so it must be bound
+      // to THIS owner and THIS file — never copied from the body. A
+      // client-supplied value is only compared against the derivation
+      // so a mismatched client fails loudly instead of recording a
+      // key that points somewhere else.
+      const resolveStorageKeys = (
+        versionNumber: number,
+      ): { ok: true; keys: string[] } | { ok: false; sequence: number } => {
+        const keys: string[] = [];
+        for (const c of submittedChunks) {
+          const expected = chunkStorageKey(session.userId, fileId, versionNumber, c.sequence);
+          if (c.storageKey !== undefined && c.storageKey !== expected) {
+            return { ok: false, sequence: c.sequence };
+          }
+          keys.push(expected);
+        }
+        return { ok: true, keys };
+      };
+
+      // Measure what actually landed in R2. The presigned PUT has no
+      // Content-Length condition and `sizeBytes` in the body is the
+      // client's word, so quota / per-file caps are enforced against
+      // the listed object sizes and those sizes are what get recorded.
+      // A chunk with no object behind it means the upload never
+      // completed — refuse rather than register a hole.
+      //
+      // On a quota rejection the blobs are removed (best-effort) so a
+      // client can't park unlimited bytes in R2 by finalizing-and-
+      // failing; the DB rows are left for the caller to tidy.
+      const measureAndCheck = async (
+        keys: string[],
+      ): Promise<
+        | { ok: true; sizes: number[]; total: number }
+        | { ok: false; status: number; error: string }
+      > => {
+        const items = submittedChunks.map((c, i) => ({ shard: c.shard, storageKey: keys[i] }));
+        const measured = await measureBlobSizes(items);
+        const sizes: number[] = [];
+        let total = 0;
+        for (let i = 0; i < submittedChunks.length; i++) {
+          const size = measured.get(keys[i]);
+          if (size === undefined) {
+            return {
+              ok: false,
+              status: 400,
+              error: `Chunk ${submittedChunks[i].sequence} was not uploaded`,
+            };
+          }
+          sizes.push(size);
+          total += size;
+        }
+        try {
+          await assertWithinQuota(session.userId, total, {
+            replacesFileId: fileId,
+            skipFileCount: true,
+          });
+        } catch (e) {
+          try {
+            await deleteBlobs(items);
+          } catch (err) {
+            logError("chunk-upload.finalize.quota-cleanup", { fileId, err });
+          }
+          return {
+            ok: false,
+            status: (e as { status?: number }).status ?? 500,
+            error: (e as Error).message,
+          };
+        }
+        return { ok: true, sizes, total };
+      };
+
       // Two paths:
       //   - Initial v1 upload: versionId absent. Chunks belong to v1.
       //     Flip upload_complete.
@@ -439,19 +544,41 @@ export async function POST(request: Request) {
         // round-trips the client used to make (~330 ms each). Atomic
         // insert; any failure leaves the DB clean (no chunks recorded
         // for this version, cleanup-stale picks up orphan R2 blobs).
+        const resolved = resolveStorageKeys(version.version_number as number);
+        if (!resolved.ok) {
+          return NextResponse.json(
+            { error: `Storage key mismatch at sequence ${resolved.sequence}` },
+            { status: 400 },
+          );
+        }
+        const measured = await measureAndCheck(resolved.keys);
+        if (!measured.ok) {
+          // Drop the orphan version row so a retry starts clean and
+          // the version list never shows a phantom entry.
+          await supabase.from("file_versions").delete().eq("id", versionId).eq("file_id", fileId);
+          return NextResponse.json({ error: measured.error }, { status: measured.status });
+        }
         const { error: insChunksErr } = await supabase.from("file_chunks").insert(
-          submittedChunks.map((c) => ({
+          submittedChunks.map((c, i) => ({
             file_id: fileId,
             version_id: versionId,
             sequence: c.sequence,
             is_final: c.isFinal,
-            size_bytes: c.sizeBytes,
-            storage_key: c.storageKey,
+            size_bytes: measured.sizes[i],
+            storage_key: resolved.keys[i],
             encryption_nonce: c.encryptionNonce,
             shard: c.shard,
           })),
         );
         if (insChunksErr) throw insChunksErr;
+
+        // Record the measured size on the version row too; the
+        // client-declared value from new-version-init is superseded.
+        const { error: verSizeErr } = await supabase
+          .from("file_versions")
+          .update({ size_bytes: measured.total })
+          .eq("id", versionId);
+        if (verSizeErr) throw verSizeErr;
 
         // Commit: point `files` at the new version so list endpoints
         // render the new metadata immediately. version_count is an
@@ -466,7 +593,7 @@ export async function POST(request: Request) {
             ? (file.current_version_number as number) + 1
             : version.version_number,
           encrypted_metadata: version.encrypted_metadata,
-          size_bytes: version.size_bytes,
+          size_bytes: measured.total,
           chunk_count: version.chunk_count,
           // Phase 4: mirror the new version's session-key wrap up
           // to the files row so list/download flows decrypt with
@@ -526,26 +653,47 @@ export async function POST(request: Request) {
         .single();
       const v1Id = v1?.id as string | undefined;
 
+      const resolvedV1 = resolveStorageKeys(1);
+      if (!resolvedV1.ok) {
+        return NextResponse.json(
+          { error: `Storage key mismatch at sequence ${resolvedV1.sequence}` },
+          { status: 400 },
+        );
+      }
+      const measuredV1 = await measureAndCheck(resolvedV1.keys);
+      if (!measuredV1.ok) {
+        // The incomplete files row stays; cleanup-stale sweeps it.
+        return NextResponse.json({ error: measuredV1.error }, { status: measuredV1.status });
+      }
       const { error: insChunksErr } = await supabase.from("file_chunks").insert(
-        submittedChunks.map((c) => ({
+        submittedChunks.map((c, i) => ({
           file_id: fileId,
           version_id: v1Id ?? null,
           sequence: c.sequence,
           is_final: c.isFinal,
-          size_bytes: c.sizeBytes,
-          storage_key: c.storageKey,
+          size_bytes: measuredV1.sizes[i],
+          storage_key: resolvedV1.keys[i],
           encryption_nonce: c.encryptionNonce,
           shard: c.shard,
         })),
       );
       if (insChunksErr) throw insChunksErr;
 
+      // Measured size replaces the init-time declaration on both the
+      // files row (what quota sums) and the v1 version row.
       const { error: finalizeErr } = await supabase
         .from("files")
-        .update({ upload_complete: true })
+        .update({ upload_complete: true, size_bytes: measuredV1.total })
         .eq("id", fileId)
         .eq("owner_id", session.userId);
       if (finalizeErr) throw finalizeErr;
+      if (v1Id) {
+        const { error: v1SizeErr } = await supabase
+          .from("file_versions")
+          .update({ size_bytes: measuredV1.total })
+          .eq("id", v1Id);
+        if (v1SizeErr) throw v1SizeErr;
+      }
 
       // Just uploaded a new file — put it at the top of the owner's
       // Recent so they can find it right after upload.

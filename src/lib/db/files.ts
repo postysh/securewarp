@@ -1407,6 +1407,44 @@ export async function getEffectivePermission(
 }
 
 /**
+ * Access gate for write-style collaborator actions (share, rename,
+ * link-create). Resolves the live file row AND the caller's effective
+ * permission in one place so routes can't accidentally skip the
+ * viewer check.
+ *
+ * Background: `getFileById` matches on *any* `file_keys` row and never
+ * reads `permission_level`, so the old
+ * `getFileById(...) || getEffectivePermission(...) !== "viewer"` idiom
+ * only rejected viewers who had no direct row. A viewer with a direct
+ * row sailed through. This helper always computes the effective level.
+ *
+ * Returns null when the file does not exist, is trashed, is still
+ * uploading, or the caller has no access at all. Otherwise returns the
+ * row plus the level — INCLUDING "viewer", so each route decides
+ * between 403 (caller can already read the file, no existence leak)
+ * and 404.
+ */
+export async function getFileWithEffectivePermission(
+  fileId: string,
+  userId: string
+): Promise<{ file: FileRow; permission: "owner" | PermissionLevel } | null> {
+  const { data, error } = await supabase
+    .from("files")
+    .select("*")
+    .eq("id", fileId)
+    .eq("upload_complete", true)
+    .is("deleted_at", null)
+    .single();
+  if (error && error.code !== "PGRST116") {
+    throw new Error(`Failed to fetch file: ${error.message}`);
+  }
+  if (!data) return null;
+  const permission = await getEffectivePermission(fileId, userId);
+  if (!permission) return null;
+  return { file: data as FileRow, permission };
+}
+
+/**
  * Move: change a file's `parent_id` and re-wrap its
  * `parent_keys_claim`. Owner-only; the route handler validates the
  * caller owns both the file being moved and the destination folder
@@ -1612,6 +1650,14 @@ export async function getLinkById(linkId: string): Promise<AnonymousLinkPayload 
     )
     .eq("id", link.file_id)
     .eq("upload_complete", true)
+    // A trashed or evidence-held target must not be served through an
+    // anonymous link. `children` and `download` already filter these
+    // per row; without the same filter HERE a link to a trashed folder
+    // kept serving collaborator-owned descendants (soft_delete_subtree
+    // only marks the owner's rows) and a link to a trashed/held file
+    // kept serving its metadata + session-key wrap.
+    .is("deleted_at", null)
+    .is("evidence_hold_at", null)
     .single();
   if (fileErr || !file) return null;
 
@@ -1650,6 +1696,44 @@ export async function getLinkById(linkId: string): Promise<AnonymousLinkPayload 
       owner_display_name: fileRow.owner?.display_name ?? null,
     },
   };
+}
+
+/**
+ * Revoke every active public link that `userId` created on `rootFileId`
+ * or on any descendant of it. Called when that user's ACL row on the
+ * root is removed (unshare / leave / rotate): a link is an anonymous
+ * bearer capability minted under the creator's access, and it must not
+ * outlive that access.
+ *
+ * Implementation: a user's active links are few, so we load them and
+ * test each one's file against the subtree with `isDescendantOf`
+ * rather than materialising the whole subtree.
+ */
+export async function revokeLinksCreatedByInSubtree(
+  rootFileId: string,
+  userId: string
+): Promise<number> {
+  const { data, error } = await supabase
+    .from("file_links")
+    .select("id, file_id")
+    .eq("created_by", userId)
+    .is("revoked_at", null);
+  if (error) throw new Error(`Failed to load links: ${error.message}`);
+  const links = (data as { id: string; file_id: string }[]) ?? [];
+  const toRevoke: string[] = [];
+  for (const link of links) {
+    if (link.file_id === rootFileId || (await isDescendantOf(rootFileId, link.file_id))) {
+      toRevoke.push(link.id);
+    }
+  }
+  if (toRevoke.length === 0) return 0;
+  const { error: updErr } = await supabase
+    .from("file_links")
+    .update({ revoked_at: new Date().toISOString() })
+    .in("id", toRevoke)
+    .is("revoked_at", null);
+  if (updErr) throw new Error(`Failed to revoke links: ${updErr.message}`);
+  return toRevoke.length;
 }
 
 /**
@@ -1725,6 +1809,12 @@ export async function isDescendantOf(
     if (query.error || !query.data) return false;
     const nextParent = (query.data as { parent_id: string | null }).parent_id;
     if (nextParent === ancestorFileId) return true;
+    // Reached a root without meeting the ancestor: a normal negative
+    // result. Previously this fell through to the depth-cap throw
+    // below, so every "not a descendant" answer that walked to a root
+    // surfaced as a 500 (e.g. moving a folder into an unrelated
+    // folder, or an anonymous link probing a sibling tree).
+    if (nextParent === null) return false;
     current = nextParent;
   }
   // Hit the depth cap without resolving the walk. The create flow can't

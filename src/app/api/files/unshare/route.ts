@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { getOwnedFile, revokeFileAccess } from "@/lib/db/files";
+import {
+  getOwnedFile,
+  revokeFileAccess,
+  revokeLinksCreatedByInSubtree,
+} from "@/lib/db/files";
 import { auditEvent } from "@/lib/audit";
 import { createNotification, resolveActorLabel } from "@/lib/db/notifications";
 import { logError } from "@/lib/log";
@@ -47,6 +51,10 @@ export async function POST(request: Request) {
     }
 
     await revokeFileAccess(fileId, targetUserId);
+    // Public links the removed user created on this file (or, for a
+    // folder, anything under it) are anonymous bearer capabilities
+    // minted under the access we just removed. Retire them too.
+    await revokeLinksCreatedByInSubtree(fileId, targetUserId);
     auditEvent({
       event: "files.unshare",
       actorUserId: session.userId,

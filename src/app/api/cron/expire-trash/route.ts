@@ -28,7 +28,7 @@ async function run(): Promise<NextResponse> {
     // Find all files trashed before the cutoff
     const { data: expired, error: findErr } = await supabase
       .from("files")
-      .select("id")
+      .select("id, parent_id, evidence_hold_at")
       .lt("deleted_at", cutoff)
       .not("deleted_at", "is", null);
     if (findErr) throw findErr;
@@ -36,7 +36,28 @@ async function run(): Promise<NextResponse> {
     let fileIds: string[] = [];
     let orphanedChunks: { shard: number; storageKey: string }[] = [];
     if (expired && expired.length > 0) {
-      fileIds = expired.map((f) => f.id);
+      // Evidence-hold exclusion. A held row must survive expiry, and
+      // so must every trashed ancestor of it: files.parent_id has no
+      // ON DELETE CASCADE, so deleting an ancestor while the held
+      // descendant remains would violate the FK and fail the whole
+      // batch. Walk each held row's parent chain within the expired
+      // set and drop those ids from the purge list.
+      const rows = expired as { id: string; parent_id: string | null; evidence_hold_at: string | null }[];
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const excluded = new Set<string>();
+      for (const r of rows) {
+        if (!r.evidence_hold_at) continue;
+        let cur: { id: string; parent_id: string | null } | undefined = r;
+        let depth = 0;
+        while (cur && depth < 64 && !excluded.has(cur.id)) {
+          excluded.add(cur.id);
+          cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+          depth++;
+        }
+      }
+      fileIds = rows.filter((f) => !excluded.has(f.id)).map((f) => f.id);
+    }
+    if (fileIds.length > 0) {
 
       // Collect (shard, storage_key) for every chunk. Legacy
       // files.storage_key is gone.

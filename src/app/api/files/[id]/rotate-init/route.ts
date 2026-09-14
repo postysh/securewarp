@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getOwnedFile } from "@/lib/db/files";
 import { getUploadUrl, shardForChunk } from "@/lib/db/r2";
+import { chunkStorageKey } from "@/lib/db/storage-key";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { logError } from "@/lib/log";
 
@@ -71,7 +72,7 @@ export async function POST(
     const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
     for (let i = 0; i < parsed.data.chunkCount; i++) {
       const shard = shardForChunk(i);
-      const storageKey = `${session.userId}/${file.id}/v${version}/chunk-${i}`;
+      const storageKey = chunkStorageKey(session.userId, file.id, version, i);
       const uploadUrl = await getUploadUrl(shard, storageKey);
       chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
     }
