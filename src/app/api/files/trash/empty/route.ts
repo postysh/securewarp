@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth/session";
 import { supabase } from "@/lib/db/supabase";
 import { deleteBlobs } from "@/lib/db/r2";
 import { auditEvent } from "@/lib/audit";
+import { findHeldFileIds } from "@/lib/db/trust-safety";
 import { logError } from "@/lib/log";
 
 // Hard-delete everything currently in the caller's trash. Same
@@ -27,6 +28,24 @@ export async function POST() {
     const trashedIds = (trashedFiles || []).map((r) => r.id);
     if (trashedIds.length === 0) {
       return NextResponse.json({ success: true, purged: 0 });
+    }
+
+    // Evidence-hold gate. A held file that was trashed (directly, or as
+    // a descendant of a trashed folder — soft_delete_subtree only
+    // checks the root) must not be destroyed. Refuse the whole
+    // operation rather than skipping the held rows: files.parent_id
+    // has no ON DELETE CASCADE, so deleting a held file's trashed
+    // ancestors while leaving the held row behind would fail the
+    // batch anyway.
+    const held = await findHeldFileIds(trashedIds);
+    if (held.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Some items in your trash are under trust & safety review and cannot be permanently deleted yet.",
+        },
+        { status: 423 },
+      );
     }
 
     const { data: chunks, error: chunkErr } = await supabase

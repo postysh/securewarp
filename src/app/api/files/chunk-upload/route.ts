@@ -8,6 +8,7 @@ import {
   getEffectivePermission,
 } from "@/lib/db/files";
 import { getUploadUrl, shardForChunk } from "@/lib/db/r2";
+import { chunkStorageKey } from "@/lib/db/storage-key";
 import { supabase } from "@/lib/db/supabase";
 import { assertWithinQuota } from "@/lib/db/quota";
 import { pruneVersionsForFile } from "@/lib/db/version-prune";
@@ -61,7 +62,11 @@ const InitSchema = z.object({
 const FinalizeChunkSchema = z.object({
   sequence: z.number().int().min(0),
   shard: z.number().int().min(0).max(63),
-  storageKey: z.string().min(1),
+  // Informational only. The server re-derives every chunk's storage
+  // key from (owner, fileId, version_number, sequence) and rejects
+  // the request if a supplied value disagrees — the recorded key is
+  // never taken from the body. See src/lib/db/storage-key.ts.
+  storageKey: z.string().min(1).optional(),
   encryptionNonce: z.string().min(1),
   sizeBytes: z.number().int().positive(),
   isFinal: z.boolean(),
@@ -226,7 +231,7 @@ export async function POST(request: Request) {
       const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
       for (let i = 0; i < data.chunkCount; i++) {
         const shard = shardForChunk(i);
-        const storageKey = `${session.userId}/${file.id}/v${version.version_number}/chunk-${i}`;
+        const storageKey = chunkStorageKey(session.userId, file.id, version.version_number, i);
         const uploadUrl = await getUploadUrl(shard, storageKey);
         chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
       }
@@ -298,7 +303,7 @@ export async function POST(request: Request) {
       const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
       for (let i = 0; i < data.chunkCount; i++) {
         const shard = shardForChunk(i);
-        const storageKey = `${session.userId}/${data.fileId}/v${version.version_number}/chunk-${i}`;
+        const storageKey = chunkStorageKey(session.userId, data.fileId, version.version_number, i);
         const uploadUrl = await getUploadUrl(shard, storageKey);
         chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
       }
@@ -362,7 +367,7 @@ export async function POST(request: Request) {
       const chunkUrls: { sequence: number; shard: number; storageKey: string; uploadUrl: string }[] = [];
       for (const i of data.chunkIndexes) {
         const shard = shardForChunk(i);
-        const storageKey = `${session.userId}/${data.fileId}/v${versionNumber}/chunk-${i}`;
+        const storageKey = chunkStorageKey(session.userId, data.fileId, versionNumber, i);
         const uploadUrl = await getUploadUrl(shard, storageKey);
         chunkUrls.push({ sequence: i, shard, storageKey, uploadUrl });
       }
@@ -410,6 +415,27 @@ export async function POST(request: Request) {
         }
       }
 
+      // Derive every chunk's R2 key on the server. The stored key is
+      // trusted by chunk-download (presigned GET) and by every blob
+      // delete path (trash-empty, purge, crons), so it must be bound
+      // to THIS owner and THIS file — never copied from the body. A
+      // client-supplied value is only compared against the derivation
+      // so a mismatched client fails loudly instead of recording a
+      // key that points somewhere else.
+      const resolveStorageKeys = (
+        versionNumber: number,
+      ): { ok: true; keys: string[] } | { ok: false; sequence: number } => {
+        const keys: string[] = [];
+        for (const c of submittedChunks) {
+          const expected = chunkStorageKey(session.userId, fileId, versionNumber, c.sequence);
+          if (c.storageKey !== undefined && c.storageKey !== expected) {
+            return { ok: false, sequence: c.sequence };
+          }
+          keys.push(expected);
+        }
+        return { ok: true, keys };
+      };
+
       // Two paths:
       //   - Initial v1 upload: versionId absent. Chunks belong to v1.
       //     Flip upload_complete.
@@ -439,14 +465,21 @@ export async function POST(request: Request) {
         // round-trips the client used to make (~330 ms each). Atomic
         // insert; any failure leaves the DB clean (no chunks recorded
         // for this version, cleanup-stale picks up orphan R2 blobs).
+        const resolved = resolveStorageKeys(version.version_number as number);
+        if (!resolved.ok) {
+          return NextResponse.json(
+            { error: `Storage key mismatch at sequence ${resolved.sequence}` },
+            { status: 400 },
+          );
+        }
         const { error: insChunksErr } = await supabase.from("file_chunks").insert(
-          submittedChunks.map((c) => ({
+          submittedChunks.map((c, i) => ({
             file_id: fileId,
             version_id: versionId,
             sequence: c.sequence,
             is_final: c.isFinal,
             size_bytes: c.sizeBytes,
-            storage_key: c.storageKey,
+            storage_key: resolved.keys[i],
             encryption_nonce: c.encryptionNonce,
             shard: c.shard,
           })),
@@ -526,14 +559,21 @@ export async function POST(request: Request) {
         .single();
       const v1Id = v1?.id as string | undefined;
 
+      const resolvedV1 = resolveStorageKeys(1);
+      if (!resolvedV1.ok) {
+        return NextResponse.json(
+          { error: `Storage key mismatch at sequence ${resolvedV1.sequence}` },
+          { status: 400 },
+        );
+      }
       const { error: insChunksErr } = await supabase.from("file_chunks").insert(
-        submittedChunks.map((c) => ({
+        submittedChunks.map((c, i) => ({
           file_id: fileId,
           version_id: v1Id ?? null,
           sequence: c.sequence,
           is_final: c.isFinal,
           size_bytes: c.sizeBytes,
-          storage_key: c.storageKey,
+          storage_key: resolvedV1.keys[i],
           encryption_nonce: c.encryptionNonce,
           shard: c.shard,
         })),

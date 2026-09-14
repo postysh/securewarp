@@ -123,6 +123,24 @@ export async function isFileOnHold(fileId: string): Promise<boolean> {
   return !!data?.evidence_hold_at;
 }
 
+/**
+ * Subset of `fileIds` that are under evidence hold. Used by the bulk
+ * destructive paths (empty-trash, purge, expire-trash) which operate
+ * on whole subtrees and therefore can't rely on a root-only
+ * `isFileOnHold` check — a held file nested under a trashed folder
+ * must still block the purge.
+ */
+export async function findHeldFileIds(fileIds: string[]): Promise<string[]> {
+  if (fileIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("files")
+    .select("id")
+    .in("id", fileIds)
+    .not("evidence_hold_at", "is", null);
+  if (error) throw new Error(`Hold lookup failed: ${error.message}`);
+  return ((data as { id: string }[]) ?? []).map((r) => r.id);
+}
+
 // ─── Banlist ────────────────────────────────────────────────────────
 
 export type BanReason = "csam" | "abuse" | "fraud" | "manual";

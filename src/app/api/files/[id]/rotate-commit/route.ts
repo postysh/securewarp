@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { getOwnedFile } from "@/lib/db/files";
+import { getOwnedFile, revokeLinksCreatedByInSubtree } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { deleteBlobs, shardForChunk } from "@/lib/db/r2";
+import { parseChunkStorageKey } from "@/lib/db/storage-key";
 import { auditEvent } from "@/lib/audit";
 import { logError } from "@/lib/log";
 
@@ -131,6 +132,16 @@ export async function POST(
         { status: 400 }
       );
     }
+    // `proposed` is a Set, so a payload that lists the revoked user in
+    // `remainingCollaborators` too would pass the equality check and
+    // then re-grant them the NEW private hier key while the audit log
+    // records a revocation. Reject it explicitly.
+    if (data.remainingCollaborators.some((c) => c.userId === data.revokedUserId)) {
+      return NextResponse.json(
+        { error: "Revoked user cannot also be in the remaining set" },
+        { status: 400 }
+      );
+    }
 
     // Fetch OLD chunk (shard, storage_key) pairs + version rows so
     // we can clean them up AFTER the new state commits. If anything
@@ -143,6 +154,56 @@ export async function POST(
     const oldOrphanedChunks = ((oldChunks as { storage_key: string; shard: number | null }[]) ?? [])
       .filter((c) => !!c.storage_key)
       .map((c) => ({ storageKey: c.storage_key, shard: c.shard ?? 0 }));
+
+    // Storage-key binding. `file_chunks.storage_key` is trusted
+    // verbatim by chunk-download (presigned GET) and by every blob
+    // delete path, so a key recorded here MUST have been minted by
+    // rotate-init for THIS caller and THIS file — otherwise the owner
+    // of a throwaway file could point it at another tenant's blob,
+    // read it, and then destroy it by emptying trash. rotate-init's
+    // tag is a timestamp we don't persist, so we can't recompute the
+    // exact key; binding owner + file + sequence is sufficient to
+    // rule out every foreign reference. We additionally require one
+    // tag across the payload, unique sequences, and no overlap with
+    // the chunk set we're about to delete (step 5 would otherwise
+    // remove blobs the new rows point at).
+    const oldKeySet = new Set(oldOrphanedChunks.map((c) => c.storageKey));
+    const seenSequences = new Set<number>();
+    let rotationTag: string | null = null;
+    for (const c of data.newChunks) {
+      const parsed = parseChunkStorageKey(c.storageKey);
+      if (
+        !parsed ||
+        parsed.ownerUserId !== session.userId ||
+        parsed.fileId !== file.id ||
+        parsed.sequence !== c.sequence
+      ) {
+        return NextResponse.json(
+          { error: `Storage key mismatch at sequence ${c.sequence}` },
+          { status: 400 }
+        );
+      }
+      if (rotationTag === null) rotationTag = parsed.versionTag;
+      if (parsed.versionTag !== rotationTag) {
+        return NextResponse.json(
+          { error: "All chunks must belong to one rotation" },
+          { status: 400 }
+        );
+      }
+      if (seenSequences.has(c.sequence)) {
+        return NextResponse.json(
+          { error: `Duplicate chunk sequence ${c.sequence}` },
+          { status: 400 }
+        );
+      }
+      seenSequences.add(c.sequence);
+      if (oldKeySet.has(c.storageKey)) {
+        return NextResponse.json(
+          { error: "Rotation must not reuse the current version's storage keys" },
+          { status: 400 }
+        );
+      }
+    }
 
     // ── mutation sequence ───────────────────────────────────────────
     // Rotation wipes the past: a revoked collaborator's cached
@@ -164,8 +225,18 @@ export async function POST(
     //      Readers now resolve to the new version.
     //   5. Clean up: delete old file_versions rows (NOT the new one)
     //      and old file_chunks rows (not the new ones).
-    //   6. Delete the revoked user's file_keys row.
-    //   7. Upsert the remaining collaborators' new priv-hier wraps.
+    //   6. Upsert the remaining collaborators' new priv-hier wraps.
+    //   7. Delete the revoked user's file_keys row — LAST.
+    //
+    // 6 before 7 is load-bearing: the files row already carries the
+    // NEW pub hier key after step 4, so until step 6 lands nobody can
+    // unwrap it. If the revoked row were deleted first and the upsert
+    // then failed, the guard above would reject every retry (the
+    // proposed set is one larger than the current set) and the file
+    // would be permanently undecryptable — including for the owner.
+    // With the revoked row deleted last, a failure anywhere leaves the
+    // current ACL set unchanged, so the identical payload passes the
+    // guard on retry and every step is an idempotent upsert/update.
 
     // 1. Next monotonic version number.
     const { data: maxRow } = await supabase
@@ -254,15 +325,7 @@ export async function POST(
       .neq("id", newVersionId);
     if (delVersionsErr) throw delVersionsErr;
 
-    // 6. Delete revoked user.
-    const { error: revokeErr } = await supabase
-      .from("file_keys")
-      .delete()
-      .eq("file_id", file.id)
-      .eq("user_id", data.revokedUserId);
-    if (revokeErr) throw revokeErr;
-
-    // 7. Upsert remaining collaborators' new priv-hier wraps.
+    // 6. Upsert remaining collaborators' new priv-hier wraps.
     const { error: upsertErr } = await supabase.from("file_keys").upsert(
       data.remainingCollaborators.map((c) => ({
         file_id: file.id,
@@ -274,6 +337,20 @@ export async function POST(
       { onConflict: "file_id,user_id" }
     );
     if (upsertErr) throw upsertErr;
+
+    // 7. Delete revoked user — last, see the ordering note above.
+    const { error: revokeErr } = await supabase
+      .from("file_keys")
+      .delete()
+      .eq("file_id", file.id)
+      .eq("user_id", data.revokedUserId);
+    if (revokeErr) throw revokeErr;
+
+    // Public links the revoked user minted are cryptographically dead
+    // (they wrap the OLD private hier key) but would still show as
+    // active in the link list. Mark them revoked so the UI and the
+    // anonymous routes agree.
+    await revokeLinksCreatedByInSubtree(file.id, data.revokedUserId);
 
     // Fire-and-forget blob cleanup — don't block the response on R2.
     // `deleteBlobs` groups by shard and issues one S3 DeleteObjects

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { getOwnedFile } from "@/lib/db/files";
+import { getOwnedFile, revokeLinksCreatedByInSubtree } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
@@ -151,6 +151,15 @@ export async function POST(
         { status: 400 }
       );
     }
+    // Same reasoning as rotate-commit: a Set-based equality check lets
+    // the revoked user ride along in `remainingCollaborators` and be
+    // re-granted the new key. Reject.
+    if (data.remainingCollaborators.some((c) => c.userId === data.revokedUserId)) {
+      return NextResponse.json(
+        { error: "Revoked user cannot also be in the remaining set" },
+        { status: 400 }
+      );
+    }
 
     // Guard 2: rewrappedChildren set equality with direct-child set.
     // Also enforces that every id in the payload is actually a direct
@@ -243,6 +252,14 @@ export async function POST(
       .eq("file_id", folder.id)
       .eq("user_id", data.revokedUserId);
     if (revokeErr) throw revokeErr;
+
+    // Retire any public links the revoked user created on this folder
+    // or anything under it. Links to the folder itself wrap the OLD
+    // folder key and are already dead; links to descendants still
+    // work (their keys are unchanged) — that's the documented shallow-
+    // rotation limitation, but the revoked user shouldn't keep a live
+    // anonymous bearer they minted while they had access.
+    await revokeLinksCreatedByInSubtree(folder.id, data.revokedUserId);
 
     auditEvent({
       event: "files.rotate",

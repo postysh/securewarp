@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { getFileById, createLink, getEffectivePermission } from "@/lib/db/files";
+import { getFileWithEffectivePermission, createLink } from "@/lib/db/files";
 import { supabase } from "@/lib/db/supabase";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { auditEvent } from "@/lib/audit";
@@ -34,10 +34,13 @@ const CreateSchema = z
   );
 
 /**
- * Any user who can decrypt a file (owner or collaborator) may create a
- * public link to it. The client, not the server, wraps the private hier
- * key under a freshly generated linkKey — the server only stores the
- * ciphertext and the nonce and has no way to materialize the plaintext.
+ * Any owner or editor may create a public link. Viewers may not: a
+ * viewer's grant is "read this yourself", and minting an anonymous
+ * bearer capability to the whole subtree would turn that into
+ * world-readable access that outlives the viewer's own row. The
+ * client, not the server, wraps the private hier key under a freshly
+ * generated linkKey — the server only stores the ciphertext and the
+ * nonce and has no way to materialize the plaintext.
  */
 export async function POST(request: Request) {
   try {
@@ -59,14 +62,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid link data" }, { status: 400 });
     }
 
-    // Access check — direct file_keys row or inherited via parent chain.
-    // Matches Phase 2 re-share: any collaborator can vend onwards.
-    const file = await getFileById(parsed.data.fileId, session.userId);
-    if (!file) {
-      const perm = await getEffectivePermission(parsed.data.fileId, session.userId);
-      if (!perm || perm === "viewer") {
-        return NextResponse.json({ error: "File not found" }, { status: 404 });
-      }
+    // Access check — live file + effective permission (direct row or
+    // inherited via parent chain), computed unconditionally so a
+    // direct-row viewer can't skip the viewer rejection.
+    const access = await getFileWithEffectivePermission(parsed.data.fileId, session.userId);
+    if (!access) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+    if (access.permission === "viewer") {
+      return NextResponse.json({ error: "Viewers cannot create links" }, { status: 403 });
     }
 
     // Workspace link-policy gate. Admins can:

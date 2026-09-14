@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { getFileById, updateFileMetadata, getEffectivePermission } from "@/lib/db/files";
+import { getFileWithEffectivePermission, updateFileMetadata } from "@/lib/db/files";
 import { recordFileAccess } from "@/lib/db/file-access";
 import { auditEvent } from "@/lib/audit";
 import { broadcastFileMutation } from "@/lib/realtime/broadcast";
 import { logError } from "@/lib/log";
 
-// Any collaborator (anyone with a `file_keys` row on this file) may
-// rename. This matches the Phase 2/3 sharing model where the private
-// hierarchical key grants full decrypt + re-encrypt capability, and
-// matches Skiff/Proton where shared-folder members can organize the
-// contents they've been given access to.
+// Any owner or editor (direct `file_keys` row or inherited via a
+// parent folder) may rename. Viewers may not — a viewer holds the
+// private hierarchical key for decrypt, but rename overwrites
+// `encrypted_metadata`, which the server can't validate; a read-only
+// grant must not include the ability to clobber the name for everyone.
+// This matches Skiff/Proton where shared-folder editors can organize
+// the contents they've been given access to.
 //
 // The server does not validate the new name — it can't, the value is
 // an opaque ciphertext under the file's session key. The only thing
@@ -34,15 +36,12 @@ export async function POST(
 
     const { id: fileId } = await params;
 
-    // Access gate: the caller must have a `file_keys` row on this
-    // file. `getFileById` joins on user_id + upload_complete so a
-    // revoked or in-flight file won't match.
-    const file = await getFileById(fileId, session.userId);
-    if (!file) {
-      // Check inherited access
-      const perm = await getEffectivePermission(fileId, session.userId);
-      if (!perm) return NextResponse.json({ error: "Not found" }, { status: 404 });
-      if (perm === "viewer") return NextResponse.json({ error: "Viewers cannot rename" }, { status: 403 });
+    // Access gate: live file + effective permission, computed
+    // unconditionally so a direct-row viewer can't skip the check.
+    const access = await getFileWithEffectivePermission(fileId, session.userId);
+    if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (access.permission === "viewer") {
+      return NextResponse.json({ error: "Viewers cannot rename" }, { status: 403 });
     }
 
     const body = await request.json();

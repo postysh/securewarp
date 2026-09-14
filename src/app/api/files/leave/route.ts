@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { revokeFileAccess, getOwnedFile } from "@/lib/db/files";
+import {
+  revokeFileAccess,
+  getOwnedFile,
+  revokeLinksCreatedByInSubtree,
+} from "@/lib/db/files";
 import { logError } from "@/lib/log";
 
 const LeaveSchema = z.object({ fileId: z.string().uuid() });
@@ -37,6 +41,9 @@ export async function POST(request: Request) {
     }
 
     await revokeFileAccess(parsed.data.fileId, session.userId);
+    // Same as /unshare: links the leaver minted under this grant must
+    // not outlive it.
+    await revokeLinksCreatedByInSubtree(parsed.data.fileId, session.userId);
     return NextResponse.json({ success: true });
   } catch (err) {
     logError("files.leave", err);

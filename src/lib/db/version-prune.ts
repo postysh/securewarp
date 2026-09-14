@@ -36,11 +36,15 @@ export async function pruneVersionsForFile(
 
   const { data: fileRow } = await supabase
     .from("files")
-    .select("id, owner_id, current_version_number")
+    .select("id, owner_id, current_version_number, evidence_hold_at")
     .eq("id", fileId)
     .eq("owner_id", ownerUserId)
     .maybeSingle();
   if (!fileRow) return { versionsDeleted: 0, blobsPurged: 0 };
+  // Evidence hold freezes every version. Retention pruning would
+  // otherwise let an owner age out a held version by uploading a few
+  // new ones. Skip entirely; the hold-release path can re-prune.
+  if (fileRow.evidence_hold_at) return { versionsDeleted: 0, blobsPurged: 0 };
   const currentVersionNumber = fileRow.current_version_number as number;
 
   const { data: versions } = await supabase

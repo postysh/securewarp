@@ -6,7 +6,7 @@ import { deleteBlobs } from "@/lib/db/r2";
 import { auditEvent } from "@/lib/audit";
 import { broadcast } from "@/lib/realtime/broadcast";
 import { channelForWorkspace } from "@/lib/realtime/channels";
-import { isFileOnHold } from "@/lib/db/trust-safety";
+import { findHeldFileIds } from "@/lib/db/trust-safety";
 import { logError } from "@/lib/log";
 
 // Hard delete. Only valid on rows that are currently in the trash
@@ -117,9 +117,28 @@ export async function POST(request: Request) {
     // PL/pgSQL ambiguity between the RETURNS TABLE output and the
     // source columns.
     const rows = (subtree || []) as {
+      out_file_id: string | null;
       out_storage_key: string | null;
       out_shard: number | null;
     }[];
+
+    // Evidence-hold gate for the SUBTREE. The root check above only
+    // covers the row being purged; a held file nested under a trashed
+    // folder must block the purge too, otherwise trashing the parent
+    // and purging it destroys held evidence.
+    const subtreeFileIds = [
+      ...new Set(rows.map((r) => r.out_file_id).filter((id): id is string => !!id)),
+    ];
+    const heldInSubtree = await findHeldFileIds(subtreeFileIds);
+    if (heldInSubtree.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "This folder contains an item under trust & safety review and cannot be permanently deleted.",
+        },
+        { status: 423 },
+      );
+    }
     const orphanedChunks = rows
       .filter((r) => !!r.out_storage_key)
       .map((r) => ({

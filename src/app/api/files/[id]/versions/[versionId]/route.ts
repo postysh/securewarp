@@ -9,6 +9,7 @@ import {
 import { deleteBlobs } from "@/lib/db/r2";
 import { supabase } from "@/lib/db/supabase";
 import { auditEvent } from "@/lib/audit";
+import { isFileOnHold } from "@/lib/db/trust-safety";
 import { logError } from "@/lib/log";
 
 /**
@@ -50,6 +51,16 @@ export async function DELETE(
     const version = await getFileVersion(parsed.data.versionId);
     if (!version || version.file_id !== parsed.data.id) {
       return NextResponse.json({ error: "Version not found" }, { status: 404 });
+    }
+
+    // Evidence hold covers every version, not just the current one —
+    // deleting a past version destroys its blobs for good. Same gate
+    // as /delete and /purge.
+    if (await isFileOnHold(parsed.data.id)) {
+      return NextResponse.json(
+        { error: "This file is under trust & safety review and its versions cannot be deleted." },
+        { status: 423 },
+      );
     }
 
     // Fetch current_version_number explicitly so the FileRow ORM
