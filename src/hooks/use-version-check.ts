@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MAINTENANCE_HEADER } from "@/lib/maintenance";
 
 /**
  * Polls /api/version and reports when the deployed bundle version
@@ -52,6 +53,14 @@ export function useVersionCheck(): VersionStatus {
     const poll = async () => {
       try {
         const res = await fetch("/api/version", { cache: "no-store" });
+        // Site closed for maintenance while this tab was open. Reload
+        // so the user sees the maintenance page instead of a drive
+        // where every request quietly fails. Nothing in-flight can
+        // finish anyway: every API route is returning 503.
+        if (res.status === 503 && res.headers.get(MAINTENANCE_HEADER)) {
+          window.location.reload();
+          return;
+        }
         if (!res.ok) return;
         const data = (await res.json()) as { version?: string };
         if (cancelled) return;

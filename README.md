@@ -1351,6 +1351,37 @@ If you don't run the cron, orphan rows still stay hidden from users (filtered
 by `upload_complete = true`), so this is a storage-hygiene concern, not a
 correctness one.
 
+### Maintenance mode
+
+A site-wide switch that closes the app to everyone. Every page (landing,
+login, signup, drive, admin, share links) returns a static
+"down for maintenance" page with a `503`. Every API route returns
+`503 {"code": "maintenance"}`. Existing sessions are shut out as well,
+and open tabs reload onto the maintenance page within a few minutes.
+The Stripe webhook and the secret-authenticated cron / cleanup routes
+stay open, so billing sync and housekeeping keep running.
+
+It's controlled by the `MAINTENANCE_MODE` Worker **secret**:
+
+```bash
+npx wrangler secret put MAINTENANCE_MODE   # enter: on
+npx wrangler secret delete MAINTENANCE_MODE
+```
+
+Each command deploys a new Worker version immediately. You can also do it
+in the dashboard: Workers & Pages → `securewarp` → Settings → Variables
+and Secrets. Accepted "on" values are `on`, `true`, `1` and `yes`; anything
+else, or no secret at all, means open.
+
+It's a secret rather than an `app_settings` flag or a `vars` entry on
+purpose. It works when Supabase is down or paused, it can't be locked
+behind the admin UI it would be closing, and it survives `wrangler deploy`,
+so shipping code while closed doesn't reopen the site. See
+`src/lib/maintenance.ts`. To block only new accounts, use the
+`signups_enabled` flag at `/admin/flags` instead.
+
+Local preview: `MAINTENANCE_MODE=on npm run dev`.
+
 ### Deployment
 
 Deploy to Vercel — encrypted file blobs go directly to R2 via presigned URLs, so Vercel serverless functions only handle small JSON metadata requests. No memory pressure.

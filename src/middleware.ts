@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
+import { isMaintenanceEnabled, isMaintenanceExempt, maintenanceResponse } from "@/lib/maintenance";
 
 const SESSION_COOKIE = "securewarp_session";
 
@@ -47,6 +48,16 @@ export async function middleware(request: NextRequest) {
     );
   }
 
+  // Maintenance mode closes the whole site: pages get a static 503
+  // page, API routes get a 503 JSON body. Runs after the www redirect
+  // so the closed page is only ever served from the bare host, and
+  // before everything else so no session check can let anyone past.
+  // See src/lib/maintenance.ts for why this is a Worker secret rather
+  // than an app_settings flag.
+  if (isMaintenanceEnabled(process.env.MAINTENANCE_MODE) && !isMaintenanceExempt(pathname)) {
+    return maintenanceResponse(pathname, process.env.SUPPORT_INBOX);
+  }
+
   if (host === PDF_SUBDOMAIN_HOST) {
     // Allow the PDF viewer plus the Office (docx/xlsx) viewers, all
     // under the /viewer prefix. Each renderer is a separate route so
@@ -66,6 +77,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // The matcher runs on every path (so maintenance mode can close all
+  // of them), but only these routes act on the session. Skip the JWT
+  // verify everywhere else rather than paying for it on each API call.
+  const isProtected = protectedRoutes.some((r) => pathname.startsWith(r));
+  const isAuthRoute = authRoutes.some((r) => pathname.startsWith(r));
+  if (!isProtected && !isAuthRoute) return NextResponse.next();
+
   const token = request.cookies.get(SESSION_COOKIE)?.value;
 
   let isAuthenticated = false;
@@ -82,12 +100,12 @@ export async function middleware(request: NextRequest) {
   }
 
   // Redirect unauthenticated users away from protected routes
-  if (protectedRoutes.some((r) => pathname.startsWith(r)) && !isAuthenticated) {
+  if (isProtected && !isAuthenticated) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
   // Redirect authenticated users away from auth routes
-  if (authRoutes.some((r) => pathname.startsWith(r)) && isAuthenticated) {
+  if (isAuthRoute && isAuthenticated) {
     return NextResponse.redirect(new URL("/drive", request.url));
   }
 
@@ -100,27 +118,12 @@ export async function middleware(request: NextRequest) {
 // Web Crypto. The `middleware` convention is deprecated-but-supported in
 // Next 16; revisit if a future OpenNext version supports Node proxy.
 //
-// `has: [{ type: "host", value: PDF_SUBDOMAIN_HOST }]` runs middleware on
-// every path for the pdf subdomain so we can enforce the /viewer-only
-// rule above. Main-app paths keep their narrow matchers.
+// The matcher covers every path except build output and public/ files
+// (anything ending in a file extension: fonts, icons, images). It used
+// to list only the auth-sensitive routes plus the www/pdf hosts, but
+// maintenance mode has to be able to close `/`, the marketing pages,
+// share links and `/api/*` as well. Per-path behaviour lives in the
+// function body; src/middleware.test.ts pins what matches.
 export const config = {
-  matcher: [
-    "/drive/:path*",
-    "/admin/:path*",
-    "/welcome",
-    "/login",
-    "/signup",
-    {
-      source: "/:path*",
-      has: [{ type: "host", value: "pdf.securewarp.com" }],
-    },
-    // Run on every path of `www.securewarp.com` so the canonicalize
-    // redirect catches API fetches too. Without this, a fetch to
-    // `www.securewarp.com/api/...` bypasses middleware and the
-    // cross-host cookie problem stays.
-    {
-      source: "/:path*",
-      has: [{ type: "host", value: "www.securewarp.com" }],
-    },
-  ],
+  matcher: ["/((?!_next/static|_next/image|.*\\.[a-zA-Z0-9]+$).*)"],
 };
