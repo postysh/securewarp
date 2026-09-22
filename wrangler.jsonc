@@ -8,6 +8,9 @@
  * Secrets (SESSION_SECRET, SUPABASE_*, R2_*, TURNSTILE_*, SENTRY_*,
  * CLEANUP_SECRET, CRON_SECRET, RESEND_API_KEY) are set via
  * `wrangler secret put <NAME>`, NOT here — this file is committed to git.
+ * Optional: MAINTENANCE_MODE=on closes the whole site behind a 503
+ * page (see README "Maintenance mode"). It's a secret so it survives
+ * deploys; don't move it into `vars`, or a deploy would reset it.
  * Non-secret build-time config (EMAIL_FROM, EMAIL_REPLY_TO) goes under
  * `vars` below.
  */
